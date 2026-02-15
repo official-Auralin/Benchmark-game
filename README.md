@@ -108,6 +108,27 @@ python3 -m gf01 freeze-pilot \
   --out-dir pilot_freeze/gf01_pilot_freeze_v1
 ```
 
+For matched-seed `HYP-018` comparisons (windowed `normal` vs exact-time `hard`),
+freeze two packs with the same seed set and explicit mode overrides:
+
+```bash
+SEEDS="7000,7001,7002,7003,7004,7005"
+
+python3 -m gf01 freeze-pilot \
+  --freeze-id gf01-hyp018-normal-v1 \
+  --split pilot_internal_hyp018 \
+  --seeds "$SEEDS" \
+  --mode normal \
+  --out-dir pilot_freeze/gf01_hyp018_normal_v1
+
+python3 -m gf01 freeze-pilot \
+  --freeze-id gf01-hyp018-hard-v1 \
+  --split pilot_internal_hyp018 \
+  --seeds "$SEEDS" \
+  --mode hard \
+  --out-dir pilot_freeze/gf01_hyp018_hard_v1
+```
+
 Run a pilot campaign on that frozen pack with official validation/report
 artifacts:
 
@@ -115,6 +136,24 @@ artifacts:
 python3 -m gf01 pilot-campaign \
   --freeze-dir pilot_freeze/gf01_pilot_freeze_v1 \
   --out-dir pilot_runs/gf01_pilot_campaign_v1 \
+  --baseline-panel random,greedy,search,tool,oracle \
+  --renderer-track json \
+  --seed 1100
+```
+
+Run campaigns for each matched-mode freeze:
+
+```bash
+python3 -m gf01 pilot-campaign \
+  --freeze-dir pilot_freeze/gf01_hyp018_normal_v1 \
+  --out-dir pilot_runs/gf01_hyp018_normal_campaign_v1 \
+  --baseline-panel random,greedy,search,tool,oracle \
+  --renderer-track json \
+  --seed 1100
+
+python3 -m gf01 pilot-campaign \
+  --freeze-dir pilot_freeze/gf01_hyp018_hard_v1 \
+  --out-dir pilot_runs/gf01_hyp018_hard_campaign_v1 \
   --baseline-panel random,greedy,search,tool,oracle \
   --renderer-track json \
   --seed 1100
@@ -128,6 +167,20 @@ python3 -m gf01 pilot-analyze \
   --campaign-dir pilot_runs/gf01_pilot_campaign_v1 \
   --eval-track EVAL-CB \
   --mode normal
+```
+
+For matched-mode comparisons, analyze each campaign separately:
+
+```bash
+python3 -m gf01 pilot-analyze \
+  --campaign-dir pilot_runs/gf01_hyp018_normal_campaign_v1 \
+  --eval-track EVAL-CB \
+  --mode normal
+
+python3 -m gf01 pilot-analyze \
+  --campaign-dir pilot_runs/gf01_hyp018_hard_campaign_v1 \
+  --eval-track EVAL-CB \
+  --mode hard
 ```
 
 This writes `pilot_analysis.json` inside the campaign directory and prints the

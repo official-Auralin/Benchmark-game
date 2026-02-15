@@ -102,6 +102,44 @@ class TestPilotFreeze(unittest.TestCase):
             payload = json.loads(proc.stdout)
             self.assertEqual(payload.get("error_type"), "output_dir_not_empty")
 
+    def test_freeze_pilot_mode_override_produces_uniform_mode(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-freeze-") as tmp:
+            out_dir = Path(tmp) / "pilot"
+            proc = _run_cli(
+                [
+                    "freeze-pilot",
+                    "--freeze-id",
+                    "gf01-pilot-freeze-hard-only",
+                    "--split",
+                    "pilot_internal_test",
+                    "--seed-start",
+                    "9300",
+                    "--count",
+                    "4",
+                    "--mode",
+                    "hard",
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+            summary = json.loads(proc.stdout)
+            self.assertEqual(summary.get("status"), "ok")
+            self.assertEqual(summary.get("mode_override"), "hard")
+
+            bundle_path = Path(summary["bundle_path"])
+            manifest_path = Path(summary["manifest_path"])
+            bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+            modes = {str(item.get("mode")) for item in bundle.get("instances", [])}
+            self.assertEqual(modes, {"hard"})
+
+            group_counts = manifest.get("group_counts", [])
+            self.assertEqual(len(group_counts), 1)
+            self.assertEqual(group_counts[0].get("mode"), "hard")
+            self.assertEqual(int(group_counts[0].get("count", 0)), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

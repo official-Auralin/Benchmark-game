@@ -538,6 +538,22 @@ def _parse_seed_list(seed_text: str) -> list[int]:
 
 def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
     cfg = GeneratorConfig()
+    mode_override = str(args.mode).strip() if args.mode else ""
+    if mode_override and mode_override not in ALLOWED_MODES:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "unsupported_mode",
+                    "message": f"mode must be one of {list(ALLOWED_MODES)}",
+                    "mode": mode_override,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     if args.seeds.strip():
         seeds = _parse_seed_list(args.seeds)
     else:
@@ -577,7 +593,12 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
     manifest_path = out_dir / "split_manifest_v1.json"
     freeze_path = out_dir / "pilot_freeze_v1.json"
 
-    suite = generate_suite(seeds=seeds, split_id=args.split, cfg=cfg)
+    suite = generate_suite(
+        seeds=seeds,
+        split_id=args.split,
+        cfg=cfg,
+        mode=mode_override or None,
+    )
     instances_payload = [inst.to_canonical_dict() for inst in suite]
     bundle = {
         "schema_version": INSTANCE_BUNDLE_SCHEMA_VERSION,
@@ -593,6 +614,7 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         "count": len(seeds),
         "seeds": seeds,
         "generated_on": date.today().isoformat(),
+        "mode_override": mode_override or "mixed",
         "instances_hash": stable_hash_json(instances_payload),
         "instances": instances_payload,
     }
@@ -634,6 +656,7 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         "split_id": args.split,
         "seed_count": len(seeds),
         "seeds": seeds,
+        "mode_override": mode_override or "mixed",
         "created_on": date.today().isoformat(),
         "instance_bundle_path": str(bundle_path),
         "split_manifest_path": str(manifest_path),
@@ -656,6 +679,7 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         "freeze_meta_path": str(freeze_path),
         "instance_count": len(suite),
         "split_id": args.split,
+        "mode_override": mode_override or "mixed",
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
@@ -1408,6 +1432,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="",
         help="Optional comma-separated explicit seed list; overrides --seed-start/--count",
+    )
+    p_freeze.add_argument(
+        "--mode",
+        type=str,
+        default="",
+        help=(
+            "Optional mode override for all frozen instances (normal/hard). "
+            "Leave empty for mixed generation."
+        ),
     )
     p_freeze.add_argument("--out-dir", type=str, default="pilot_freeze/gf01_pilot_freeze_v1")
     p_freeze.add_argument(

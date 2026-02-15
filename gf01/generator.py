@@ -158,11 +158,14 @@ def generate_instance(
 
 
 def generate_suite(
-    seeds: list[int], split_id: str, cfg: GeneratorConfig | None = None
+    seeds: list[int],
+    split_id: str,
+    cfg: GeneratorConfig | None = None,
+    mode: str | None = None,
 ) -> list[GF01Instance]:
     cfg = cfg or GeneratorConfig()
     suite: list[GF01Instance] = []
     for seed in seeds:
-        instance, _ = generate_instance(seed=seed, cfg=cfg, split_id=split_id)
+        instance, _ = generate_instance(seed=seed, cfg=cfg, split_id=split_id, mode=mode)
         suite.append(instance)
     return suite
