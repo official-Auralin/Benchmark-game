@@ -49,12 +49,6 @@ Rules:
 - Do not include timestep labels in the input (no `t=...` prefix).
 - Do not use JSON at the interactive prompt.
 
-Common mistakes:
-
-- `-renderer-track` (single dash) should be `--renderer-track` (double dash).
-- `in0:1` is invalid; use `in0=1`.
-- `in0=true` is invalid; use `in0=1` or `in0=0`.
-
 If you want non-interactive execution (no manual input), use `--agent`:
 
 ```bash
@@ -155,6 +149,11 @@ The `run_contract` also includes:
 
 - `play_protocol` (`commit_only` or `explore_then_commit`)
 - `scored_commit_episode` (`true` for scored commit rows, `false` for unscored exploration rows)
+
+Defaults:
+
+- `play_protocol=commit_only`
+- `scored_commit_episode=true`
 
 ## Notes
 
