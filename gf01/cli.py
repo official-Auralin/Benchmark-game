@@ -42,6 +42,7 @@ from .io import (
     load_json,
     load_jsonl,
     migrate_run_rows,
+    run_record_to_dict,
     validate_manifest,
     validate_run_rows,
     write_json,
@@ -345,6 +346,21 @@ def _cmd_report(args: argparse.Namespace) -> int:
         print(json.dumps(err_payload, indent=2, sort_keys=True))
         return 2
 
+    out = _build_report_payload(
+        rows=rows,
+        strict_mode=strict_mode,
+        coverage_payload=coverage_payload,
+    )
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0
+
+
+def _build_report_payload(
+    *,
+    rows: list[dict[str, object]],
+    strict_mode: bool,
+    coverage_payload: dict[str, object] | None,
+) -> dict[str, object]:
     groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
     for row in rows:
         key = (
@@ -386,8 +402,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
     }
     if coverage_payload is not None:
         out["manifest_coverage"] = coverage_payload
-    print(json.dumps(out, indent=2, sort_keys=True))
-    return 0
+    return out
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
@@ -807,6 +822,168 @@ def _cmd_play(args: argparse.Namespace) -> int:
     return 0
 
 
+def _panel_ids(panel_arg: str) -> list[str]:
+    ids: list[str] = []
+    for part in panel_arg.split(","):
+        token = part.strip().lower()
+        if token:
+            ids.append(token)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in ids:
+        if item not in seen:
+            deduped.append(item)
+            seen.add(item)
+    return deduped
+
+
+def _track_for_agent_id(agent_id: str) -> str:
+    if agent_id in {"tool", "bl-03", "bl-03-toolplanner"}:
+        return "EVAL-TA"
+    if agent_id in {"oracle", "bl-04", "bl-04-exactoracle"}:
+        return "EVAL-OC"
+    return "EVAL-CB"
+
+
+def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
+    freeze_dir = Path(args.freeze_dir)
+    bundle_path = freeze_dir / "instance_bundle_v1.json"
+    manifest_path = freeze_dir / "split_manifest_v1.json"
+    if not bundle_path.exists() or not manifest_path.exists():
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "freeze_artifacts_missing",
+                    "freeze_dir": str(freeze_dir),
+                    "required": [str(bundle_path), str(manifest_path)],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    out_dir = Path(args.out_dir)
+    if out_dir.exists() and any(out_dir.iterdir()) and not args.force:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "output_dir_not_empty",
+                    "out_dir": str(out_dir),
+                    "message": "use --force to overwrite a non-empty output directory",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    instances, bundle_meta = load_instance_bundle(str(bundle_path))
+    instance_lookup = {inst.instance_id: inst for inst in instances}
+    rows: list[dict[str, object]] = []
+    panel = _panel_ids(args.baseline_panel)
+
+    for idx, agent_id in enumerate(panel):
+        agent = make_agent(agent_id)
+        eval_track = _track_for_agent_id(agent_id)
+        if eval_track == "EVAL-TA":
+            tool_allowlist_id = args.tool_allowlist_id
+            tool_log_hash = args.tool_log_hash or stable_hash_json(
+                {
+                    "freeze_dir": str(freeze_dir),
+                    "agent": agent.name,
+                    "seed": int(args.seed + idx),
+                    "panel_index": idx,
+                }
+            )[:16]
+        else:
+            tool_allowlist_id = "none"
+            tool_log_hash = ""
+
+        records, _ = evaluate_suite(
+            agent=agent,
+            instances=instances,
+            eval_track=eval_track,
+            renderer_track=args.renderer_track,
+            seed=args.seed + idx,
+        )
+        run_meta = {
+            "family_id": bundle_meta.get("family_id", FAMILY_ID),
+            "benchmark_version": bundle_meta.get("benchmark_version", BENCHMARK_VERSION),
+            "generator_version": bundle_meta.get("generator_version", GENERATOR_VERSION),
+            "checker_version": bundle_meta.get("checker_version", CHECKER_VERSION),
+            "harness_version": HARNESS_VERSION,
+            "git_commit": current_git_commit(),
+            "config_hash": bundle_meta.get("config_hash", "unknown"),
+            "tool_allowlist_id": tool_allowlist_id,
+            "tool_log_hash": tool_log_hash,
+        }
+        for record in records:
+            rows.append(
+                run_record_to_dict(
+                    record,
+                    instance=instance_lookup.get(record.instance_id),
+                    run_meta=run_meta,
+                )
+            )
+
+    for external_path in args.external_runs:
+        rows.extend(load_jsonl(external_path))
+
+    runs_path = out_dir / "runs_combined.jsonl"
+    write_jsonl(str(runs_path), rows)
+
+    err_payload, coverage_payload = _validate_runs_manifest(
+        rows,
+        manifest_path=str(manifest_path),
+        strict_mode=True,
+        official_mode=True,
+    )
+    validation_path = out_dir / "official_validation.json"
+    report_path = out_dir / "official_report.json"
+
+    if err_payload is not None:
+        write_json(str(validation_path), err_payload)
+        print(json.dumps(err_payload, indent=2, sort_keys=True))
+        return 2
+
+    validation_ok = {
+        "status": "ok",
+        "strict_mode": True,
+        "official_mode": True,
+        "rows": len(rows),
+        "manifest_path": str(manifest_path),
+        "runs_path": str(runs_path),
+    }
+    if coverage_payload is not None:
+        validation_ok["manifest_coverage"] = coverage_payload
+    write_json(str(validation_path), validation_ok)
+
+    report = _build_report_payload(
+        rows=rows,
+        strict_mode=True,
+        coverage_payload=coverage_payload,
+    )
+    write_json(str(report_path), report)
+
+    summary = {
+        "status": "ok",
+        "freeze_dir": str(freeze_dir),
+        "out_dir": str(out_dir),
+        "runs_path": str(runs_path),
+        "validation_path": str(validation_path),
+        "report_path": str(report_path),
+        "row_count": len(rows),
+        "baseline_panel": panel,
+        "external_runs_count": len(args.external_runs),
+    }
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="GF-01 benchmark harness CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -963,6 +1140,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite an existing non-empty output directory",
     )
     p_freeze.set_defaults(func=_cmd_freeze_pilot)
+
+    p_campaign = sub.add_parser(
+        "pilot-campaign",
+        help="Run a pilot campaign on a frozen pack with official validation/report outputs",
+    )
+    p_campaign.add_argument(
+        "--freeze-dir",
+        type=str,
+        required=True,
+        help="Directory containing instance_bundle_v1.json and split_manifest_v1.json",
+    )
+    p_campaign.add_argument(
+        "--out-dir",
+        type=str,
+        default="pilot_runs/gf01_pilot_campaign_v1",
+        help="Output directory for combined runs, validation, and report artifacts",
+    )
+    p_campaign.add_argument(
+        "--baseline-panel",
+        type=str,
+        default="random,greedy,search,tool,oracle",
+        help="Comma-separated baseline ids (e.g., random,greedy,search,tool,oracle)",
+    )
+    p_campaign.add_argument("--renderer-track", type=str, default="json", choices=["json", "visual"])
+    p_campaign.add_argument("--seed", type=int, default=1100)
+    p_campaign.add_argument("--tool-allowlist-id", type=str, default="local-planner-v1")
+    p_campaign.add_argument("--tool-log-hash", type=str, default="")
+    p_campaign.add_argument(
+        "--external-runs",
+        action="append",
+        default=[],
+        help="Optional path to external run JSONL (repeatable)",
+    )
+    p_campaign.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing non-empty output directory",
+    )
+    p_campaign.set_defaults(func=_cmd_pilot_campaign)
 
     p_play = sub.add_parser(
         "play",

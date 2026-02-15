@@ -1,0 +1,135 @@
+"""
+Regression tests for pilot campaign execution on frozen packs.
+
+These tests ensure the campaign command emits strict/official artifacts and
+enforces output-directory safety behavior.
+"""
+# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+__author__ = "Bobby Veihman"
+__copyright__ = "Academic Commons"
+__license__ = "License Name"
+__version__ = "1.0.0"
+__maintainer__ = "Bobby Veihman"
+__email__ = "bv2340@columbia.edu"
+__status__ = "Development"
+
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "gf01", *args],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+class TestPilotCampaign(unittest.TestCase):
+    def test_campaign_writes_official_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
+            freeze_dir = Path(tmp) / "freeze"
+            run_dir = Path(tmp) / "runs"
+            freeze = _run_cli(
+                [
+                    "freeze-pilot",
+                    "--freeze-id",
+                    "gf01-pilot-freeze-campaign-test",
+                    "--split",
+                    "pilot_internal_test",
+                    "--seed-start",
+                    "9300",
+                    "--count",
+                    "2",
+                    "--out-dir",
+                    str(freeze_dir),
+                ]
+            )
+            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
+
+            campaign = _run_cli(
+                [
+                    "pilot-campaign",
+                    "--freeze-dir",
+                    str(freeze_dir),
+                    "--out-dir",
+                    str(run_dir),
+                    "--baseline-panel",
+                    "greedy,oracle",
+                    "--renderer-track",
+                    "json",
+                    "--seed",
+                    "55",
+                ]
+            )
+            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
+            summary = json.loads(campaign.stdout)
+            self.assertEqual(summary.get("status"), "ok")
+            self.assertEqual(summary.get("row_count"), 4)
+
+            runs_path = Path(summary["runs_path"])
+            val_path = Path(summary["validation_path"])
+            report_path = Path(summary["report_path"])
+            self.assertTrue(runs_path.exists())
+            self.assertTrue(val_path.exists())
+            self.assertTrue(report_path.exists())
+
+            val_payload = json.loads(val_path.read_text(encoding="utf-8"))
+            self.assertEqual(val_payload.get("status"), "ok")
+            self.assertTrue(val_payload.get("official_mode"))
+
+    def test_campaign_requires_force_for_non_empty_output_dir(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
+            freeze_dir = Path(tmp) / "freeze"
+            run_dir = Path(tmp) / "runs"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "existing.txt").write_text("x", encoding="utf-8")
+
+            freeze = _run_cli(
+                [
+                    "freeze-pilot",
+                    "--freeze-id",
+                    "gf01-pilot-freeze-campaign-test",
+                    "--split",
+                    "pilot_internal_test",
+                    "--seed-start",
+                    "9300",
+                    "--count",
+                    "2",
+                    "--out-dir",
+                    str(freeze_dir),
+                ]
+            )
+            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
+
+            campaign = _run_cli(
+                [
+                    "pilot-campaign",
+                    "--freeze-dir",
+                    str(freeze_dir),
+                    "--out-dir",
+                    str(run_dir),
+                    "--baseline-panel",
+                    "greedy",
+                ]
+            )
+            self.assertEqual(campaign.returncode, 2, msg=campaign.stdout + campaign.stderr)
+            payload = json.loads(campaign.stdout)
+            self.assertEqual(payload.get("error_type"), "output_dir_not_empty")
+
+
+if __name__ == "__main__":
+    unittest.main()

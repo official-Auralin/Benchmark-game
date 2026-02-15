@@ -114,6 +114,18 @@ python3 -m gf01 freeze-pilot \
   --out-dir pilot_freeze/gf01_pilot_freeze_v1
 ```
 
+Run a pilot campaign on that frozen pack with official validation/report
+artifacts:
+
+```bash
+python3 -m gf01 pilot-campaign \
+  --freeze-dir pilot_freeze/gf01_pilot_freeze_v1 \
+  --out-dir pilot_runs/gf01_pilot_campaign_v1 \
+  --baseline-panel random,greedy,search,tool,oracle \
+  --renderer-track json \
+  --seed 1100
+```
+
 ## Track policy summary
 
 - `EVAL-CB` (closed-book): no external tool metadata allowed.
