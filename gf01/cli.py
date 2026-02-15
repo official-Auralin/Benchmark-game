@@ -304,8 +304,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "config_hash": bundle_meta.get("config_hash", "unknown"),
         "tool_allowlist_id": args.tool_allowlist_id,
         "tool_log_hash": args.tool_log_hash,
-        "play_protocol": args.play_protocol,
-        "scored_commit_episode": bool(args.scored_commit_episode),
+        "play_protocol": "commit_only",
+        "scored_commit_episode": True,
     }
     records, aggregate = evaluate_suite(
         agent=agent,
@@ -331,8 +331,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "run_schema_version": RUN_RECORD_SCHEMA_VERSION,
         "source_bundle_schema_version": bundle_meta.get("schema_version", "legacy-instance-list"),
         "tool_allowlist_id": args.tool_allowlist_id,
-        "play_protocol": args.play_protocol,
-        "scored_commit_episode": bool(args.scored_commit_episode),
+        "play_protocol": "commit_only",
+        "scored_commit_episode": True,
         "out_jsonl": args.out,
     }
     print(json.dumps(out, indent=2, sort_keys=True))
@@ -453,8 +453,8 @@ def _cmd_migrate_runs(args: argparse.Namespace) -> int:
         "config_hash": args.config_hash,
         "tool_allowlist_id": args.tool_allowlist_id,
         "tool_log_hash": args.tool_log_hash,
-        "play_protocol": args.default_play_protocol,
-        "scored_commit_episode": bool(args.default_scored_commit_episode),
+        "play_protocol": "commit_only",
+        "scored_commit_episode": True,
         "eval_track": args.default_eval_track,
         "renderer_track": args.default_renderer_track,
         "agent_name": args.default_agent_name,
@@ -824,8 +824,8 @@ def _cmd_play(args: argparse.Namespace) -> int:
             "renderer_track": args.renderer_track,
             "tool_allowlist_id": tool_allowlist_id or "none",
             "tool_log_hash": tool_log_hash,
-            "play_protocol": args.play_protocol,
-            "scored_commit_episode": bool(args.scored_commit_episode),
+            "play_protocol": "commit_only",
+            "scored_commit_episode": True,
         },
         "instance": instance.to_canonical_dict(),
         "episode": result,
@@ -934,8 +934,8 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
             "config_hash": bundle_meta.get("config_hash", "unknown"),
             "tool_allowlist_id": tool_allowlist_id,
             "tool_log_hash": tool_log_hash,
-            "play_protocol": args.play_protocol,
-            "scored_commit_episode": bool(args.scored_commit_episode),
+            "play_protocol": "commit_only",
+            "scored_commit_episode": True,
         }
         for record in records:
             rows.append(
@@ -1302,19 +1302,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--seed", type=int, default=0)
     p_eval.add_argument("--tool-allowlist-id", type=str, default="none")
     p_eval.add_argument("--tool-log-hash", type=str, default="")
-    p_eval.add_argument(
-        "--play-protocol",
-        type=str,
-        default="commit_only",
-        choices=list(ALLOWED_PLAY_PROTOCOLS),
-    )
-    p_eval.add_argument(
-        "--scored-commit-episode",
-        type=int,
-        default=1,
-        choices=[0, 1],
-        help="Set to 1 for scored commit episodes, 0 for unscored exploration rows",
-    )
     p_eval.add_argument("--out", type=str, default="", help="Optional output JSONL path")
     p_eval.set_defaults(func=_cmd_evaluate)
 
@@ -1369,18 +1356,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_migrate.add_argument("--config-hash", type=str, default="legacy-backfill")
     p_migrate.add_argument("--tool-allowlist-id", type=str, default="none")
     p_migrate.add_argument("--tool-log-hash", type=str, default="")
-    p_migrate.add_argument(
-        "--default-play-protocol",
-        type=str,
-        default="commit_only",
-        choices=list(ALLOWED_PLAY_PROTOCOLS),
-    )
-    p_migrate.add_argument(
-        "--default-scored-commit-episode",
-        type=int,
-        default=1,
-        choices=[0, 1],
-    )
     p_migrate.add_argument("--default-eval-track", type=str, default="EVAL-CB")
     p_migrate.add_argument("--default-renderer-track", type=str, default="json")
     p_migrate.add_argument("--default-agent-name", type=str, default="legacy-agent")
@@ -1469,19 +1444,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_campaign.add_argument("--tool-allowlist-id", type=str, default="local-planner-v1")
     p_campaign.add_argument("--tool-log-hash", type=str, default="")
     p_campaign.add_argument(
-        "--play-protocol",
-        type=str,
-        default="commit_only",
-        choices=list(ALLOWED_PLAY_PROTOCOLS),
-    )
-    p_campaign.add_argument(
-        "--scored-commit-episode",
-        type=int,
-        default=1,
-        choices=[0, 1],
-        help="Set to 1 for scored commit episodes, 0 for unscored exploration rows",
-    )
-    p_campaign.add_argument(
         "--external-runs",
         action="append",
         default=[],
@@ -1554,19 +1516,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_play.add_argument("--eval-track", type=str, default="EVAL-CB", choices=list(ALLOWED_EVAL_TRACKS))
     p_play.add_argument("--tool-allowlist-id", type=str, default="none")
     p_play.add_argument("--tool-log-hash", type=str, default="")
-    p_play.add_argument(
-        "--play-protocol",
-        type=str,
-        default="commit_only",
-        choices=list(ALLOWED_PLAY_PROTOCOLS),
-    )
-    p_play.add_argument(
-        "--scored-commit-episode",
-        type=int,
-        default=1,
-        choices=[0, 1],
-        help="Set to 1 for scored commit episodes, 0 for unscored exploration rows",
-    )
     p_play.add_argument("--out", type=str, default="", help="Optional output JSON path")
     p_play.set_defaults(func=_cmd_play)
     return parser

@@ -37,7 +37,7 @@ PILOT_FREEZE_SCHEMA_VERSION = "gf01.pilot_freeze.v1"
 
 ALLOWED_EVAL_TRACKS = ("EVAL-CB", "EVAL-TA", "EVAL-OC")
 ALLOWED_MODES = ("normal", "hard")
-ALLOWED_PLAY_PROTOCOLS = ("commit_only", "explore_then_commit")
+ALLOWED_PLAY_PROTOCOLS = ("commit_only",)
 
 REQUIRED_RUN_FIELDS = (
     "schema_version",
