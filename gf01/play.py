@@ -234,8 +234,10 @@ def human_policy(renderer_track: str = "visual") -> PolicyFn:
                 f"Budget remaining: timestep={budget_t_remaining}, atoms={budget_a_remaining}"
             )
             print(
-                "Enter action as 'ap=0,ap=1' for current timestep, or 'skip'. "
-                f"Valid APs: {', '.join(instance.automaton.input_aps)}"
+                "Enter action for THIS timestep only.\n"
+                "  Accepted: 'skip' | 'in0=1' | 'in0=1,in2=0'\n"
+                "  Values must be 0 or 1; AP names must match the valid list.\n"
+                f"  Valid APs: {', '.join(instance.automaton.input_aps)}"
             )
             raw = input("> ")
             try:

@@ -31,6 +31,36 @@ python3 -m gf01 play --seed 1337 --renderer-track visual
 python3 -m gf01 play --seed 1337 --agent greedy --renderer-track json
 ```
 
+### Interactive input format (`gf01 play --renderer-track visual`)
+
+At each timestep, the CLI prompt expects an action for the **current timestep
+only**.
+
+Accepted forms:
+
+- `skip` (or empty input): make no intervention this step
+- `in0=1`: set one input proposition
+- `in0=1,in2=0`: set multiple input propositions in the same timestep
+
+Rules:
+
+- Use only AP names shown in `Valid APs` at the prompt.
+- Values must be `0` or `1`.
+- Do not include timestep labels in the input (no `t=...` prefix).
+- Do not use JSON at the interactive prompt.
+
+Common mistakes:
+
+- `-renderer-track` (single dash) should be `--renderer-track` (double dash).
+- `in0:1` is invalid; use `in0=1`.
+- `in0=true` is invalid; use `in0=1` or `in0=0`.
+
+If you want non-interactive execution (no manual input), use `--agent`:
+
+```bash
+python3 -m gf01 play --seed 1337 --agent greedy --renderer-track json
+```
+
 Run checks and tests:
 
 ```bash
