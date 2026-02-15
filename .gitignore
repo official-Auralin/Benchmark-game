@@ -1,0 +1,12 @@
+# OS/editor
+.DS_Store
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.stats
+
+# Local runtime outputs
+*.jsonl

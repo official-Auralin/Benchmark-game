@@ -1,0 +1,66 @@
+{
+  "benchmark_version": "0.1.0-dev",
+  "checker_version": "0.1.0-dev",
+  "family_id": "GF-01",
+  "generator_version": "0.1.0-dev",
+  "group_counts": [
+    {
+      "count": 3,
+      "mode": "hard",
+      "split_id": "public_dev"
+    },
+    {
+      "count": 1,
+      "mode": "normal",
+      "split_id": "public_dev"
+    }
+  ],
+  "harness_version": "1.0.0",
+  "instance_count": 4,
+  "instances": [
+    {
+      "budget_atoms": 4,
+      "budget_timestep": 3,
+      "instance_id": "gf01-2306ebfa159a",
+      "mode": "hard",
+      "seed": 7100,
+      "split_id": "public_dev",
+      "t_star": 3,
+      "window_size": 1
+    },
+    {
+      "budget_atoms": 3,
+      "budget_timestep": 2,
+      "instance_id": "gf01-253ad22c2c13",
+      "mode": "hard",
+      "seed": 7103,
+      "split_id": "public_dev",
+      "t_star": 5,
+      "window_size": 1
+    },
+    {
+      "budget_atoms": 4,
+      "budget_timestep": 3,
+      "instance_id": "gf01-3e29532e854e",
+      "mode": "hard",
+      "seed": 7101,
+      "split_id": "public_dev",
+      "t_star": 3,
+      "window_size": 1
+    },
+    {
+      "budget_atoms": 4,
+      "budget_timestep": 3,
+      "instance_id": "gf01-7a189480696b",
+      "mode": "normal",
+      "seed": 7102,
+      "split_id": "public_dev",
+      "t_star": 3,
+      "window_size": 2
+    }
+  ],
+  "schema_version": "gf01.split_manifest.v1",
+  "source_bundle_hash": "57281cd97c5faa58e0beab867d9969405f54517b3958d3cf26c6ccdce17fbb9f",
+  "source_bundle_schema_version": "gf01.instance_bundle.v1",
+  "source_path": "tests/fixtures/official_example/instance_bundle_v1.json"
+}
