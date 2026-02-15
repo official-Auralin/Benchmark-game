@@ -12,5 +12,5 @@ local research repository. Do not edit files here manually; rerun
 - `.github/workflows/gf01-gate.yml`
 
 ## Provenance
-- source_commit: `5263f037dd875a747becb0b281f5fe676c362300`
-- generated_utc: `2026-02-15 05:26:43Z`
+- source_commit: `e2f7272e90ee8222e04a58d91255b6c60d97a87b`
+- generated_utc: `2026-02-15 05:27:57Z`
