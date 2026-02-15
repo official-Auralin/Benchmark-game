@@ -15,6 +15,16 @@ Run single-instance demo:
 python3 -m gf01 demo --seed 1337
 ```
 
+Run one playable episode:
+
+```bash
+# human-interactive episode
+python3 -m gf01 play --seed 1337 --renderer-track visual
+
+# baseline-agent episode (non-interactive)
+python3 -m gf01 play --seed 1337 --agent greedy --renderer-track json
+```
+
 Run priority H3 checks (including structural-invalid edge cases):
 
 ```bash

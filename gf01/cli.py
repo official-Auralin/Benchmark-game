@@ -62,6 +62,7 @@ from .meta import (
     stable_hash_json,
 )
 from .models import GeneratorConfig
+from .play import baseline_policy, human_policy, parse_action_script, run_episode, scripted_policy
 from .profiling import profile_pipeline
 
 
@@ -490,6 +491,83 @@ def _cmd_manifest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_play(args: argparse.Namespace) -> int:
+    if args.instances:
+        instances, _ = load_instance_bundle(args.instances)
+        if args.instance_index < 0 or args.instance_index >= len(instances):
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "instance_index_out_of_range",
+                        "instance_count": len(instances),
+                        "instance_index": int(args.instance_index),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        instance = instances[args.instance_index]
+    else:
+        cfg = GeneratorConfig()
+        instance, _ = generate_instance(seed=args.seed, cfg=cfg, split_id=args.split)
+
+    if args.agent and args.script:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "mutually_exclusive_inputs",
+                    "message": "choose either --agent or --script, not both",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if args.agent:
+        agent = make_agent(args.agent)
+        policy = baseline_policy(agent, instance)
+        actor = agent.name
+    elif args.script:
+        actions_by_t = parse_action_script(args.script)
+        policy = scripted_policy(actions_by_t)
+        actor = "scripted-policy"
+    else:
+        policy = human_policy(renderer_track=args.renderer_track)
+        actor = "human-interactive"
+
+    try:
+        result = run_episode(instance, policy, renderer_track=args.renderer_track)
+    except ValueError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "episode_execution_error",
+                    "message": str(exc),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    payload = {
+        "status": "ok",
+        "actor": actor,
+        "renderer_track": args.renderer_track,
+        "instance": instance.to_canonical_dict(),
+        "episode": result,
+    }
+    if args.out:
+        write_json(args.out, payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="GF-01 benchmark harness CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -624,6 +702,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_manifest.add_argument("--instances", type=str, required=True, help="Path to instance JSON")
     p_manifest.add_argument("--out", type=str, default="", help="Optional output manifest path")
     p_manifest.set_defaults(func=_cmd_manifest)
+
+    p_play = sub.add_parser(
+        "play",
+        help="Run one playable GF-01 episode (human, scripted, or baseline agent)",
+    )
+    p_play.add_argument("--seed", type=int, default=1337)
+    p_play.add_argument("--split", type=str, default="public_dev")
+    p_play.add_argument("--instances", type=str, default="", help="Optional instance bundle/list JSON")
+    p_play.add_argument(
+        "--instance-index",
+        type=int,
+        default=0,
+        help="Instance index when --instances contains multiple entries",
+    )
+    p_play.add_argument("--agent", type=str, default="", help="Optional baseline policy id")
+    p_play.add_argument("--script", type=str, default="", help="Optional action script JSON")
+    p_play.add_argument("--renderer-track", type=str, choices=["json", "visual"], default="visual")
+    p_play.add_argument("--out", type=str, default="", help="Optional output JSON path")
+    p_play.set_defaults(func=_cmd_play)
     return parser
 
 
