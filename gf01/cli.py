@@ -53,6 +53,7 @@ from .io import (
 from .meta import (
     ALLOWED_EVAL_TRACKS,
     ALLOWED_MODES,
+    ALLOWED_PLAY_PROTOCOLS,
     BENCHMARK_VERSION,
     CHECKER_VERSION,
     FAMILY_ID,
@@ -303,6 +304,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "config_hash": bundle_meta.get("config_hash", "unknown"),
         "tool_allowlist_id": args.tool_allowlist_id,
         "tool_log_hash": args.tool_log_hash,
+        "play_protocol": args.play_protocol,
+        "scored_commit_episode": bool(args.scored_commit_episode),
     }
     records, aggregate = evaluate_suite(
         agent=agent,
@@ -328,6 +331,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "run_schema_version": RUN_RECORD_SCHEMA_VERSION,
         "source_bundle_schema_version": bundle_meta.get("schema_version", "legacy-instance-list"),
         "tool_allowlist_id": args.tool_allowlist_id,
+        "play_protocol": args.play_protocol,
+        "scored_commit_episode": bool(args.scored_commit_episode),
         "out_jsonl": args.out,
     }
     print(json.dumps(out, indent=2, sort_keys=True))
@@ -362,19 +367,21 @@ def _build_report_payload(
     strict_mode: bool,
     coverage_payload: dict[str, object] | None,
 ) -> dict[str, object]:
-    groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
+    groups: dict[tuple[str, str, str, str, str, bool], list[dict[str, object]]] = {}
     for row in rows:
         key = (
             str(row.get("eval_track", "unknown")),
             str(row.get("renderer_track", "unknown")),
             str(row.get("split_id", "unknown")),
             str(row.get("mode", "unknown")),
+            str(row.get("play_protocol", "unknown")),
+            bool(row.get("scored_commit_episode", True)),
         )
         groups.setdefault(key, []).append(row)
 
     report_rows = []
     for key, entries in sorted(groups.items()):
-        eval_track, renderer_track, split_id, mode = key
+        eval_track, renderer_track, split_id, mode, play_protocol, scored_commit_episode = key
         n = len(entries)
         cert_rate = sum(1 for e in entries if bool(e.get("valid", False))) / max(1, n)
         goal_rate = sum(1 for e in entries if bool(e.get("goal", False))) / max(1, n)
@@ -386,6 +393,8 @@ def _build_report_payload(
                 "renderer_track": renderer_track,
                 "split_id": split_id,
                 "mode": mode,
+                "play_protocol": play_protocol,
+                "scored_commit_episode": scored_commit_episode,
                 "count": n,
                 "certified_rate": cert_rate,
                 "goal_rate": goal_rate,
@@ -444,6 +453,8 @@ def _cmd_migrate_runs(args: argparse.Namespace) -> int:
         "config_hash": args.config_hash,
         "tool_allowlist_id": args.tool_allowlist_id,
         "tool_log_hash": args.tool_log_hash,
+        "play_protocol": args.default_play_protocol,
+        "scored_commit_episode": bool(args.default_scored_commit_episode),
         "eval_track": args.default_eval_track,
         "renderer_track": args.default_renderer_track,
         "agent_name": args.default_agent_name,
@@ -813,6 +824,8 @@ def _cmd_play(args: argparse.Namespace) -> int:
             "renderer_track": args.renderer_track,
             "tool_allowlist_id": tool_allowlist_id or "none",
             "tool_log_hash": tool_log_hash,
+            "play_protocol": args.play_protocol,
+            "scored_commit_episode": bool(args.scored_commit_episode),
         },
         "instance": instance.to_canonical_dict(),
         "episode": result,
@@ -921,6 +934,8 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
             "config_hash": bundle_meta.get("config_hash", "unknown"),
             "tool_allowlist_id": tool_allowlist_id,
             "tool_log_hash": tool_log_hash,
+            "play_protocol": args.play_protocol,
+            "scored_commit_episode": bool(args.scored_commit_episode),
         }
         for record in records:
             rows.append(
@@ -1028,24 +1043,28 @@ def _assign_complexity_quartiles(
 
 
 def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    grouped: dict[tuple[str, str, str], list[dict[str, object]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, str, bool], list[dict[str, object]]] = defaultdict(list)
     for row in rows:
         key = (
             str(row.get("agent_name", "unknown")),
             str(row.get("eval_track", "unknown")),
             str(row.get("mode", "unknown")),
+            str(row.get("play_protocol", "unknown")),
+            bool(row.get("scored_commit_episode", True)),
         )
         grouped[key].append(row)
 
     summary_rows: list[dict[str, object]] = []
     for key in sorted(grouped):
-        agent_name, eval_track, mode = key
+        agent_name, eval_track, mode, play_protocol, scored_commit_episode = key
         entries = grouped[key]
         summary_rows.append(
             {
                 "agent_name": agent_name,
                 "eval_track": eval_track,
                 "mode": mode,
+                "play_protocol": play_protocol,
+                "scored_commit_episode": scored_commit_episode,
                 "count": len(entries),
                 "goal_rate": _analysis_rate(entries, "goal"),
                 "certified_rate": _analysis_rate(entries, "valid"),
@@ -1106,7 +1125,9 @@ def _cmd_pilot_analyze(args: argparse.Namespace) -> int:
     mode_rows = [
         row
         for row in rows
-        if str(row.get("eval_track", "")) == eval_track and str(row.get("mode", "")) == mode
+        if str(row.get("eval_track", "")) == eval_track
+        and str(row.get("mode", "")) == mode
+        and bool(row.get("scored_commit_episode", True))
     ]
     greedy_rows = [row for row in mode_rows if str(row.get("agent_name", "")) == greedy_agent_name]
     held_out_greedy_rows = [
@@ -1281,10 +1302,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--seed", type=int, default=0)
     p_eval.add_argument("--tool-allowlist-id", type=str, default="none")
     p_eval.add_argument("--tool-log-hash", type=str, default="")
+    p_eval.add_argument(
+        "--play-protocol",
+        type=str,
+        default="commit_only",
+        choices=list(ALLOWED_PLAY_PROTOCOLS),
+    )
+    p_eval.add_argument(
+        "--scored-commit-episode",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Set to 1 for scored commit episodes, 0 for unscored exploration rows",
+    )
     p_eval.add_argument("--out", type=str, default="", help="Optional output JSONL path")
     p_eval.set_defaults(func=_cmd_evaluate)
 
-    p_report = sub.add_parser("report", help="Aggregate run JSONL by track/split/mode")
+    p_report = sub.add_parser(
+        "report",
+        help="Aggregate run JSONL by track/renderer/protocol/split/mode",
+    )
     p_report.add_argument("--runs", type=str, required=True, help="Path to run JSONL")
     p_report.add_argument("--manifest", type=str, default="", help="Optional split manifest JSON")
     p_report.add_argument(
@@ -1332,6 +1369,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_migrate.add_argument("--config-hash", type=str, default="legacy-backfill")
     p_migrate.add_argument("--tool-allowlist-id", type=str, default="none")
     p_migrate.add_argument("--tool-log-hash", type=str, default="")
+    p_migrate.add_argument(
+        "--default-play-protocol",
+        type=str,
+        default="commit_only",
+        choices=list(ALLOWED_PLAY_PROTOCOLS),
+    )
+    p_migrate.add_argument(
+        "--default-scored-commit-episode",
+        type=int,
+        default=1,
+        choices=[0, 1],
+    )
     p_migrate.add_argument("--default-eval-track", type=str, default="EVAL-CB")
     p_migrate.add_argument("--default-renderer-track", type=str, default="json")
     p_migrate.add_argument("--default-agent-name", type=str, default="legacy-agent")
@@ -1420,6 +1469,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_campaign.add_argument("--tool-allowlist-id", type=str, default="local-planner-v1")
     p_campaign.add_argument("--tool-log-hash", type=str, default="")
     p_campaign.add_argument(
+        "--play-protocol",
+        type=str,
+        default="commit_only",
+        choices=list(ALLOWED_PLAY_PROTOCOLS),
+    )
+    p_campaign.add_argument(
+        "--scored-commit-episode",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Set to 1 for scored commit episodes, 0 for unscored exploration rows",
+    )
+    p_campaign.add_argument(
         "--external-runs",
         action="append",
         default=[],
@@ -1492,6 +1554,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_play.add_argument("--eval-track", type=str, default="EVAL-CB", choices=list(ALLOWED_EVAL_TRACKS))
     p_play.add_argument("--tool-allowlist-id", type=str, default="none")
     p_play.add_argument("--tool-log-hash", type=str, default="")
+    p_play.add_argument(
+        "--play-protocol",
+        type=str,
+        default="commit_only",
+        choices=list(ALLOWED_PLAY_PROTOCOLS),
+    )
+    p_play.add_argument(
+        "--scored-commit-episode",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Set to 1 for scored commit episodes, 0 for unscored exploration rows",
+    )
     p_play.add_argument("--out", type=str, default="", help="Optional output JSON path")
     p_play.set_defaults(func=_cmd_play)
     return parser

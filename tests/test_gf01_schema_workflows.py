@@ -141,6 +141,11 @@ class TestSchemaWorkflows(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertEqual(payload.get("strict_mode"), True)
         self.assertEqual(payload.get("total_rows"), 4)
+        groups = payload.get("groups", [])
+        self.assertTrue(groups)
+        first = groups[0]
+        self.assertIn("play_protocol", first)
+        self.assertIn("scored_commit_episode", first)
 
 
 if __name__ == "__main__":

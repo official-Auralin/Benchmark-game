@@ -89,6 +89,7 @@ python3 -m gf01 evaluate \
   --agent greedy \
   --eval-track EVAL-CB \
   --renderer-track json \
+  --play-protocol commit_only \
   --tool-allowlist-id none \
   --out gf01_runs.jsonl
 ```
@@ -123,6 +124,7 @@ python3 -m gf01 pilot-campaign \
   --out-dir pilot_runs/gf01_pilot_campaign_v1 \
   --baseline-panel random,greedy,search,tool,oracle \
   --renderer-track json \
+  --play-protocol commit_only \
   --seed 1100
 ```
 
@@ -149,6 +151,10 @@ same payload to stdout.
 
 `python3 -m gf01 play` enforces these constraints at runtime and logs a
 machine-checkable `run_contract` block in output.
+The `run_contract` also includes:
+
+- `play_protocol` (`commit_only` or `explore_then_commit`)
+- `scored_commit_episode` (`true` for scored commit rows, `false` for unscored exploration rows)
 
 ## Notes
 

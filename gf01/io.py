@@ -25,6 +25,7 @@ from typing import Any
 from .meta import (
     ALLOWED_EVAL_TRACKS,
     ALLOWED_MODES,
+    ALLOWED_PLAY_PROTOCOLS,
     BENCHMARK_VERSION,
     CHECKER_VERSION,
     FAMILY_ID,
@@ -173,6 +174,8 @@ def run_record_to_dict(
         "config_hash": run_meta.get("config_hash", "unknown"),
         "tool_allowlist_id": run_meta.get("tool_allowlist_id", ""),
         "tool_log_hash": run_meta.get("tool_log_hash", ""),
+        "play_protocol": run_meta.get("play_protocol", "commit_only"),
+        "scored_commit_episode": bool(run_meta.get("scored_commit_episode", True)),
         "instance_id": record.instance_id,
         "eval_track": record.eval_track,
         "renderer_track": record.renderer_track,
@@ -282,10 +285,17 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
         if mode not in ALLOWED_MODES:
             errors.append(f"row {idx}: mode={mode} not in {list(ALLOWED_MODES)}")
 
+        play_protocol = str(row.get("play_protocol"))
+        if play_protocol not in ALLOWED_PLAY_PROTOCOLS:
+            errors.append(
+                f"row {idx}: play_protocol={play_protocol} "
+                f"not in {list(ALLOWED_PLAY_PROTOCOLS)}"
+            )
+
         if not isinstance(row.get("certificate"), list):
             errors.append(f"row {idx}: certificate must be a list")
 
-        for bool_field in ("suff", "min1", "valid", "goal"):
+        for bool_field in ("suff", "min1", "valid", "goal", "scored_commit_episode"):
             if not isinstance(row.get(bool_field), bool):
                 errors.append(f"row {idx}: {bool_field} must be boolean")
 
@@ -304,6 +314,7 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
                 "git_commit",
                 "config_hash",
                 "tool_allowlist_id",
+                "play_protocol",
                 "renderer_track",
                 "split_id",
                 "agent_name",
@@ -456,6 +467,13 @@ def migrate_run_rows(
         _fill(item, "config_hash", defaults.get("config_hash"))
         _fill(item, "tool_allowlist_id", defaults.get("tool_allowlist_id", "none"))
         _fill(item, "tool_log_hash", defaults.get("tool_log_hash", ""), treat_unknown_as_missing=False)
+        _fill(item, "play_protocol", defaults.get("play_protocol", "commit_only"))
+        _fill(
+            item,
+            "scored_commit_episode",
+            defaults.get("scored_commit_episode", True),
+            treat_unknown_as_missing=False,
+        )
 
         _fill(item, "eval_track", defaults.get("eval_track", "EVAL-CB"))
         _fill(item, "renderer_track", defaults.get("renderer_track", "json"))
@@ -479,6 +497,9 @@ def migrate_run_rows(
         if str(item.get("mode", "")).strip() not in ALLOWED_MODES:
             item["mode"] = defaults.get("mode", "normal")
             _mark(coercion_counts, "mode")
+        if str(item.get("play_protocol", "")).strip() not in ALLOWED_PLAY_PROTOCOLS:
+            item["play_protocol"] = defaults.get("play_protocol", "commit_only")
+            _mark(coercion_counts, "play_protocol")
 
         cert_before = item.get("certificate")
         cert_after = _sanitize_certificate(cert_before)
@@ -486,7 +507,7 @@ def migrate_run_rows(
         if cert_before is not cert_after and cert_before != cert_after:
             _mark(coercion_counts, "certificate")
 
-        for bool_field in ("suff", "min1", "valid", "goal"):
+        for bool_field in ("suff", "min1", "valid", "goal", "scored_commit_episode"):
             before = item.get(bool_field, False)
             after = _to_bool(before)
             item[bool_field] = after
@@ -534,6 +555,8 @@ def migrate_run_rows(
         _fill(item, "suff", False, treat_unknown_as_missing=False)
         _fill(item, "min1", False, treat_unknown_as_missing=False)
         _fill(item, "valid", False, treat_unknown_as_missing=False)
+        _fill(item, "play_protocol", "commit_only", treat_unknown_as_missing=False)
+        _fill(item, "scored_commit_episode", True, treat_unknown_as_missing=False)
         _fill(item, "ap_f1", 0.0, treat_unknown_as_missing=False)
         _fill(item, "ts_f1", 0.0, treat_unknown_as_missing=False)
 

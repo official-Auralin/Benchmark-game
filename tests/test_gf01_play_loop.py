@@ -48,6 +48,8 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(run_contract.get("renderer_track"), "json")
         self.assertEqual(run_contract.get("eval_track"), "EVAL-CB")
         self.assertEqual(run_contract.get("tool_allowlist_id"), "none")
+        self.assertEqual(run_contract.get("play_protocol"), "commit_only")
+        self.assertEqual(run_contract.get("scored_commit_episode"), True)
         episode = payload.get("episode", {})
         self.assertIn("certificate", episode)
         self.assertIn("suff", episode)
@@ -120,6 +122,8 @@ class TestPlayableLoop(unittest.TestCase):
         run_contract = payload.get("run_contract", {})
         self.assertEqual(run_contract.get("eval_track"), "EVAL-TA")
         self.assertEqual(run_contract.get("tool_allowlist_id"), "local-planner-v1")
+        self.assertEqual(run_contract.get("play_protocol"), "commit_only")
+        self.assertEqual(run_contract.get("scored_commit_episode"), True)
 
 
 if __name__ == "__main__":
