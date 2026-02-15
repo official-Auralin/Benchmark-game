@@ -99,6 +99,17 @@ Build a manifest from any existing instance file:
 python3 -m gf01 manifest --instances gf01_public_dev.json --out gf01_manifest.json
 ```
 
+Freeze a provisional internal pilot pack (bundle + manifest + freeze metadata):
+
+```bash
+python3 -m gf01 freeze-pilot \
+  --freeze-id gf01-pilot-freeze-v1 \
+  --split pilot_internal_v1 \
+  --seed-start 7000 \
+  --count 24 \
+  --out-dir pilot_freeze/gf01_pilot_freeze_v1
+```
+
 Run fixture-based regression tests:
 
 ```bash

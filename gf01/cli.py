@@ -57,6 +57,7 @@ from .meta import (
     GENERATOR_VERSION,
     HARNESS_VERSION,
     INSTANCE_BUNDLE_SCHEMA_VERSION,
+    PILOT_FREEZE_SCHEMA_VERSION,
     RUN_RECORD_SCHEMA_VERSION,
     config_hash,
     current_git_commit,
@@ -492,6 +493,147 @@ def _cmd_manifest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_seed_list(seed_text: str) -> list[int]:
+    seeds: list[int] = []
+    for part in seed_text.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        seeds.append(int(token))
+    deduped: list[int] = []
+    seen: set[int] = set()
+    for seed in seeds:
+        if seed not in seen:
+            deduped.append(seed)
+            seen.add(seed)
+    return deduped
+
+
+def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
+    cfg = GeneratorConfig()
+    if args.seeds.strip():
+        seeds = _parse_seed_list(args.seeds)
+    else:
+        seeds = [args.seed_start + i for i in range(args.count)]
+    if not seeds:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "empty_seed_set",
+                    "message": "pilot freeze requires at least one seed",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    out_dir = Path(args.out_dir)
+    if out_dir.exists() and any(out_dir.iterdir()) and not args.force:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "output_dir_not_empty",
+                    "message": "output directory exists and is not empty; use --force to overwrite",
+                    "out_dir": str(out_dir),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = out_dir / "instance_bundle_v1.json"
+    manifest_path = out_dir / "split_manifest_v1.json"
+    freeze_path = out_dir / "pilot_freeze_v1.json"
+
+    suite = generate_suite(seeds=seeds, split_id=args.split, cfg=cfg)
+    instances_payload = [inst.to_canonical_dict() for inst in suite]
+    bundle = {
+        "schema_version": INSTANCE_BUNDLE_SCHEMA_VERSION,
+        "family_id": FAMILY_ID,
+        "benchmark_version": BENCHMARK_VERSION,
+        "generator_version": GENERATOR_VERSION,
+        "checker_version": CHECKER_VERSION,
+        "harness_version": HARNESS_VERSION,
+        "git_commit": current_git_commit(),
+        "config_hash": config_hash(cfg),
+        "split_id": args.split,
+        "seed_start": int(min(seeds)),
+        "count": len(seeds),
+        "seeds": seeds,
+        "generated_on": date.today().isoformat(),
+        "instances_hash": stable_hash_json(instances_payload),
+        "instances": instances_payload,
+    }
+    write_json(str(bundle_path), bundle)
+
+    manifest = build_split_manifest(
+        suite,
+        bundle_meta=bundle,
+        source_path=str(bundle_path),
+    )
+    manifest_errors = validate_manifest(manifest, strict=True)
+    if manifest_errors:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "manifest_validation_failed",
+                    "errors": manifest_errors,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+    write_json(str(manifest_path), manifest)
+
+    freeze_meta = {
+        "schema_version": PILOT_FREEZE_SCHEMA_VERSION,
+        "freeze_id": args.freeze_id,
+        "provisional": True,
+        "purpose": "internal_pilot",
+        "family_id": FAMILY_ID,
+        "benchmark_version": BENCHMARK_VERSION,
+        "generator_version": GENERATOR_VERSION,
+        "checker_version": CHECKER_VERSION,
+        "harness_version": HARNESS_VERSION,
+        "git_commit": current_git_commit(),
+        "config_hash": config_hash(cfg),
+        "split_id": args.split,
+        "seed_count": len(seeds),
+        "seeds": seeds,
+        "created_on": date.today().isoformat(),
+        "instance_bundle_path": str(bundle_path),
+        "split_manifest_path": str(manifest_path),
+        "instance_bundle_hash": stable_hash_json(bundle),
+        "split_manifest_hash": stable_hash_json(manifest),
+        "notes": (
+            "Provisional pilot freeze for internal testing only. "
+            "Does not finalize public/private split governance."
+        ),
+    }
+    write_json(str(freeze_path), freeze_meta)
+
+    summary = {
+        "status": "ok",
+        "freeze_id": args.freeze_id,
+        "out_dir": str(out_dir),
+        "seed_count": len(seeds),
+        "bundle_path": str(bundle_path),
+        "manifest_path": str(manifest_path),
+        "freeze_meta_path": str(freeze_path),
+        "instance_count": len(suite),
+        "split_id": args.split,
+    }
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
 def _cmd_play(args: argparse.Namespace) -> int:
     if args.instances:
         instances, _ = load_instance_bundle(args.instances)
@@ -799,6 +941,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_manifest.add_argument("--instances", type=str, required=True, help="Path to instance JSON")
     p_manifest.add_argument("--out", type=str, default="", help="Optional output manifest path")
     p_manifest.set_defaults(func=_cmd_manifest)
+
+    p_freeze = sub.add_parser(
+        "freeze-pilot",
+        help="Freeze a provisional internal pilot pack (bundle + manifest + freeze metadata)",
+    )
+    p_freeze.add_argument("--freeze-id", type=str, default="gf01-pilot-freeze-v1")
+    p_freeze.add_argument("--split", type=str, default="pilot_internal_v1")
+    p_freeze.add_argument("--seed-start", type=int, default=7000)
+    p_freeze.add_argument("--count", type=int, default=24)
+    p_freeze.add_argument(
+        "--seeds",
+        type=str,
+        default="",
+        help="Optional comma-separated explicit seed list; overrides --seed-start/--count",
+    )
+    p_freeze.add_argument("--out-dir", type=str, default="pilot_freeze/gf01_pilot_freeze_v1")
+    p_freeze.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing non-empty output directory",
+    )
+    p_freeze.set_defaults(func=_cmd_freeze_pilot)
 
     p_play = sub.add_parser(
         "play",

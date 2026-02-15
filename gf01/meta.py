@@ -33,6 +33,7 @@ HARNESS_VERSION = __version__
 INSTANCE_BUNDLE_SCHEMA_VERSION = "gf01.instance_bundle.v1"
 RUN_RECORD_SCHEMA_VERSION = "gf01.run_record.v1"
 SPLIT_MANIFEST_SCHEMA_VERSION = "gf01.split_manifest.v1"
+PILOT_FREEZE_SCHEMA_VERSION = "gf01.pilot_freeze.v1"
 
 ALLOWED_EVAL_TRACKS = ("EVAL-CB", "EVAL-TA", "EVAL-OC")
 ALLOWED_MODES = ("normal", "hard")
