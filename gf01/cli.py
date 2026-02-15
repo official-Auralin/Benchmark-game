@@ -22,6 +22,7 @@ import argparse
 import cProfile
 import json
 import statistics
+from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
@@ -984,6 +985,257 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
     return 0
 
 
+def _analysis_rate(rows: list[dict[str, object]], field: str) -> float:
+    if not rows:
+        return 0.0
+    return sum(1 for row in rows if bool(row.get(field, False))) / float(len(rows))
+
+
+def _complexity_score(row: dict[str, object]) -> float | None:
+    complexity = row.get("complexity")
+    if not isinstance(complexity, dict) or not complexity:
+        return None
+    values: list[float] = []
+    for value in complexity.values():
+        try:
+            values.append(float(value))
+        except Exception:
+            continue
+    if not values:
+        return None
+    return statistics.fmean(values)
+
+
+def _assign_complexity_quartiles(
+    rows: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    scored: list[dict[str, object]] = []
+    for row in rows:
+        score = _complexity_score(row)
+        if score is None:
+            continue
+        cloned = dict(row)
+        cloned["complexity_score"] = score
+        scored.append(cloned)
+    scored.sort(key=lambda item: float(item["complexity_score"]))
+    n = len(scored)
+    if n == 0:
+        return []
+    for idx, row in enumerate(scored):
+        quartile_idx = min(4, (idx * 4) // n + 1)
+        row["quartile"] = f"Q{quartile_idx}"
+    return scored
+
+
+def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[tuple[str, str, str], list[dict[str, object]]] = defaultdict(list)
+    for row in rows:
+        key = (
+            str(row.get("agent_name", "unknown")),
+            str(row.get("eval_track", "unknown")),
+            str(row.get("mode", "unknown")),
+        )
+        grouped[key].append(row)
+
+    summary_rows: list[dict[str, object]] = []
+    for key in sorted(grouped):
+        agent_name, eval_track, mode = key
+        entries = grouped[key]
+        summary_rows.append(
+            {
+                "agent_name": agent_name,
+                "eval_track": eval_track,
+                "mode": mode,
+                "count": len(entries),
+                "goal_rate": _analysis_rate(entries, "goal"),
+                "certified_rate": _analysis_rate(entries, "valid"),
+                "ap_f1_mean": statistics.fmean(float(e.get("ap_f1", 0.0)) for e in entries),
+                "ts_f1_mean": statistics.fmean(float(e.get("ts_f1", 0.0)) for e in entries),
+            }
+        )
+    return summary_rows
+
+
+def _cmd_pilot_analyze(args: argparse.Namespace) -> int:
+    campaign_dir = Path(args.campaign_dir)
+    runs_path = campaign_dir / "runs_combined.jsonl"
+    validation_path = campaign_dir / "official_validation.json"
+
+    if not runs_path.exists():
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "campaign_runs_missing",
+                    "campaign_dir": str(campaign_dir),
+                    "runs_path": str(runs_path),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    rows = load_jsonl(str(runs_path))
+    schema_errors = validate_run_rows(rows, strict=True)
+    if schema_errors:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "run_schema_validation",
+                    "strict_mode": True,
+                    "error_count": len(schema_errors),
+                    "errors_preview": schema_errors[:50],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    validation_payload: dict[str, object] | None = None
+    if validation_path.exists():
+        validation_payload = load_json(str(validation_path))
+
+    eval_track = str(args.eval_track)
+    mode = str(args.mode)
+    greedy_agent_name = str(args.greedy_agent_name)
+    public_splits = {token.strip() for token in str(args.public_splits).split(",") if token.strip()}
+
+    mode_rows = [
+        row
+        for row in rows
+        if str(row.get("eval_track", "")) == eval_track and str(row.get("mode", "")) == mode
+    ]
+    greedy_rows = [row for row in mode_rows if str(row.get("agent_name", "")) == greedy_agent_name]
+    held_out_greedy_rows = [
+        row for row in greedy_rows if str(row.get("split_id", "")) not in public_splits
+    ]
+    if not held_out_greedy_rows:
+        held_out_greedy_rows = greedy_rows
+
+    quartiled = _assign_complexity_quartiles(held_out_greedy_rows)
+    quartile_rows: dict[str, list[dict[str, object]]] = {q: [] for q in ("Q1", "Q2", "Q3", "Q4")}
+    for row in quartiled:
+        quartile = str(row.get("quartile", "Q4"))
+        quartile_rows.setdefault(quartile, []).append(row)
+
+    quartile_stats: list[dict[str, object]] = []
+    for quartile in ("Q1", "Q2", "Q3", "Q4"):
+        bucket = quartile_rows.get(quartile, [])
+        stats_row: dict[str, object] = {
+            "quartile": quartile,
+            "count": len(bucket),
+            "certified_rate": _analysis_rate(bucket, "valid"),
+            "goal_rate": _analysis_rate(bucket, "goal"),
+        }
+        if bucket:
+            scores = [float(item.get("complexity_score", 0.0)) for item in bucket]
+            stats_row["complexity_score_min"] = min(scores)
+            stats_row["complexity_score_max"] = max(scores)
+        quartile_stats.append(stats_row)
+
+    q1_stats = quartile_stats[0]
+    q4_stats = quartile_stats[3]
+    m_q1 = float(q1_stats["certified_rate"])
+    m_q4 = float(q4_stats["certified_rate"])
+    discrimination_delta = m_q1 - m_q4
+    discrimination_trigger = (
+        discrimination_delta < float(args.discrimination_delta_threshold)
+        or m_q4 < float(args.discrimination_q4_floor)
+    )
+
+    greedy_goal = _analysis_rate(held_out_greedy_rows, "goal")
+    greedy_m = _analysis_rate(held_out_greedy_rows, "valid")
+    shortcut_trigger = (
+        greedy_goal > float(args.shortcut_goal_threshold)
+        and greedy_m < float(args.shortcut_certified_floor)
+    )
+
+    normal_unique_instance_count = len(
+        {
+            str(row.get("instance_id"))
+            for row in mode_rows
+            if str(row.get("instance_id", "")).strip()
+        }
+    )
+    sample_trigger_reached = normal_unique_instance_count >= int(args.sample_target)
+
+    oracle_rows = [
+        row
+        for row in rows
+        if str(row.get("mode", "")) == mode
+        and str(row.get("eval_track", "")) == "EVAL-OC"
+        and "oracle" in str(row.get("agent_name", "")).lower()
+    ]
+    oracle_minus_greedy = _analysis_rate(oracle_rows, "valid") - greedy_m if oracle_rows else None
+
+    recommendation = "keep_coefficients"
+    if discrimination_trigger or shortcut_trigger:
+        recommendation = "recalibrate_normal_window"
+
+    out = {
+        "status": "ok",
+        "policy_reference": "DEC-014d",
+        "campaign_dir": str(campaign_dir),
+        "runs_path": str(runs_path),
+        "validation_path": str(validation_path) if validation_path.exists() else "",
+        "row_count": len(rows),
+        "analysis_scope": {
+            "eval_track": eval_track,
+            "mode": mode,
+            "greedy_agent_name": greedy_agent_name,
+            "public_splits": sorted(public_splits),
+            "held_out_fallback_used": not bool(
+                [
+                    row
+                    for row in greedy_rows
+                    if str(row.get("split_id", "")) not in public_splits
+                ]
+            ),
+        },
+        "thresholds": {
+            "sample_target": int(args.sample_target),
+            "discrimination_delta_threshold": float(args.discrimination_delta_threshold),
+            "discrimination_q4_floor": float(args.discrimination_q4_floor),
+            "shortcut_goal_threshold": float(args.shortcut_goal_threshold),
+            "shortcut_certified_floor": float(args.shortcut_certified_floor),
+        },
+        "sample_progress": {
+            "normal_unique_instance_count": normal_unique_instance_count,
+            "sample_trigger_reached": sample_trigger_reached,
+        },
+        "discrimination_check": {
+            "m_q1": m_q1,
+            "m_q4": m_q4,
+            "m_q1_minus_m_q4": discrimination_delta,
+            "quartile_stats": quartile_stats,
+            "triggered": discrimination_trigger,
+        },
+        "shortcut_check": {
+            "goal_rate": greedy_goal,
+            "certified_rate": greedy_m,
+            "triggered": shortcut_trigger,
+            "row_count": len(held_out_greedy_rows),
+        },
+        "oracle_context": {
+            "oracle_minus_greedy_certified_rate": oracle_minus_greedy,
+            "oracle_row_count": len(oracle_rows),
+        },
+        "agent_summary": _agent_summary_rows(rows),
+        "recommendation": recommendation,
+    }
+    if validation_payload is not None:
+        out["official_validation"] = validation_payload
+
+    out_path = Path(args.out) if args.out else campaign_dir / "pilot_analysis.json"
+    write_json(str(out_path), out)
+    out["out_path"] = str(out_path)
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="GF-01 benchmark harness CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1179,6 +1431,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite an existing non-empty output directory",
     )
     p_campaign.set_defaults(func=_cmd_pilot_campaign)
+
+    p_analysis = sub.add_parser(
+        "pilot-analyze",
+        help="Analyze a pilot campaign and evaluate DEC-014d calibration triggers",
+    )
+    p_analysis.add_argument(
+        "--campaign-dir",
+        type=str,
+        required=True,
+        help="Directory containing campaign artifacts (runs_combined.jsonl at minimum)",
+    )
+    p_analysis.add_argument(
+        "--out",
+        type=str,
+        default="",
+        help="Optional output path for analysis JSON (default: <campaign-dir>/pilot_analysis.json)",
+    )
+    p_analysis.add_argument("--eval-track", type=str, default="EVAL-CB")
+    p_analysis.add_argument(
+        "--mode",
+        type=str,
+        default="normal",
+        choices=list(ALLOWED_MODES),
+    )
+    p_analysis.add_argument(
+        "--greedy-agent-name",
+        type=str,
+        default="BL-01-GreedyLocal",
+    )
+    p_analysis.add_argument(
+        "--public-splits",
+        type=str,
+        default="public_dev,public_val",
+        help="Comma-separated split IDs treated as public (excluded from held-out shortcut check)",
+    )
+    p_analysis.add_argument("--sample-target", type=int, default=240)
+    p_analysis.add_argument("--discrimination-delta-threshold", type=float, default=0.12)
+    p_analysis.add_argument("--discrimination-q4-floor", type=float, default=0.10)
+    p_analysis.add_argument("--shortcut-goal-threshold", type=float, default=0.40)
+    p_analysis.add_argument("--shortcut-certified-floor", type=float, default=0.05)
+    p_analysis.set_defaults(func=_cmd_pilot_analyze)
 
     p_play = sub.add_parser(
         "play",

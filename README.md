@@ -126,6 +126,19 @@ python3 -m gf01 pilot-campaign \
   --seed 1100
 ```
 
+Analyze campaign artifacts against the pre-registered `DEC-014d` trigger checks
+(quartile discrimination + shortcut anomaly):
+
+```bash
+python3 -m gf01 pilot-analyze \
+  --campaign-dir pilot_runs/gf01_pilot_campaign_v1 \
+  --eval-track EVAL-CB \
+  --mode normal
+```
+
+This writes `pilot_analysis.json` inside the campaign directory and prints the
+same payload to stdout.
+
 ## Track policy summary
 
 - `EVAL-CB` (closed-book): no external tool metadata allowed.
