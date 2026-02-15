@@ -49,6 +49,7 @@ from .io import (
     write_run_records_jsonl,
 )
 from .meta import (
+    ALLOWED_EVAL_TRACKS,
     ALLOWED_MODES,
     BENCHMARK_VERSION,
     CHECKER_VERSION,
@@ -527,8 +528,99 @@ def _cmd_play(args: argparse.Namespace) -> int:
         )
         return 2
 
+    eval_track = str(args.eval_track)
+    tool_allowlist_id = str(args.tool_allowlist_id).strip()
+    tool_log_hash = str(args.tool_log_hash).strip()
+
+    if eval_track not in ALLOWED_EVAL_TRACKS:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "track_policy_violation",
+                    "message": f"unsupported eval_track {eval_track}",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if eval_track == "EVAL-CB":
+        if tool_allowlist_id.lower() != "none" or tool_log_hash:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "track_policy_violation",
+                        "message": (
+                            "EVAL-CB forbids external tool metadata; "
+                            "use tool_allowlist_id=none and empty tool_log_hash"
+                        ),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+
+    if eval_track == "EVAL-TA":
+        if not tool_allowlist_id or tool_allowlist_id.lower() == "none":
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "track_policy_violation",
+                        "message": "EVAL-TA requires a non-empty tool_allowlist_id",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        if not tool_log_hash:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "track_policy_violation",
+                        "message": "EVAL-TA requires a non-empty tool_log_hash",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+
     if args.agent:
         agent = make_agent(args.agent)
+        agent_id = str(args.agent).strip().lower()
+        if agent_id in {"tool", "bl-03", "bl-03-toolplanner"} and eval_track == "EVAL-CB":
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "track_policy_violation",
+                        "message": "tool planner agent is not allowed in EVAL-CB",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        if agent_id in {"oracle", "bl-04", "bl-04-exactoracle"} and eval_track != "EVAL-OC":
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "track_policy_violation",
+                        "message": "exact oracle agent is restricted to EVAL-OC",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
         policy = baseline_policy(agent, instance)
         actor = agent.name
     elif args.script:
@@ -558,7 +650,12 @@ def _cmd_play(args: argparse.Namespace) -> int:
     payload = {
         "status": "ok",
         "actor": actor,
-        "renderer_track": args.renderer_track,
+        "run_contract": {
+            "eval_track": eval_track,
+            "renderer_track": args.renderer_track,
+            "tool_allowlist_id": tool_allowlist_id or "none",
+            "tool_log_hash": tool_log_hash,
+        },
         "instance": instance.to_canonical_dict(),
         "episode": result,
     }
@@ -719,6 +816,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_play.add_argument("--agent", type=str, default="", help="Optional baseline policy id")
     p_play.add_argument("--script", type=str, default="", help="Optional action script JSON")
     p_play.add_argument("--renderer-track", type=str, choices=["json", "visual"], default="visual")
+    p_play.add_argument("--eval-track", type=str, default="EVAL-CB", choices=list(ALLOWED_EVAL_TRACKS))
+    p_play.add_argument("--tool-allowlist-id", type=str, default="none")
+    p_play.add_argument("--tool-log-hash", type=str, default="")
     p_play.add_argument("--out", type=str, default="", help="Optional output JSON path")
     p_play.set_defaults(func=_cmd_play)
     return parser

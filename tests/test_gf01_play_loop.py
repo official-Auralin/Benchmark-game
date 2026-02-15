@@ -44,7 +44,10 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload.get("status"), "ok")
-        self.assertEqual(payload.get("renderer_track"), "json")
+        run_contract = payload.get("run_contract", {})
+        self.assertEqual(run_contract.get("renderer_track"), "json")
+        self.assertEqual(run_contract.get("eval_track"), "EVAL-CB")
+        self.assertEqual(run_contract.get("tool_allowlist_id"), "none")
         episode = payload.get("episode", {})
         self.assertIn("certificate", episode)
         self.assertIn("suff", episode)
@@ -80,6 +83,43 @@ class TestPlayableLoop(unittest.TestCase):
             self.assertEqual(payload.get("status"), "ok")
             self.assertIn("instance", payload)
             self.assertIn("episode", payload)
+
+    def test_play_rejects_tool_agent_on_closed_book_track(self) -> None:
+        proc = _run_cli(["play", "--seed", "1337", "--agent", "tool", "--eval-track", "EVAL-CB"])
+        self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("error_type"), "track_policy_violation")
+
+    def test_play_rejects_ta_track_without_tool_metadata(self) -> None:
+        proc = _run_cli(["play", "--seed", "1337", "--agent", "tool", "--eval-track", "EVAL-TA"])
+        self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("error_type"), "track_policy_violation")
+
+    def test_play_allows_ta_track_with_tool_metadata(self) -> None:
+        proc = _run_cli(
+            [
+                "play",
+                "--seed",
+                "1337",
+                "--agent",
+                "tool",
+                "--eval-track",
+                "EVAL-TA",
+                "--tool-allowlist-id",
+                "local-planner-v1",
+                "--tool-log-hash",
+                "demo-hash",
+                "--renderer-track",
+                "json",
+            ]
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("status"), "ok")
+        run_contract = payload.get("run_contract", {})
+        self.assertEqual(run_contract.get("eval_track"), "EVAL-TA")
+        self.assertEqual(run_contract.get("tool_allowlist_id"), "local-planner-v1")
 
 
 if __name__ == "__main__":

@@ -23,6 +23,11 @@ python3 -m gf01 play --seed 1337 --renderer-track visual
 
 # baseline-agent episode (non-interactive)
 python3 -m gf01 play --seed 1337 --agent greedy --renderer-track json
+
+# tool-augmented track episode (requires explicit tool metadata)
+python3 -m gf01 play --seed 1337 --agent tool --eval-track EVAL-TA \
+  --tool-allowlist-id local-planner-v1 --tool-log-hash demo-log-hash \
+  --renderer-track json
 ```
 
 Run priority H3 checks (including structural-invalid edge cases):
