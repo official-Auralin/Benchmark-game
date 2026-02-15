@@ -186,6 +186,23 @@ python3 -m gf01 pilot-analyze \
 This writes `pilot_analysis.json` inside the campaign directory and prints the
 same payload to stdout.
 
+## Deterministic Notebook Campaign (HYP-018)
+
+A reproducible notebook is provided at:
+
+- `research_pack/49_phase_g14_4_hyp018_matched_mode_campaign.ipynb`
+
+The notebook:
+
+- freezes matched-seed `normal` and `hard` packs,
+- runs paired campaigns with the same baseline panel,
+- computes a deterministic comparison table (`CSV` + `Markdown`),
+- and exports SVG charts + HTML report artifacts.
+
+Default artifact output location:
+
+- `pilot_runs/hyp018_matched_mode_v1/artifacts`
+
 ## Track policy summary
 
 - `EVAL-CB` (closed-book): no external tool metadata allowed.
