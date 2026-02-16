@@ -196,7 +196,9 @@ The notebook:
 
 - freezes matched-seed `normal` and `hard` packs,
 - runs paired campaigns with the same baseline panel,
-- computes a deterministic comparison table (`CSV` + `Markdown`),
+- computes deterministic comparison tables:
+  - wide summary (`mode_comparison_table.csv` / `.md`),
+  - tall/narrow view (`mode_comparison_tall_table.csv` / `.md`),
 - and exports SVG charts + HTML report artifacts.
 
 Default artifact output location:
