@@ -56,6 +56,14 @@ RENDERER_PROFILE_BY_TRACK = {
     "visual": "GF-01-R1",
 }
 ALLOWED_RENDERER_PROFILE_IDS = tuple(sorted(RENDERER_PROFILE_BY_TRACK.values()))
+COMPLEXITY_POLICY_VERSION = "gf01.complexity_policy.v1"
+COMPLEXITY_SCORE_METHOD = "mean_normalized_knobs"
+COMPLEXITY_KNOB_KEYS = (
+    "state_count_norm",
+    "effect_depth_norm",
+    "transition_count_norm",
+    "input_count_norm",
+)
 BASELINE_PANEL_POLICY_VERSION = "gf01.baseline_panel_policy.v1"
 ALLOWED_BASELINE_PANEL_LEVELS = ("full", "core")
 BASELINE_PANEL_CORE = ("random", "greedy", "oracle")

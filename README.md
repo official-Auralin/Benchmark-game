@@ -196,6 +196,17 @@ python3 -m gf01 pilot-analyze \
 This writes `pilot_analysis.json` inside the campaign directory and prints the
 same payload to stdout.
 
+`pilot-analyze` now emits `complexity_policy_version=gf01.complexity_policy.v1`
+with machine-checkable complexity diagnostics:
+
+- composite quartile summaries (held-out greedy and pooled evaluation scope),
+- per-knob diagnostics (`*_knob_stats`) with `is_constant` flags,
+- per-agent knob slices (`per_agent_knob_stats`) for auditability.
+
+If historical `runs_combined.jsonl` rows predate current required metadata
+fields, `pilot-analyze` applies deterministic in-memory migration before strict
+validation and records the operation under `legacy_migration` in output.
+
 ## Deterministic HYP-018 artifacts (CLI-first)
 
 Use freeze + pilot campaign + pilot analyze commands to generate deterministic

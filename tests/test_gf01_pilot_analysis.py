@@ -96,11 +96,84 @@ class TestPilotAnalysis(unittest.TestCase):
             payload = json.loads(analysis.stdout)
             self.assertEqual(payload.get("status"), "ok")
             self.assertEqual(payload.get("policy_reference"), "DEC-014d")
+            self.assertEqual(payload.get("complexity_policy_version"), "gf01.complexity_policy.v1")
             self.assertIn("discrimination_check", payload)
             self.assertIn("shortcut_check", payload)
+            self.assertIn("complexity_diagnostics", payload)
             self.assertIn("sample_progress", payload)
             self.assertTrue(Path(payload["out_path"]).exists())
             self.assertIn(payload.get("recommendation"), {"keep_coefficients", "recalibrate_normal_window"})
+
+    def test_pilot_analysis_migrates_legacy_rows(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-analysis-") as tmp:
+            freeze_dir = Path(tmp) / "freeze"
+            run_dir = Path(tmp) / "runs"
+
+            freeze = _run_cli(
+                [
+                    "freeze-pilot",
+                    "--freeze-id",
+                    "gf01-pilot-freeze-analysis-legacy-test",
+                    "--split",
+                    "pilot_internal_test",
+                    "--seed-start",
+                    "9500",
+                    "--count",
+                    "6",
+                    "--out-dir",
+                    str(freeze_dir),
+                ]
+            )
+            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
+
+            campaign = _run_cli(
+                [
+                    "pilot-campaign",
+                    "--freeze-dir",
+                    str(freeze_dir),
+                    "--out-dir",
+                    str(run_dir),
+                    "--baseline-panel",
+                    "random,greedy,oracle",
+                    "--baseline-policy-level",
+                    "core",
+                    "--renderer-track",
+                    "json",
+                    "--seed",
+                    "91",
+                ]
+            )
+            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
+
+            runs_path = run_dir / "runs_combined.jsonl"
+            rows = [json.loads(line) for line in runs_path.read_text().splitlines() if line.strip()]
+            for row in rows:
+                row.pop("renderer_policy_version", None)
+                row.pop("renderer_profile_id", None)
+                row.pop("adaptation_policy_version", None)
+                row.pop("adaptation_condition", None)
+                row.pop("adaptation_budget_tokens", None)
+                row.pop("adaptation_data_scope", None)
+                row.pop("adaptation_protocol_id", None)
+            runs_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))
+
+            analysis = _run_cli(
+                [
+                    "pilot-analyze",
+                    "--campaign-dir",
+                    str(run_dir),
+                    "--eval-track",
+                    "EVAL-CB",
+                    "--mode",
+                    "normal",
+                ]
+            )
+            self.assertEqual(analysis.returncode, 0, msg=analysis.stdout + analysis.stderr)
+            payload = json.loads(analysis.stdout)
+            legacy = payload.get("legacy_migration", {})
+            self.assertEqual(payload.get("status"), "ok")
+            self.assertTrue(bool(legacy.get("applied", False)))
+            self.assertIn("report", legacy)
 
     def test_pilot_analysis_requires_campaign_runs(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-analysis-") as tmp:

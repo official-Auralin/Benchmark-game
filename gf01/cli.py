@@ -21,6 +21,7 @@ __status__ = "Development"
 import argparse
 import cProfile
 import json
+import math
 import statistics
 from collections import defaultdict
 from datetime import date
@@ -65,6 +66,9 @@ from .meta import (
     BASELINE_PANEL_POLICY_VERSION,
     BENCHMARK_VERSION,
     CHECKER_VERSION,
+    COMPLEXITY_KNOB_KEYS,
+    COMPLEXITY_POLICY_VERSION,
+    COMPLEXITY_SCORE_METHOD,
     DEFAULT_PRIVATE_EVAL_MIN_COUNT,
     DEFAULT_SPLIT_RATIOS,
     DEFAULT_SPLIT_RATIO_TOLERANCE,
@@ -1763,33 +1767,41 @@ def _analysis_rate(rows: list[dict[str, object]], field: str) -> float:
     return sum(1 for row in rows if bool(row.get(field, False))) / float(len(rows))
 
 
-def _complexity_score(row: dict[str, object]) -> float | None:
+def _complexity_values(row: dict[str, object]) -> dict[str, float]:
     complexity = row.get("complexity")
-    if not isinstance(complexity, dict) or not complexity:
-        return None
-    values: list[float] = []
-    for value in complexity.values():
+    if not isinstance(complexity, dict):
+        return {}
+    values: dict[str, float] = {}
+    for key, value in complexity.items():
         try:
-            values.append(float(value))
+            values[str(key)] = float(value)
         except Exception:
             continue
-    if not values:
+    return values
+
+
+def _complexity_score(row: dict[str, object]) -> float | None:
+    complexity = _complexity_values(row)
+    if not complexity:
         return None
-    return statistics.fmean(values)
+    return statistics.fmean(complexity.values())
 
 
-def _assign_complexity_quartiles(
-    rows: list[dict[str, object]]
+def _assign_numeric_quartiles(
+    rows: list[dict[str, object]],
+    score_getter,
+    *,
+    score_field: str,
 ) -> list[dict[str, object]]:
     scored: list[dict[str, object]] = []
     for row in rows:
-        score = _complexity_score(row)
+        score = score_getter(row)
         if score is None:
             continue
         cloned = dict(row)
-        cloned["complexity_score"] = score
+        cloned[score_field] = float(score)
         scored.append(cloned)
-    scored.sort(key=lambda item: float(item["complexity_score"]))
+    scored.sort(key=lambda item: float(item[score_field]))
     n = len(scored)
     if n == 0:
         return []
@@ -1797,6 +1809,137 @@ def _assign_complexity_quartiles(
         quartile_idx = min(4, (idx * 4) // n + 1)
         row["quartile"] = f"Q{quartile_idx}"
     return scored
+
+
+def _assign_complexity_quartiles(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return _assign_numeric_quartiles(
+        rows,
+        _complexity_score,
+        score_field="complexity_score",
+    )
+
+
+def _quartile_stats(
+    rows: list[dict[str, object]],
+    *,
+    score_field: str,
+) -> list[dict[str, object]]:
+    quartile_rows: dict[str, list[dict[str, object]]] = {q: [] for q in ("Q1", "Q2", "Q3", "Q4")}
+    for row in rows:
+        quartile = str(row.get("quartile", "Q4"))
+        quartile_rows.setdefault(quartile, []).append(row)
+    out: list[dict[str, object]] = []
+    for quartile in ("Q1", "Q2", "Q3", "Q4"):
+        bucket = quartile_rows.get(quartile, [])
+        stats_row: dict[str, object] = {
+            "quartile": quartile,
+            "count": len(bucket),
+            "certified_rate": _analysis_rate(bucket, "valid"),
+            "goal_rate": _analysis_rate(bucket, "goal"),
+        }
+        if bucket:
+            values = [float(item.get(score_field, 0.0)) for item in bucket]
+            stats_row[f"{score_field}_min"] = min(values)
+            stats_row[f"{score_field}_max"] = max(values)
+        out.append(stats_row)
+    return out
+
+
+def _pearson_corr(x_vals: list[float], y_vals: list[float]) -> float | None:
+    if len(x_vals) < 2 or len(y_vals) < 2 or len(x_vals) != len(y_vals):
+        return None
+    x_mean = statistics.fmean(x_vals)
+    y_mean = statistics.fmean(y_vals)
+    x_var = statistics.fmean((x - x_mean) ** 2 for x in x_vals)
+    y_var = statistics.fmean((y - y_mean) ** 2 for y in y_vals)
+    if x_var <= 0.0 or y_var <= 0.0:
+        return None
+    cov = statistics.fmean((x - x_mean) * (y - y_mean) for x, y in zip(x_vals, y_vals))
+    return cov / math.sqrt(x_var * y_var)
+
+
+def _complexity_knob_diagnostics(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    diagnostics: list[dict[str, object]] = []
+    for knob in COMPLEXITY_KNOB_KEYS:
+        knob_rows: list[dict[str, object]] = []
+        knob_values: list[float] = []
+        valid_values: list[float] = []
+        goal_values: list[float] = []
+        for row in rows:
+            values = _complexity_values(row)
+            if knob not in values:
+                continue
+            knob_value = float(values[knob])
+            cloned = dict(row)
+            cloned["knob_value"] = knob_value
+            knob_rows.append(cloned)
+            knob_values.append(knob_value)
+            valid_values.append(1.0 if bool(row.get("valid", False)) else 0.0)
+            goal_values.append(1.0 if bool(row.get("goal", False)) else 0.0)
+        value_min = min(knob_values) if knob_values else None
+        value_max = max(knob_values) if knob_values else None
+        is_constant = (
+            value_min is not None
+            and value_max is not None
+            and abs(float(value_max) - float(value_min)) <= 1e-12
+        )
+        q1_certified_rate: float | None = None
+        q4_certified_rate: float | None = None
+        q1_minus_q4_certified_rate: float | None = None
+        q1_goal_rate: float | None = None
+        q4_goal_rate: float | None = None
+        q1_minus_q4_goal_rate: float | None = None
+        if is_constant:
+            quartile_stats = [
+                {
+                    "quartile": "ALL",
+                    "count": len(knob_rows),
+                    "certified_rate": _analysis_rate(knob_rows, "valid"),
+                    "goal_rate": _analysis_rate(knob_rows, "goal"),
+                    "knob_value_min": value_min,
+                    "knob_value_max": value_max,
+                }
+            ]
+        else:
+            quartiled = _assign_numeric_quartiles(
+                knob_rows,
+                lambda row: row.get("knob_value"),
+                score_field="knob_value",
+            )
+            quartile_stats = _quartile_stats(quartiled, score_field="knob_value")
+            q1 = quartile_stats[0]
+            q4 = quartile_stats[3]
+            q1_certified_rate = float(q1["certified_rate"])
+            q4_certified_rate = float(q4["certified_rate"])
+            q1_minus_q4_certified_rate = q1_certified_rate - q4_certified_rate
+            q1_goal_rate = float(q1["goal_rate"])
+            q4_goal_rate = float(q4["goal_rate"])
+            q1_minus_q4_goal_rate = q1_goal_rate - q4_goal_rate
+        diagnostics.append(
+            {
+                "knob": knob,
+                "row_count": len(knob_rows),
+                "is_constant": is_constant,
+                "value_min": value_min,
+                "value_max": value_max,
+                "q1_certified_rate": q1_certified_rate,
+                "q4_certified_rate": q4_certified_rate,
+                "q1_minus_q4_certified_rate": q1_minus_q4_certified_rate,
+                "q1_goal_rate": q1_goal_rate,
+                "q4_goal_rate": q4_goal_rate,
+                "q1_minus_q4_goal_rate": q1_minus_q4_goal_rate,
+                "pearson_corr_certified": _pearson_corr(knob_values, valid_values),
+                "pearson_corr_goal": _pearson_corr(knob_values, goal_values),
+                "quartile_stats": quartile_stats,
+            }
+        )
+    diagnostics.sort(
+        key=lambda row: (
+            -abs(float(row.get("q1_minus_q4_certified_rate", 0.0) or 0.0)),
+            str(row.get("knob", "")),
+        )
+    )
+    return diagnostics
 
 
 def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -1885,6 +2028,43 @@ def _cmd_pilot_analyze(args: argparse.Namespace) -> int:
 
     rows = load_jsonl(str(runs_path))
     schema_errors = validate_run_rows(rows, strict=True)
+    migration_payload: dict[str, object] | None = None
+    if schema_errors:
+        migrated_rows, migration_report = migrate_run_rows(
+            rows,
+            defaults={
+                "schema_version": RUN_RECORD_SCHEMA_VERSION,
+                "family_id": FAMILY_ID,
+                "benchmark_version": BENCHMARK_VERSION,
+                "generator_version": GENERATOR_VERSION,
+                "checker_version": CHECKER_VERSION,
+                "harness_version": HARNESS_VERSION,
+                "git_commit": current_git_commit(),
+                "config_hash": "pilot-analyze-legacy-backfill",
+                "tool_allowlist_id": DEFAULT_TOOL_ALLOWLIST_BY_TRACK["EVAL-CB"],
+                "tool_log_hash": "",
+                "play_protocol": "commit_only",
+                "scored_commit_episode": True,
+                "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
+                "adaptation_condition": "no_adaptation",
+                "adaptation_budget_tokens": 0,
+                "adaptation_data_scope": "none",
+                "adaptation_protocol_id": "none",
+                "eval_track": "EVAL-CB",
+                "renderer_track": "json",
+                "renderer_policy_version": RENDERER_POLICY_VERSION,
+                "renderer_profile_id": renderer_profile_for_track("json"),
+                "agent_name": "legacy-agent",
+                "split_id": "public_dev",
+                "mode": "normal",
+                "seed": 0,
+            },
+        )
+        migrated_errors = validate_run_rows(migrated_rows, strict=True)
+        if not migrated_errors:
+            rows = migrated_rows
+            migration_payload = migration_report
+            schema_errors = []
     if schema_errors:
         print(
             json.dumps(
@@ -1925,25 +2105,7 @@ def _cmd_pilot_analyze(args: argparse.Namespace) -> int:
         held_out_greedy_rows = greedy_rows
 
     quartiled = _assign_complexity_quartiles(held_out_greedy_rows)
-    quartile_rows: dict[str, list[dict[str, object]]] = {q: [] for q in ("Q1", "Q2", "Q3", "Q4")}
-    for row in quartiled:
-        quartile = str(row.get("quartile", "Q4"))
-        quartile_rows.setdefault(quartile, []).append(row)
-
-    quartile_stats: list[dict[str, object]] = []
-    for quartile in ("Q1", "Q2", "Q3", "Q4"):
-        bucket = quartile_rows.get(quartile, [])
-        stats_row: dict[str, object] = {
-            "quartile": quartile,
-            "count": len(bucket),
-            "certified_rate": _analysis_rate(bucket, "valid"),
-            "goal_rate": _analysis_rate(bucket, "goal"),
-        }
-        if bucket:
-            scores = [float(item.get("complexity_score", 0.0)) for item in bucket]
-            stats_row["complexity_score_min"] = min(scores)
-            stats_row["complexity_score_max"] = max(scores)
-        quartile_stats.append(stats_row)
+    quartile_stats = _quartile_stats(quartiled, score_field="complexity_score")
 
     q1_stats = quartile_stats[0]
     q4_stats = quartile_stats[3]
@@ -1984,9 +2146,37 @@ def _cmd_pilot_analyze(args: argparse.Namespace) -> int:
     if discrimination_trigger or shortcut_trigger:
         recommendation = "recalibrate_normal_window"
 
+    mode_rows_same_track = [
+        row
+        for row in mode_rows
+        if str(row.get("eval_track", "")) == eval_track
+        and bool(row.get("scored_commit_episode", True))
+    ]
+    pooled_quartiled = _assign_complexity_quartiles(mode_rows_same_track)
+    pooled_quartile_stats = _quartile_stats(
+        pooled_quartiled,
+        score_field="complexity_score",
+    )
+    pooled_q1 = pooled_quartile_stats[0]
+    pooled_q4 = pooled_quartile_stats[3]
+    pooled_knob_stats = _complexity_knob_diagnostics(mode_rows_same_track)
+    held_out_knob_stats = _complexity_knob_diagnostics(held_out_greedy_rows)
+    per_agent_knob_stats = {
+        agent_name: _complexity_knob_diagnostics(
+            [row for row in mode_rows_same_track if str(row.get("agent_name", "")) == agent_name]
+        )
+        for agent_name in sorted({str(row.get("agent_name", "")) for row in mode_rows_same_track})
+        if agent_name
+    }
+
     out = {
         "status": "ok",
         "policy_reference": "DEC-014d",
+        "complexity_policy_version": COMPLEXITY_POLICY_VERSION,
+        "complexity_policy": {
+            "score_method": COMPLEXITY_SCORE_METHOD,
+            "knob_keys": list(COMPLEXITY_KNOB_KEYS),
+        },
         "campaign_dir": str(campaign_dir),
         "runs_path": str(runs_path),
         "validation_path": str(validation_path) if validation_path.exists() else "",
@@ -2028,6 +2218,28 @@ def _cmd_pilot_analyze(args: argparse.Namespace) -> int:
             "triggered": shortcut_trigger,
             "row_count": len(held_out_greedy_rows),
         },
+        "complexity_diagnostics": {
+            "scope_rows": {
+                "held_out_greedy": len(held_out_greedy_rows),
+                "pooled_eval_track_mode": len(mode_rows_same_track),
+            },
+            "held_out_greedy_composite": {
+                "q1_certified_rate": float(q1_stats["certified_rate"]),
+                "q4_certified_rate": float(q4_stats["certified_rate"]),
+                "q1_minus_q4_certified_rate": discrimination_delta,
+                "quartile_stats": quartile_stats,
+            },
+            "pooled_eval_track_mode_composite": {
+                "q1_certified_rate": float(pooled_q1["certified_rate"]),
+                "q4_certified_rate": float(pooled_q4["certified_rate"]),
+                "q1_minus_q4_certified_rate": float(pooled_q1["certified_rate"])
+                - float(pooled_q4["certified_rate"]),
+                "quartile_stats": pooled_quartile_stats,
+            },
+            "held_out_greedy_knob_stats": held_out_knob_stats,
+            "pooled_eval_track_mode_knob_stats": pooled_knob_stats,
+            "per_agent_knob_stats": per_agent_knob_stats,
+        },
         "oracle_context": {
             "oracle_minus_greedy_certified_rate": oracle_minus_greedy,
             "oracle_row_count": len(oracle_rows),
@@ -2037,6 +2249,11 @@ def _cmd_pilot_analyze(args: argparse.Namespace) -> int:
     }
     if validation_payload is not None:
         out["official_validation"] = validation_payload
+    if migration_payload is not None:
+        out["legacy_migration"] = {
+            "applied": True,
+            "report": migration_payload,
+        }
 
     out_path = Path(args.out) if args.out else campaign_dir / "pilot_analysis.json"
     write_json(str(out_path), out)
