@@ -208,6 +208,12 @@ presentation layer over these same command outputs.
 - `EVAL-OC` (oracle ceiling): strongest tooling/solver condition, reported
   separately.
 
+Allowed `tool_allowlist_id` values:
+
+- `EVAL-CB`: `none`
+- `EVAL-TA`: `local-planner-v1`
+- `EVAL-OC`: `oracle-exact-search-v1`
+
 `python3 -m gf01 play` enforces these constraints at runtime and logs a
 machine-checkable `run_contract` block in output.
 The `run_contract` also includes:

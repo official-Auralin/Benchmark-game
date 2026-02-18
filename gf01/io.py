@@ -26,8 +26,10 @@ from .meta import (
     ALLOWED_EVAL_TRACKS,
     ALLOWED_MODES,
     ALLOWED_PLAY_PROTOCOLS,
+    ALLOWED_TOOL_ALLOWLISTS_BY_TRACK,
     BENCHMARK_VERSION,
     CHECKER_VERSION,
+    DEFAULT_TOOL_ALLOWLIST_BY_TRACK,
     FAMILY_ID,
     GENERATOR_VERSION,
     HARNESS_VERSION,
@@ -38,6 +40,32 @@ from .meta import (
     stable_hash_json,
 )
 from .models import GF01Instance, InterventionAtom, MealyAutomaton, RunRecord
+
+
+def _track_tool_policy_error(
+    eval_track: str,
+    tool_allowlist_id: str,
+    tool_log_hash: str,
+) -> str | None:
+    allowlist = str(tool_allowlist_id).strip()
+    tool_hash = str(tool_log_hash).strip()
+    if eval_track not in ALLOWED_TOOL_ALLOWLISTS_BY_TRACK:
+        return None
+    if eval_track == "EVAL-CB":
+        if allowlist.lower() != "none":
+            return "EVAL-CB requires tool_allowlist_id=none"
+        if tool_hash:
+            return "EVAL-CB requires empty tool_log_hash"
+        return None
+    allowed = ALLOWED_TOOL_ALLOWLISTS_BY_TRACK[eval_track]
+    if allowlist not in allowed:
+        return (
+            f"{eval_track} requires tool_allowlist_id in {list(allowed)} "
+            f"(received {allowlist or '<empty>'})"
+        )
+    if not tool_hash or tool_hash.lower() == "unknown":
+        return f"{eval_track} requires non-empty tool_log_hash"
+    return None
 
 
 def _to_int_valuation(data: dict[str, Any]) -> dict[str, int]:
@@ -280,6 +308,14 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
             errors.append(
                 f"row {idx}: eval_track={eval_track} not in {list(ALLOWED_EVAL_TRACKS)}"
             )
+        else:
+            tool_policy_error = _track_tool_policy_error(
+                eval_track=eval_track,
+                tool_allowlist_id=str(row.get("tool_allowlist_id", "")),
+                tool_log_hash=str(row.get("tool_log_hash", "")),
+            )
+            if tool_policy_error is not None:
+                errors.append(f"row {idx}: {tool_policy_error}")
 
         mode = str(row.get("mode"))
         if mode not in ALLOWED_MODES:
@@ -500,6 +536,33 @@ def migrate_run_rows(
         if str(item.get("play_protocol", "")).strip() not in ALLOWED_PLAY_PROTOCOLS:
             item["play_protocol"] = defaults.get("play_protocol", "commit_only")
             _mark(coercion_counts, "play_protocol")
+
+        eval_track = str(item.get("eval_track", "EVAL-CB")).strip()
+        allowlist = str(item.get("tool_allowlist_id", "")).strip()
+        tool_hash = str(item.get("tool_log_hash", "")).strip()
+        if eval_track == "EVAL-CB":
+            if allowlist.lower() != "none":
+                item["tool_allowlist_id"] = "none"
+                _mark(coercion_counts, "tool_allowlist_id")
+            if tool_hash:
+                item["tool_log_hash"] = ""
+                _mark(coercion_counts, "tool_log_hash")
+        elif eval_track in {"EVAL-TA", "EVAL-OC"}:
+            allowed = ALLOWED_TOOL_ALLOWLISTS_BY_TRACK[eval_track]
+            default_allowlist = DEFAULT_TOOL_ALLOWLIST_BY_TRACK[eval_track]
+            if allowlist not in allowed:
+                item["tool_allowlist_id"] = default_allowlist
+                _mark(coercion_counts, "tool_allowlist_id")
+            if not tool_hash or tool_hash.lower() == "unknown":
+                item["tool_log_hash"] = stable_hash_json(
+                    {
+                        "migration_row": idx,
+                        "instance_id": item.get("instance_id", ""),
+                        "eval_track": eval_track,
+                        "tool_allowlist_id": item.get("tool_allowlist_id", default_allowlist),
+                    }
+                )[:16]
+                _mark(coercion_counts, "tool_log_hash")
 
         cert_before = item.get("certificate")
         cert_after = _sanitize_certificate(cert_before)

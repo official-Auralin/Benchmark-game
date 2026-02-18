@@ -38,6 +38,15 @@ PILOT_FREEZE_SCHEMA_VERSION = "gf01.pilot_freeze.v1"
 ALLOWED_EVAL_TRACKS = ("EVAL-CB", "EVAL-TA", "EVAL-OC")
 ALLOWED_MODES = ("normal", "hard")
 ALLOWED_PLAY_PROTOCOLS = ("commit_only",)
+TOOL_POLICY_VERSION = "gf01.tool_policy.v1"
+ALLOWED_TOOL_ALLOWLISTS_BY_TRACK = {
+    "EVAL-CB": ("none",),
+    "EVAL-TA": ("local-planner-v1",),
+    "EVAL-OC": ("oracle-exact-search-v1",),
+}
+DEFAULT_TOOL_ALLOWLIST_BY_TRACK = {
+    track: allowlists[0] for track, allowlists in ALLOWED_TOOL_ALLOWLISTS_BY_TRACK.items()
+}
 
 REQUIRED_RUN_FIELDS = (
     "schema_version",

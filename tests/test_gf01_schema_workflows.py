@@ -147,6 +147,36 @@ class TestSchemaWorkflows(unittest.TestCase):
         self.assertIn("play_protocol", first)
         self.assertIn("scored_commit_episode", first)
 
+    def test_validate_strict_fails_on_bad_ta_tool_policy(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-test-") as tmp:
+            bad_runs = Path(tmp) / "bad_ta_runs.jsonl"
+            rows = []
+            for line in RUNS_V1.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    rows.append(json.loads(line))
+            self.assertTrue(rows)
+            rows[0]["eval_track"] = "EVAL-TA"
+            rows[0]["tool_allowlist_id"] = "none"
+            rows[0]["tool_log_hash"] = ""
+            bad_runs.write_text(
+                "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+
+            proc = _run_cli(
+                [
+                    "validate",
+                    "--runs",
+                    str(bad_runs),
+                    "--manifest",
+                    str(MANIFEST),
+                    "--strict",
+                ]
+            )
+            self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload.get("error_type"), "run_schema_validation")
+
 
 if __name__ == "__main__":
     unittest.main()

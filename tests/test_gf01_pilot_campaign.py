@@ -68,7 +68,7 @@ class TestPilotCampaign(unittest.TestCase):
                     "--out-dir",
                     str(run_dir),
                     "--baseline-panel",
-                    "greedy,oracle",
+                    "greedy,tool,oracle",
                     "--renderer-track",
                     "json",
                     "--seed",
@@ -78,7 +78,7 @@ class TestPilotCampaign(unittest.TestCase):
             self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
             summary = json.loads(campaign.stdout)
             self.assertEqual(summary.get("status"), "ok")
-            self.assertEqual(summary.get("row_count"), 4)
+            self.assertEqual(summary.get("row_count"), 6)
 
             runs_path = Path(summary["runs_path"])
             val_path = Path(summary["validation_path"])
@@ -86,6 +86,24 @@ class TestPilotCampaign(unittest.TestCase):
             self.assertTrue(runs_path.exists())
             self.assertTrue(val_path.exists())
             self.assertTrue(report_path.exists())
+
+            rows = []
+            for line in runs_path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    rows.append(json.loads(line))
+            self.assertTrue(rows)
+            ta_rows = [row for row in rows if row.get("eval_track") == "EVAL-TA"]
+            oc_rows = [row for row in rows if row.get("eval_track") == "EVAL-OC"]
+            self.assertTrue(ta_rows)
+            self.assertTrue(oc_rows)
+            self.assertTrue(
+                all(row.get("tool_allowlist_id") == "local-planner-v1" for row in ta_rows)
+            )
+            self.assertTrue(
+                all(row.get("tool_allowlist_id") == "oracle-exact-search-v1" for row in oc_rows)
+            )
+            self.assertTrue(all(bool(str(row.get("tool_log_hash", "")).strip()) for row in ta_rows))
+            self.assertTrue(all(bool(str(row.get("tool_log_hash", "")).strip()) for row in oc_rows))
 
             val_payload = json.loads(val_path.read_text(encoding="utf-8"))
             self.assertEqual(val_payload.get("status"), "ok")

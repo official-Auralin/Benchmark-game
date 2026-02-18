@@ -125,6 +125,51 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(run_contract.get("play_protocol"), "commit_only")
         self.assertEqual(run_contract.get("scored_commit_episode"), True)
 
+    def test_play_rejects_unknown_ta_allowlist(self) -> None:
+        proc = _run_cli(
+            [
+                "play",
+                "--seed",
+                "1337",
+                "--agent",
+                "tool",
+                "--eval-track",
+                "EVAL-TA",
+                "--tool-allowlist-id",
+                "unknown-tools-v9",
+                "--tool-log-hash",
+                "demo-hash",
+            ]
+        )
+        self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("error_type"), "track_policy_violation")
+
+    def test_play_allows_oc_with_oracle_allowlist(self) -> None:
+        proc = _run_cli(
+            [
+                "play",
+                "--seed",
+                "1337",
+                "--agent",
+                "oracle",
+                "--eval-track",
+                "EVAL-OC",
+                "--tool-allowlist-id",
+                "oracle-exact-search-v1",
+                "--tool-log-hash",
+                "oracle-demo-hash",
+                "--renderer-track",
+                "json",
+            ]
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("status"), "ok")
+        run_contract = payload.get("run_contract", {})
+        self.assertEqual(run_contract.get("eval_track"), "EVAL-OC")
+        self.assertEqual(run_contract.get("tool_allowlist_id"), "oracle-exact-search-v1")
+
 
 if __name__ == "__main__":
     unittest.main()

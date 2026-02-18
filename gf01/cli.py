@@ -54,8 +54,10 @@ from .meta import (
     ALLOWED_EVAL_TRACKS,
     ALLOWED_MODES,
     ALLOWED_PLAY_PROTOCOLS,
+    ALLOWED_TOOL_ALLOWLISTS_BY_TRACK,
     BENCHMARK_VERSION,
     CHECKER_VERSION,
+    DEFAULT_TOOL_ALLOWLIST_BY_TRACK,
     FAMILY_ID,
     GENERATOR_VERSION,
     HARNESS_VERSION,
@@ -180,6 +182,36 @@ def _validate_runs_manifest(
     return None, coverage
 
 
+def _track_tool_policy_message(
+    *,
+    eval_track: str,
+    tool_allowlist_id: str,
+    tool_log_hash: str,
+) -> str | None:
+    allowlist = str(tool_allowlist_id).strip()
+    tool_hash = str(tool_log_hash).strip()
+    if eval_track not in ALLOWED_TOOL_ALLOWLISTS_BY_TRACK:
+        return f"unsupported eval_track {eval_track}"
+    if eval_track == "EVAL-CB":
+        if allowlist.lower() != "none" or tool_hash:
+            return (
+                "EVAL-CB forbids external tool metadata; "
+                "use tool_allowlist_id=none and empty tool_log_hash"
+            )
+        return None
+    allowed = ALLOWED_TOOL_ALLOWLISTS_BY_TRACK[eval_track]
+    if allowlist not in allowed:
+        return (
+            f"{eval_track} requires tool_allowlist_id in {list(allowed)} "
+            f"(received {allowlist or '<empty>'})"
+        )
+    if not tool_hash:
+        return f"{eval_track} requires a non-empty tool_log_hash"
+    if tool_hash.lower() == "unknown":
+        return f"{eval_track} requires tool_log_hash != unknown"
+    return None
+
+
 def _cmd_demo(args: argparse.Namespace) -> int:
     cfg = GeneratorConfig()
     instance, witness = generate_instance(seed=args.seed, cfg=cfg, split_id="public_dev")
@@ -292,8 +324,73 @@ def _cmd_profile(args: argparse.Namespace) -> int:
 def _cmd_evaluate(args: argparse.Namespace) -> int:
     instances, bundle_meta = load_instance_bundle(args.instances)
     agent = make_agent(args.agent)
-    eval_track = args.eval_track
+    eval_track = str(args.eval_track).strip()
     renderer_track = args.renderer_track
+    agent_id = str(args.agent).strip().lower()
+    tool_allowlist_id = str(args.tool_allowlist_id).strip()
+    tool_log_hash = str(args.tool_log_hash).strip()
+
+    if eval_track not in ALLOWED_EVAL_TRACKS:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "track_policy_violation",
+                    "message": f"unsupported eval_track {eval_track}",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if agent_id in {"tool", "bl-03", "bl-03-toolplanner"} and eval_track == "EVAL-CB":
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "track_policy_violation",
+                    "message": "tool planner agent is not allowed in EVAL-CB",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if agent_id in {"oracle", "bl-04", "bl-04-exactoracle"} and eval_track != "EVAL-OC":
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "track_policy_violation",
+                    "message": "exact oracle agent is restricted to EVAL-OC",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    policy_msg = _track_tool_policy_message(
+        eval_track=eval_track,
+        tool_allowlist_id=tool_allowlist_id,
+        tool_log_hash=tool_log_hash,
+    )
+    if policy_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "track_policy_violation",
+                    "message": policy_msg,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     run_meta = {
         "family_id": bundle_meta.get("family_id", FAMILY_ID),
         "benchmark_version": bundle_meta.get("benchmark_version", BENCHMARK_VERSION),
@@ -302,8 +399,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "harness_version": bundle_meta.get("harness_version", HARNESS_VERSION),
         "git_commit": current_git_commit(),
         "config_hash": bundle_meta.get("config_hash", "unknown"),
-        "tool_allowlist_id": args.tool_allowlist_id,
-        "tool_log_hash": args.tool_log_hash,
+        "tool_allowlist_id": tool_allowlist_id or "none",
+        "tool_log_hash": tool_log_hash,
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
     }
@@ -330,7 +427,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "aggregate": aggregate,
         "run_schema_version": RUN_RECORD_SCHEMA_VERSION,
         "source_bundle_schema_version": bundle_meta.get("schema_version", "legacy-instance-list"),
-        "tool_allowlist_id": args.tool_allowlist_id,
+        "tool_allowlist_id": tool_allowlist_id or "none",
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
         "out_jsonl": args.out,
@@ -442,6 +539,57 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 def _cmd_migrate_runs(args: argparse.Namespace) -> int:
     rows = load_jsonl(args.runs)
     manifest: dict[str, object] | None = load_json(args.manifest) if args.manifest else None
+    default_eval_track = str(args.default_eval_track).strip()
+    if default_eval_track not in ALLOWED_EVAL_TRACKS:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "track_policy_violation",
+                    "message": f"unsupported default_eval_track {default_eval_track}",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    tool_allowlist_id = str(args.tool_allowlist_id).strip()
+    tool_log_hash = str(args.tool_log_hash).strip()
+    if default_eval_track == "EVAL-CB":
+        tool_allowlist_id = "none"
+        tool_log_hash = ""
+    else:
+        if not tool_allowlist_id or tool_allowlist_id.lower() == "none":
+            tool_allowlist_id = DEFAULT_TOOL_ALLOWLIST_BY_TRACK[default_eval_track]
+        if not tool_log_hash:
+            tool_log_hash = stable_hash_json(
+                {
+                    "migration_out": args.out,
+                    "default_eval_track": default_eval_track,
+                    "tool_allowlist_id": tool_allowlist_id,
+                }
+            )[:16]
+
+    policy_msg = _track_tool_policy_message(
+        eval_track=default_eval_track,
+        tool_allowlist_id=tool_allowlist_id,
+        tool_log_hash=tool_log_hash,
+    )
+    if policy_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "track_policy_violation",
+                    "message": policy_msg,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     defaults: dict[str, object] = {
         "schema_version": RUN_RECORD_SCHEMA_VERSION,
         "family_id": FAMILY_ID,
@@ -451,11 +599,11 @@ def _cmd_migrate_runs(args: argparse.Namespace) -> int:
         "harness_version": args.harness_version,
         "git_commit": args.git_commit or current_git_commit(),
         "config_hash": args.config_hash,
-        "tool_allowlist_id": args.tool_allowlist_id,
-        "tool_log_hash": args.tool_log_hash,
+        "tool_allowlist_id": tool_allowlist_id,
+        "tool_log_hash": tool_log_hash,
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
-        "eval_track": args.default_eval_track,
+        "eval_track": default_eval_track,
         "renderer_track": args.default_renderer_track,
         "agent_name": args.default_agent_name,
         "split_id": args.default_split_id,
@@ -721,7 +869,7 @@ def _cmd_play(args: argparse.Namespace) -> int:
         )
         return 2
 
-    eval_track = str(args.eval_track)
+    eval_track = str(args.eval_track).strip()
     tool_allowlist_id = str(args.tool_allowlist_id).strip()
     tool_log_hash = str(args.tool_log_hash).strip()
 
@@ -739,51 +887,24 @@ def _cmd_play(args: argparse.Namespace) -> int:
         )
         return 2
 
-    if eval_track == "EVAL-CB":
-        if tool_allowlist_id.lower() != "none" or tool_log_hash:
-            print(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "error_type": "track_policy_violation",
-                        "message": (
-                            "EVAL-CB forbids external tool metadata; "
-                            "use tool_allowlist_id=none and empty tool_log_hash"
-                        ),
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
+    policy_msg = _track_tool_policy_message(
+        eval_track=eval_track,
+        tool_allowlist_id=tool_allowlist_id,
+        tool_log_hash=tool_log_hash,
+    )
+    if policy_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "track_policy_violation",
+                    "message": policy_msg,
+                },
+                indent=2,
+                sort_keys=True,
             )
-            return 2
-
-    if eval_track == "EVAL-TA":
-        if not tool_allowlist_id or tool_allowlist_id.lower() == "none":
-            print(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "error_type": "track_policy_violation",
-                        "message": "EVAL-TA requires a non-empty tool_allowlist_id",
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-            )
-            return 2
-        if not tool_log_hash:
-            print(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "error_type": "track_policy_violation",
-                        "message": "EVAL-TA requires a non-empty tool_log_hash",
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-            )
-            return 2
+        )
+        return 2
 
     if args.agent:
         agent = make_agent(args.agent)
@@ -937,9 +1058,41 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
                     "panel_index": idx,
                 }
             )[:16]
+        elif eval_track == "EVAL-OC":
+            tool_allowlist_id = DEFAULT_TOOL_ALLOWLIST_BY_TRACK["EVAL-OC"]
+            tool_log_hash = stable_hash_json(
+                {
+                    "freeze_dir": str(freeze_dir),
+                    "agent": agent.name,
+                    "seed": int(args.seed + idx),
+                    "panel_index": idx,
+                    "policy": "oracle-ceiling",
+                }
+            )[:16]
         else:
             tool_allowlist_id = "none"
             tool_log_hash = ""
+
+        policy_msg = _track_tool_policy_message(
+            eval_track=eval_track,
+            tool_allowlist_id=tool_allowlist_id,
+            tool_log_hash=tool_log_hash,
+        )
+        if policy_msg is not None:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "track_policy_violation",
+                        "message": policy_msg,
+                        "agent": agent.name,
+                        "eval_track": eval_track,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
 
         records, _ = evaluate_suite(
             agent=agent,
@@ -1321,7 +1474,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval = sub.add_parser("evaluate", help="Evaluate one baseline agent on external instances")
     p_eval.add_argument("--instances", type=str, required=True, help="Path to instance JSON")
     p_eval.add_argument("--agent", type=str, default="greedy", help="random|greedy|search|tool|oracle")
-    p_eval.add_argument("--eval-track", type=str, default="EVAL-CB")
+    p_eval.add_argument("--eval-track", type=str, default="EVAL-CB", choices=list(ALLOWED_EVAL_TRACKS))
     p_eval.add_argument("--renderer-track", type=str, default="json")
     p_eval.add_argument("--seed", type=int, default=0)
     p_eval.add_argument("--tool-allowlist-id", type=str, default="none")
@@ -1380,7 +1533,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_migrate.add_argument("--config-hash", type=str, default="legacy-backfill")
     p_migrate.add_argument("--tool-allowlist-id", type=str, default="none")
     p_migrate.add_argument("--tool-log-hash", type=str, default="")
-    p_migrate.add_argument("--default-eval-track", type=str, default="EVAL-CB")
+    p_migrate.add_argument(
+        "--default-eval-track",
+        type=str,
+        default="EVAL-CB",
+        choices=list(ALLOWED_EVAL_TRACKS),
+    )
     p_migrate.add_argument("--default-renderer-track", type=str, default="json")
     p_migrate.add_argument("--default-agent-name", type=str, default="legacy-agent")
     p_migrate.add_argument("--default-split-id", type=str, default="public_dev")
@@ -1474,7 +1632,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_campaign.add_argument("--renderer-track", type=str, default="json", choices=["json", "visual"])
     p_campaign.add_argument("--seed", type=int, default=1100)
-    p_campaign.add_argument("--tool-allowlist-id", type=str, default="local-planner-v1")
+    p_campaign.add_argument(
+        "--tool-allowlist-id",
+        type=str,
+        default=DEFAULT_TOOL_ALLOWLIST_BY_TRACK["EVAL-TA"],
+        choices=list(ALLOWED_TOOL_ALLOWLISTS_BY_TRACK["EVAL-TA"]),
+        help="Tool allowlist id used for EVAL-TA baseline rows",
+    )
     p_campaign.add_argument("--tool-log-hash", type=str, default="")
     p_campaign.add_argument(
         "--external-runs",
