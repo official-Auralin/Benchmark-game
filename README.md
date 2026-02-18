@@ -137,6 +137,7 @@ python3 -m gf01 pilot-campaign \
   --freeze-dir pilot_freeze/gf01_pilot_freeze_v1 \
   --out-dir pilot_runs/gf01_pilot_campaign_v1 \
   --baseline-panel random,greedy,search,tool,oracle \
+  --baseline-policy-level full \
   --renderer-track json \
   --seed 1100
 ```
@@ -148,6 +149,7 @@ python3 -m gf01 pilot-campaign \
   --freeze-dir pilot_freeze/gf01_hyp018_normal_v1 \
   --out-dir pilot_runs/gf01_hyp018_normal_campaign_v1 \
   --baseline-panel random,greedy,search,tool,oracle \
+  --baseline-policy-level full \
   --renderer-track json \
   --seed 1100
 
@@ -155,9 +157,17 @@ python3 -m gf01 pilot-campaign \
   --freeze-dir pilot_freeze/gf01_hyp018_hard_v1 \
   --out-dir pilot_runs/gf01_hyp018_hard_campaign_v1 \
   --baseline-panel random,greedy,search,tool,oracle \
+  --baseline-policy-level full \
   --renderer-track json \
   --seed 1100
 ```
+
+Baseline-panel policy (`gf01.baseline_panel_policy.v1`):
+
+- `--baseline-policy-level full` (default): requires
+  `random,greedy,search,tool,oracle`.
+- `--baseline-policy-level core`: requires `random,greedy,oracle` and is
+  intended for faster internal smoke runs.
 
 Analyze campaign artifacts against the pre-registered `DEC-014d` trigger checks
 (quartile discrimination + shortcut anomaly):

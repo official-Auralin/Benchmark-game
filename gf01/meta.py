@@ -49,6 +49,10 @@ ALLOWED_ADAPTATION_DATA_SCOPES = (
     "public_only",
     "public_plus_external",
 )
+BASELINE_PANEL_POLICY_VERSION = "gf01.baseline_panel_policy.v1"
+ALLOWED_BASELINE_PANEL_LEVELS = ("full", "core")
+BASELINE_PANEL_CORE = ("random", "greedy", "oracle")
+BASELINE_PANEL_FULL = ("random", "greedy", "search", "tool", "oracle")
 OFFICIAL_SPLITS = ("public_dev", "public_val", "private_eval")
 SPLIT_POLICY_VERSION = "gf01.split_policy.v1"
 DEFAULT_SPLIT_RATIOS = {

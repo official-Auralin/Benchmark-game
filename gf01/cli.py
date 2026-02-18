@@ -55,9 +55,13 @@ from .meta import (
     ALLOWED_EVAL_TRACKS,
     ALLOWED_ADAPTATION_CONDITIONS,
     ALLOWED_ADAPTATION_DATA_SCOPES,
+    ALLOWED_BASELINE_PANEL_LEVELS,
     ALLOWED_MODES,
     ALLOWED_PLAY_PROTOCOLS,
     ALLOWED_TOOL_ALLOWLISTS_BY_TRACK,
+    BASELINE_PANEL_CORE,
+    BASELINE_PANEL_FULL,
+    BASELINE_PANEL_POLICY_VERSION,
     BENCHMARK_VERSION,
     CHECKER_VERSION,
     DEFAULT_PRIVATE_EVAL_MIN_COUNT,
@@ -254,6 +258,49 @@ def _adaptation_policy_message(
         return f"{adaptation_condition} requires adaptation_data_scope!=none"
     if not protocol or protocol.lower() in {"none", "unknown"}:
         return f"{adaptation_condition} requires non-empty adaptation_protocol_id"
+    return None
+
+
+def _canonical_baseline_agent_id(agent_id: str) -> str:
+    key = agent_id.strip().lower()
+    if key in {"random", "bl-00", "bl-00-randomintervention"}:
+        return "random"
+    if key in {"greedy", "bl-01", "bl-01-greedylocal"}:
+        return "greedy"
+    if key in {"search", "bl-02", "bl-02-budgetawaresearch"}:
+        return "search"
+    if key in {"tool", "bl-03", "bl-03-toolplanner"}:
+        return "tool"
+    if key in {"oracle", "bl-04", "bl-04-exactoracle"}:
+        return "oracle"
+    raise ValueError(f"unknown baseline agent id: {agent_id}")
+
+
+def _baseline_panel_policy_message(
+    panel_ids: list[str],
+    *,
+    policy_level: str,
+) -> str | None:
+    if policy_level not in ALLOWED_BASELINE_PANEL_LEVELS:
+        return (
+            f"unsupported baseline_policy_level {policy_level}; expected one of "
+            f"{list(ALLOWED_BASELINE_PANEL_LEVELS)}"
+        )
+    allowed = set(BASELINE_PANEL_FULL)
+    panel_set = set(panel_ids)
+    unknown = sorted(panel_set - allowed)
+    if unknown:
+        return f"baseline panel contains unsupported ids: {unknown}"
+
+    required = set(BASELINE_PANEL_FULL if policy_level == "full" else BASELINE_PANEL_CORE)
+    missing = sorted(required - panel_set)
+    if missing:
+        return f"baseline panel missing required ids for {policy_level} policy: {missing}"
+
+    if policy_level == "full" and panel_set != allowed:
+        extras = sorted(panel_set - allowed)
+        if extras:
+            return f"full baseline policy forbids extra ids: {extras}"
     return None
 
 
@@ -1375,7 +1422,50 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
     instances, bundle_meta = load_instance_bundle(str(bundle_path))
     instance_lookup = {inst.instance_id: inst for inst in instances}
     rows: list[dict[str, object]] = []
-    panel = _panel_ids(args.baseline_panel)
+    panel_raw = _panel_ids(args.baseline_panel)
+    panel: list[str] = []
+    seen_panel: set[str] = set()
+    for item in panel_raw:
+        try:
+            canonical_id = _canonical_baseline_agent_id(item)
+        except ValueError as exc:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "baseline_panel_invalid",
+                        "message": str(exc),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        if canonical_id not in seen_panel:
+            panel.append(canonical_id)
+            seen_panel.add(canonical_id)
+
+    baseline_policy_level = str(args.baseline_policy_level).strip()
+    baseline_policy_msg = _baseline_panel_policy_message(
+        panel,
+        policy_level=baseline_policy_level,
+    )
+    if baseline_policy_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "baseline_panel_policy_violation",
+                    "baseline_policy_version": BASELINE_PANEL_POLICY_VERSION,
+                    "baseline_policy_level": baseline_policy_level,
+                    "message": baseline_policy_msg,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     adaptation_condition = str(args.adaptation_condition).strip()
     adaptation_budget_tokens = int(args.adaptation_budget_tokens)
     adaptation_data_scope = str(args.adaptation_data_scope).strip()
@@ -1530,6 +1620,13 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
         "validation_path": str(validation_path),
         "report_path": str(report_path),
         "row_count": len(rows),
+        "baseline_policy_version": BASELINE_PANEL_POLICY_VERSION,
+        "baseline_policy_level": baseline_policy_level,
+        "baseline_panel_required": (
+            list(BASELINE_PANEL_FULL)
+            if baseline_policy_level == "full"
+            else list(BASELINE_PANEL_CORE)
+        ),
         "baseline_panel": panel,
         "external_runs_count": len(args.external_runs),
         "adaptation_condition": adaptation_condition,
@@ -2091,6 +2188,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="random,greedy,search,tool,oracle",
         help="Comma-separated baseline ids (e.g., random,greedy,search,tool,oracle)",
+    )
+    p_campaign.add_argument(
+        "--baseline-policy-level",
+        type=str,
+        default="full",
+        choices=list(ALLOWED_BASELINE_PANEL_LEVELS),
+        help=(
+            "Baseline-policy enforcement level: "
+            "'full' requires random,greedy,search,tool,oracle; "
+            "'core' requires random,greedy,oracle."
+        ),
     )
     p_campaign.add_argument("--renderer-track", type=str, default="json", choices=["json", "visual"])
     p_campaign.add_argument("--seed", type=int, default=1100)

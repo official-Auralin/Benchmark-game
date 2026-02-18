@@ -68,7 +68,7 @@ class TestPilotCampaign(unittest.TestCase):
                     "--out-dir",
                     str(run_dir),
                     "--baseline-panel",
-                    "greedy,tool,oracle",
+                    "random,greedy,search,tool,oracle",
                     "--renderer-track",
                     "json",
                     "--seed",
@@ -78,7 +78,9 @@ class TestPilotCampaign(unittest.TestCase):
             self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
             summary = json.loads(campaign.stdout)
             self.assertEqual(summary.get("status"), "ok")
-            self.assertEqual(summary.get("row_count"), 6)
+            self.assertEqual(summary.get("row_count"), 10)
+            self.assertEqual(summary.get("baseline_policy_version"), "gf01.baseline_panel_policy.v1")
+            self.assertEqual(summary.get("baseline_policy_level"), "full")
 
             runs_path = Path(summary["runs_path"])
             val_path = Path(summary["validation_path"])
@@ -151,6 +153,81 @@ class TestPilotCampaign(unittest.TestCase):
             self.assertEqual(campaign.returncode, 2, msg=campaign.stdout + campaign.stderr)
             payload = json.loads(campaign.stdout)
             self.assertEqual(payload.get("error_type"), "output_dir_not_empty")
+
+    def test_campaign_rejects_panel_missing_required_full_policy_ids(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
+            freeze_dir = Path(tmp) / "freeze"
+            run_dir = Path(tmp) / "runs"
+            freeze = _run_cli(
+                [
+                    "freeze-pilot",
+                    "--freeze-id",
+                    "gf01-pilot-freeze-campaign-test",
+                    "--split",
+                    "pilot_internal_test",
+                    "--seed-start",
+                    "9300",
+                    "--count",
+                    "2",
+                    "--out-dir",
+                    str(freeze_dir),
+                ]
+            )
+            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
+
+            campaign = _run_cli(
+                [
+                    "pilot-campaign",
+                    "--freeze-dir",
+                    str(freeze_dir),
+                    "--out-dir",
+                    str(run_dir),
+                    "--baseline-panel",
+                    "random,greedy,oracle",
+                ]
+            )
+            self.assertEqual(campaign.returncode, 2, msg=campaign.stdout + campaign.stderr)
+            payload = json.loads(campaign.stdout)
+            self.assertEqual(payload.get("error_type"), "baseline_panel_policy_violation")
+
+    def test_campaign_core_policy_accepts_core_panel(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
+            freeze_dir = Path(tmp) / "freeze"
+            run_dir = Path(tmp) / "runs"
+            freeze = _run_cli(
+                [
+                    "freeze-pilot",
+                    "--freeze-id",
+                    "gf01-pilot-freeze-campaign-test",
+                    "--split",
+                    "pilot_internal_test",
+                    "--seed-start",
+                    "9300",
+                    "--count",
+                    "2",
+                    "--out-dir",
+                    str(freeze_dir),
+                ]
+            )
+            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
+
+            campaign = _run_cli(
+                [
+                    "pilot-campaign",
+                    "--freeze-dir",
+                    str(freeze_dir),
+                    "--out-dir",
+                    str(run_dir),
+                    "--baseline-panel",
+                    "random,greedy,oracle",
+                    "--baseline-policy-level",
+                    "core",
+                ]
+            )
+            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
+            payload = json.loads(campaign.stdout)
+            self.assertEqual(payload.get("baseline_policy_level"), "core")
+            self.assertEqual(payload.get("row_count"), 6)
 
 
 if __name__ == "__main__":
