@@ -81,6 +81,8 @@ class TestPilotCampaign(unittest.TestCase):
             self.assertEqual(summary.get("row_count"), 10)
             self.assertEqual(summary.get("baseline_policy_version"), "gf01.baseline_panel_policy.v1")
             self.assertEqual(summary.get("baseline_policy_level"), "full")
+            self.assertEqual(summary.get("renderer_policy_version"), "gf01.renderer_policy.v1")
+            self.assertEqual(summary.get("renderer_profile_id"), "canonical-json-v1")
 
             runs_path = Path(summary["runs_path"])
             val_path = Path(summary["validation_path"])
@@ -106,6 +108,8 @@ class TestPilotCampaign(unittest.TestCase):
             )
             self.assertTrue(all(bool(str(row.get("tool_log_hash", "")).strip()) for row in ta_rows))
             self.assertTrue(all(bool(str(row.get("tool_log_hash", "")).strip()) for row in oc_rows))
+            self.assertTrue(all(row.get("renderer_policy_version") == "gf01.renderer_policy.v1" for row in rows))
+            self.assertTrue(all(row.get("renderer_profile_id") == "canonical-json-v1" for row in rows))
             self.assertTrue(all(row.get("adaptation_condition") == "no_adaptation" for row in rows))
             self.assertTrue(all(int(row.get("adaptation_budget_tokens", -1)) == 0 for row in rows))
             self.assertTrue(all(row.get("adaptation_data_scope") == "none" for row in rows))

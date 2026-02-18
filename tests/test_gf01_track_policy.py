@@ -41,6 +41,22 @@ def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 class TestTrackPolicyCli(unittest.TestCase):
+    def test_evaluate_rejects_unknown_renderer_track(self) -> None:
+        proc = _run_cli(
+            [
+                "evaluate",
+                "--instances",
+                str(BUNDLE),
+                "--agent",
+                "greedy",
+                "--renderer-track",
+                "barcode-v9",
+            ]
+        )
+        self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("error_type"), "renderer_policy_violation")
+
     def test_evaluate_rejects_ta_without_tool_metadata(self) -> None:
         proc = _run_cli(
             [

@@ -49,6 +49,13 @@ ALLOWED_ADAPTATION_DATA_SCOPES = (
     "public_only",
     "public_plus_external",
 )
+RENDERER_POLICY_VERSION = "gf01.renderer_policy.v1"
+ALLOWED_RENDERER_TRACKS = ("json", "visual")
+RENDERER_PROFILE_BY_TRACK = {
+    "json": "canonical-json-v1",
+    "visual": "GF-01-R1",
+}
+ALLOWED_RENDERER_PROFILE_IDS = tuple(sorted(RENDERER_PROFILE_BY_TRACK.values()))
 BASELINE_PANEL_POLICY_VERSION = "gf01.baseline_panel_policy.v1"
 ALLOWED_BASELINE_PANEL_LEVELS = ("full", "core")
 BASELINE_PANEL_CORE = ("random", "greedy", "oracle")
@@ -84,6 +91,8 @@ REQUIRED_RUN_FIELDS = (
     "instance_id",
     "eval_track",
     "renderer_track",
+    "renderer_policy_version",
+    "renderer_profile_id",
     "agent_name",
     "certificate",
     "suff",
@@ -125,6 +134,10 @@ def config_hash(cfg: Any) -> str:
     if is_dataclass(cfg):
         return stable_hash_json(asdict(cfg))
     return stable_hash_json(cfg)
+
+
+def renderer_profile_for_track(renderer_track: str) -> str:
+    return RENDERER_PROFILE_BY_TRACK.get(str(renderer_track).strip(), "unknown")
 
 
 def current_git_commit() -> str:

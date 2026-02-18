@@ -27,6 +27,7 @@ from .meta import (
     ALLOWED_EVAL_TRACKS,
     ALLOWED_ADAPTATION_CONDITIONS,
     ALLOWED_ADAPTATION_DATA_SCOPES,
+    ALLOWED_RENDERER_TRACKS,
     ALLOWED_MODES,
     ALLOWED_PLAY_PROTOCOLS,
     ALLOWED_TOOL_ALLOWLISTS_BY_TRACK,
@@ -36,8 +37,10 @@ from .meta import (
     FAMILY_ID,
     GENERATOR_VERSION,
     HARNESS_VERSION,
+    RENDERER_POLICY_VERSION,
     REQUIRED_MANIFEST_FIELDS,
     REQUIRED_RUN_FIELDS,
+    renderer_profile_for_track,
     RUN_RECORD_SCHEMA_VERSION,
     SPLIT_MANIFEST_SCHEMA_VERSION,
     stable_hash_json,
@@ -104,6 +107,23 @@ def _adaptation_policy_error(
         return f"{adaptation_condition} requires adaptation_data_scope!=none"
     if not protocol or protocol.lower() == "none" or protocol.lower() == "unknown":
         return f"{adaptation_condition} requires non-empty adaptation_protocol_id"
+    return None
+
+
+def _renderer_policy_error(
+    renderer_track: str,
+    renderer_profile_id: str,
+) -> str | None:
+    track = str(renderer_track).strip()
+    profile = str(renderer_profile_id).strip()
+    if track not in ALLOWED_RENDERER_TRACKS:
+        return f"renderer_track={track} not in {list(ALLOWED_RENDERER_TRACKS)}"
+    expected = renderer_profile_for_track(track)
+    if profile != expected:
+        return (
+            f"renderer_profile_id={profile} must match {expected} "
+            f"for renderer_track={track}"
+        )
     return None
 
 
@@ -254,6 +274,14 @@ def run_record_to_dict(
         "instance_id": record.instance_id,
         "eval_track": record.eval_track,
         "renderer_track": record.renderer_track,
+        "renderer_policy_version": run_meta.get(
+            "renderer_policy_version",
+            RENDERER_POLICY_VERSION,
+        ),
+        "renderer_profile_id": run_meta.get(
+            "renderer_profile_id",
+            renderer_profile_for_track(record.renderer_track),
+        ),
         "agent_name": record.agent_name,
         "certificate": [atom.to_tuple() for atom in record.certificate],
         "suff": bool(record.suff),
@@ -364,6 +392,13 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
             if tool_policy_error is not None:
                 errors.append(f"row {idx}: {tool_policy_error}")
 
+        renderer_err = _renderer_policy_error(
+            renderer_track=str(row.get("renderer_track", "")),
+            renderer_profile_id=str(row.get("renderer_profile_id", "")),
+        )
+        if renderer_err is not None:
+            errors.append(f"row {idx}: {renderer_err}")
+
         mode = str(row.get("mode"))
         if mode not in ALLOWED_MODES:
             errors.append(f"row {idx}: mode={mode} not in {list(ALLOWED_MODES)}")
@@ -417,6 +452,8 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
                 "tool_allowlist_id",
                 "play_protocol",
                 "renderer_track",
+                "renderer_policy_version",
+                "renderer_profile_id",
                 "split_id",
                 "agent_name",
                 "adaptation_policy_version",
@@ -592,6 +629,19 @@ def migrate_run_rows(
 
         _fill(item, "eval_track", defaults.get("eval_track", "EVAL-CB"))
         _fill(item, "renderer_track", defaults.get("renderer_track", "json"))
+        _fill(
+            item,
+            "renderer_policy_version",
+            defaults.get("renderer_policy_version", RENDERER_POLICY_VERSION),
+        )
+        _fill(
+            item,
+            "renderer_profile_id",
+            defaults.get(
+                "renderer_profile_id",
+                renderer_profile_for_track(str(item.get("renderer_track", "json"))),
+            ),
+        )
         _fill(item, "agent_name", defaults.get("agent_name", "legacy-agent"))
 
         _fill(item, "split_id", manifest_entry.get("split_id"))
@@ -615,6 +665,9 @@ def migrate_run_rows(
         if str(item.get("play_protocol", "")).strip() not in ALLOWED_PLAY_PROTOCOLS:
             item["play_protocol"] = defaults.get("play_protocol", "commit_only")
             _mark(coercion_counts, "play_protocol")
+        if str(item.get("renderer_track", "")).strip() not in ALLOWED_RENDERER_TRACKS:
+            item["renderer_track"] = defaults.get("renderer_track", "json")
+            _mark(coercion_counts, "renderer_track")
 
         if str(item.get("adaptation_policy_version", "")).strip() in {"", "unknown"}:
             item["adaptation_policy_version"] = defaults.get(
@@ -622,6 +675,22 @@ def migrate_run_rows(
                 ADAPTATION_POLICY_VERSION,
             )
             _mark(coercion_counts, "adaptation_policy_version")
+        if str(item.get("renderer_policy_version", "")).strip() in {"", "unknown"}:
+            item["renderer_policy_version"] = defaults.get(
+                "renderer_policy_version",
+                RENDERER_POLICY_VERSION,
+            )
+            _mark(coercion_counts, "renderer_policy_version")
+
+        renderer_track = str(item.get("renderer_track", "json")).strip()
+        renderer_profile_id = str(item.get("renderer_profile_id", "")).strip()
+        renderer_err = _renderer_policy_error(
+            renderer_track=renderer_track,
+            renderer_profile_id=renderer_profile_id,
+        )
+        if renderer_err is not None:
+            item["renderer_profile_id"] = renderer_profile_for_track(renderer_track)
+            _mark(coercion_counts, "renderer_profile_id")
 
         eval_track = str(item.get("eval_track", "EVAL-CB")).strip()
         allowlist = str(item.get("tool_allowlist_id", "")).strip()
@@ -758,6 +827,18 @@ def migrate_run_rows(
         _fill(item, "valid", False, treat_unknown_as_missing=False)
         _fill(item, "play_protocol", "commit_only", treat_unknown_as_missing=False)
         _fill(item, "scored_commit_episode", True, treat_unknown_as_missing=False)
+        _fill(
+            item,
+            "renderer_policy_version",
+            RENDERER_POLICY_VERSION,
+            treat_unknown_as_missing=False,
+        )
+        _fill(
+            item,
+            "renderer_profile_id",
+            renderer_profile_for_track(str(item.get("renderer_track", "json"))),
+            treat_unknown_as_missing=False,
+        )
         _fill(
             item,
             "adaptation_policy_version",

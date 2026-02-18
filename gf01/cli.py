@@ -58,6 +58,7 @@ from .meta import (
     ALLOWED_BASELINE_PANEL_LEVELS,
     ALLOWED_MODES,
     ALLOWED_PLAY_PROTOCOLS,
+    ALLOWED_RENDERER_TRACKS,
     ALLOWED_TOOL_ALLOWLISTS_BY_TRACK,
     BASELINE_PANEL_CORE,
     BASELINE_PANEL_FULL,
@@ -74,6 +75,8 @@ from .meta import (
     INSTANCE_BUNDLE_SCHEMA_VERSION,
     OFFICIAL_SPLITS,
     PILOT_FREEZE_SCHEMA_VERSION,
+    RENDERER_POLICY_VERSION,
+    renderer_profile_for_track,
     RUN_RECORD_SCHEMA_VERSION,
     SPLIT_POLICY_VERSION,
     config_hash,
@@ -304,6 +307,27 @@ def _baseline_panel_policy_message(
     return None
 
 
+def _renderer_policy_message(
+    *,
+    renderer_track: str,
+    renderer_profile_id: str,
+) -> str | None:
+    track = str(renderer_track).strip()
+    profile = str(renderer_profile_id).strip()
+    if track not in ALLOWED_RENDERER_TRACKS:
+        return (
+            f"unsupported renderer_track {track}; "
+            f"expected one of {list(ALLOWED_RENDERER_TRACKS)}"
+        )
+    expected = renderer_profile_for_track(track)
+    if profile != expected:
+        return (
+            f"renderer_profile_id {profile} must match {expected} "
+            f"for renderer_track {track}"
+        )
+    return None
+
+
 def _parse_split_ratio_arg(text: str) -> dict[str, float]:
     ratio_map: dict[str, float] = {}
     for part in text.split(","):
@@ -522,7 +546,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     instances, bundle_meta = load_instance_bundle(args.instances)
     agent = make_agent(args.agent)
     eval_track = str(args.eval_track).strip()
-    renderer_track = args.renderer_track
+    renderer_track = str(args.renderer_track).strip()
+    renderer_profile_id = renderer_profile_for_track(renderer_track)
     agent_id = str(args.agent).strip().lower()
     tool_allowlist_id = str(args.tool_allowlist_id).strip()
     tool_log_hash = str(args.tool_log_hash).strip()
@@ -538,6 +563,24 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
                     "status": "error",
                     "error_type": "track_policy_violation",
                     "message": f"unsupported eval_track {eval_track}",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    renderer_msg = _renderer_policy_message(
+        renderer_track=renderer_track,
+        renderer_profile_id=renderer_profile_id,
+    )
+    if renderer_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "renderer_policy_violation",
+                    "message": renderer_msg,
                 },
                 indent=2,
                 sort_keys=True,
@@ -624,6 +667,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "tool_log_hash": tool_log_hash,
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
+        "renderer_policy_version": RENDERER_POLICY_VERSION,
+        "renderer_profile_id": renderer_profile_id,
         "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
         "adaptation_condition": adaptation_condition,
         "adaptation_budget_tokens": adaptation_budget_tokens,
@@ -656,6 +701,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "tool_allowlist_id": tool_allowlist_id or "none",
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
+        "renderer_policy_version": RENDERER_POLICY_VERSION,
+        "renderer_profile_id": renderer_profile_id,
         "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
         "adaptation_condition": adaptation_condition,
         "adaptation_budget_tokens": adaptation_budget_tokens,
@@ -696,7 +743,7 @@ def _build_report_payload(
     coverage_payload: dict[str, object] | None,
 ) -> dict[str, object]:
     groups: dict[
-        tuple[str, str, str, str, str, bool, str, int, str, str],
+        tuple[str, str, str, str, str, bool, str, int, str, str, str],
         list[dict[str, object]],
     ] = {}
     for row in rows:
@@ -707,6 +754,7 @@ def _build_report_payload(
         key = (
             str(row.get("eval_track", "unknown")),
             str(row.get("renderer_track", "unknown")),
+            str(row.get("renderer_profile_id", "unknown")),
             str(row.get("split_id", "unknown")),
             str(row.get("mode", "unknown")),
             str(row.get("play_protocol", "unknown")),
@@ -723,6 +771,7 @@ def _build_report_payload(
         (
             eval_track,
             renderer_track,
+            renderer_profile_id,
             split_id,
             mode,
             play_protocol,
@@ -741,6 +790,7 @@ def _build_report_payload(
             {
                 "eval_track": eval_track,
                 "renderer_track": renderer_track,
+                "renderer_profile_id": renderer_profile_id,
                 "split_id": split_id,
                 "mode": mode,
                 "play_protocol": play_protocol,
@@ -797,6 +847,8 @@ def _cmd_migrate_runs(args: argparse.Namespace) -> int:
     rows = load_jsonl(args.runs)
     manifest: dict[str, object] | None = load_json(args.manifest) if args.manifest else None
     default_eval_track = str(args.default_eval_track).strip()
+    default_renderer_track = str(args.default_renderer_track).strip()
+    renderer_profile_id = renderer_profile_for_track(default_renderer_track)
     if default_eval_track not in ALLOWED_EVAL_TRACKS:
         print(
             json.dumps(
@@ -804,6 +856,24 @@ def _cmd_migrate_runs(args: argparse.Namespace) -> int:
                     "status": "error",
                     "error_type": "track_policy_violation",
                     "message": f"unsupported default_eval_track {default_eval_track}",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    renderer_msg = _renderer_policy_message(
+        renderer_track=default_renderer_track,
+        renderer_profile_id=renderer_profile_id,
+    )
+    if renderer_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "renderer_policy_violation",
+                    "message": renderer_msg,
                 },
                 indent=2,
                 sort_keys=True,
@@ -884,13 +954,15 @@ def _cmd_migrate_runs(args: argparse.Namespace) -> int:
         "tool_log_hash": tool_log_hash,
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
+        "renderer_policy_version": RENDERER_POLICY_VERSION,
+        "renderer_profile_id": renderer_profile_id,
         "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
         "adaptation_condition": adaptation_condition,
         "adaptation_budget_tokens": adaptation_budget_tokens,
         "adaptation_data_scope": adaptation_data_scope,
         "adaptation_protocol_id": adaptation_protocol_id or "none",
         "eval_track": default_eval_track,
-        "renderer_track": args.default_renderer_track,
+        "renderer_track": default_renderer_track,
         "agent_name": args.default_agent_name,
         "split_id": args.default_split_id,
         "mode": args.default_mode,
@@ -1220,6 +1292,8 @@ def _cmd_play(args: argparse.Namespace) -> int:
         return 2
 
     eval_track = str(args.eval_track).strip()
+    renderer_track = str(args.renderer_track).strip()
+    renderer_profile_id = renderer_profile_for_track(renderer_track)
     tool_allowlist_id = str(args.tool_allowlist_id).strip()
     tool_log_hash = str(args.tool_log_hash).strip()
     adaptation_condition = str(args.adaptation_condition).strip()
@@ -1234,6 +1308,24 @@ def _cmd_play(args: argparse.Namespace) -> int:
                     "status": "error",
                     "error_type": "track_policy_violation",
                     "message": f"unsupported eval_track {eval_track}",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    renderer_msg = _renderer_policy_message(
+        renderer_track=renderer_track,
+        renderer_profile_id=renderer_profile_id,
+    )
+    if renderer_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "renderer_policy_violation",
+                    "message": renderer_msg,
                 },
                 indent=2,
                 sort_keys=True,
@@ -1316,11 +1408,11 @@ def _cmd_play(args: argparse.Namespace) -> int:
         policy = scripted_policy(actions_by_t)
         actor = "scripted-policy"
     else:
-        policy = human_policy(renderer_track=args.renderer_track)
+        policy = human_policy(renderer_track=renderer_track)
         actor = "human-interactive"
 
     try:
-        result = run_episode(instance, policy, renderer_track=args.renderer_track)
+        result = run_episode(instance, policy, renderer_track=renderer_track)
     except ValueError as exc:
         print(
             json.dumps(
@@ -1340,7 +1432,9 @@ def _cmd_play(args: argparse.Namespace) -> int:
         "actor": actor,
         "run_contract": {
             "eval_track": eval_track,
-            "renderer_track": args.renderer_track,
+            "renderer_track": renderer_track,
+            "renderer_policy_version": RENDERER_POLICY_VERSION,
+            "renderer_profile_id": renderer_profile_id,
             "tool_allowlist_id": tool_allowlist_id or "none",
             "tool_log_hash": tool_log_hash,
             "play_protocol": "commit_only",
@@ -1418,6 +1512,26 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
         )
         return 2
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    renderer_track = str(args.renderer_track).strip()
+    renderer_profile_id = renderer_profile_for_track(renderer_track)
+    renderer_msg = _renderer_policy_message(
+        renderer_track=renderer_track,
+        renderer_profile_id=renderer_profile_id,
+    )
+    if renderer_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "renderer_policy_violation",
+                    "message": renderer_msg,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
 
     instances, bundle_meta = load_instance_bundle(str(bundle_path))
     instance_lookup = {inst.instance_id: inst for inst in instances}
@@ -1543,7 +1657,7 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
             agent=agent,
             instances=instances,
             eval_track=eval_track,
-            renderer_track=args.renderer_track,
+            renderer_track=renderer_track,
             seed=args.seed + idx,
         )
         run_meta = {
@@ -1558,6 +1672,8 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
             "tool_log_hash": tool_log_hash,
             "play_protocol": "commit_only",
             "scored_commit_episode": True,
+            "renderer_policy_version": RENDERER_POLICY_VERSION,
+            "renderer_profile_id": renderer_profile_id,
             "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
             "adaptation_condition": adaptation_condition,
             "adaptation_budget_tokens": adaptation_budget_tokens,
@@ -1620,6 +1736,7 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
         "validation_path": str(validation_path),
         "report_path": str(report_path),
         "row_count": len(rows),
+        "renderer_track": renderer_track,
         "baseline_policy_version": BASELINE_PANEL_POLICY_VERSION,
         "baseline_policy_level": baseline_policy_level,
         "baseline_panel_required": (
@@ -1627,6 +1744,8 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
             if baseline_policy_level == "full"
             else list(BASELINE_PANEL_CORE)
         ),
+        "renderer_policy_version": RENDERER_POLICY_VERSION,
+        "renderer_profile_id": renderer_profile_id,
         "baseline_panel": panel,
         "external_runs_count": len(args.external_runs),
         "adaptation_condition": adaptation_condition,
@@ -1682,7 +1801,7 @@ def _assign_complexity_quartiles(
 
 def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     grouped: dict[
-        tuple[str, str, str, str, bool, str, int, str, str],
+        tuple[str, str, str, str, str, str, bool, str, int, str, str],
         list[dict[str, object]],
     ] = defaultdict(list)
     for row in rows:
@@ -1694,6 +1813,8 @@ def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]
             str(row.get("agent_name", "unknown")),
             str(row.get("eval_track", "unknown")),
             str(row.get("mode", "unknown")),
+            str(row.get("renderer_track", "unknown")),
+            str(row.get("renderer_profile_id", "unknown")),
             str(row.get("play_protocol", "unknown")),
             bool(row.get("scored_commit_episode", True)),
             str(row.get("adaptation_condition", "unknown")),
@@ -1709,6 +1830,8 @@ def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]
             agent_name,
             eval_track,
             mode,
+            renderer_track,
+            renderer_profile_id,
             play_protocol,
             scored_commit_episode,
             adaptation_condition,
@@ -1722,6 +1845,8 @@ def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]
                 "agent_name": agent_name,
                 "eval_track": eval_track,
                 "mode": mode,
+                "renderer_track": renderer_track,
+                "renderer_profile_id": renderer_profile_id,
                 "play_protocol": play_protocol,
                 "scored_commit_episode": scored_commit_episode,
                 "adaptation_condition": adaptation_condition,
@@ -2200,7 +2325,12 @@ def build_parser() -> argparse.ArgumentParser:
             "'core' requires random,greedy,oracle."
         ),
     )
-    p_campaign.add_argument("--renderer-track", type=str, default="json", choices=["json", "visual"])
+    p_campaign.add_argument(
+        "--renderer-track",
+        type=str,
+        default="json",
+        choices=list(ALLOWED_RENDERER_TRACKS),
+    )
     p_campaign.add_argument("--seed", type=int, default=1100)
     p_campaign.add_argument(
         "--tool-allowlist-id",
@@ -2293,7 +2423,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_play.add_argument("--agent", type=str, default="", help="Optional baseline policy id")
     p_play.add_argument("--script", type=str, default="", help="Optional action script JSON")
-    p_play.add_argument("--renderer-track", type=str, choices=["json", "visual"], default="visual")
+    p_play.add_argument(
+        "--renderer-track",
+        type=str,
+        choices=list(ALLOWED_RENDERER_TRACKS),
+        default="visual",
+    )
     p_play.add_argument("--eval-track", type=str, default="EVAL-CB", choices=list(ALLOWED_EVAL_TRACKS))
     p_play.add_argument("--tool-allowlist-id", type=str, default="none")
     p_play.add_argument("--tool-log-hash", type=str, default="")

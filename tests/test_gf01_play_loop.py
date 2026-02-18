@@ -46,6 +46,8 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(payload.get("status"), "ok")
         run_contract = payload.get("run_contract", {})
         self.assertEqual(run_contract.get("renderer_track"), "json")
+        self.assertEqual(run_contract.get("renderer_policy_version"), "gf01.renderer_policy.v1")
+        self.assertEqual(run_contract.get("renderer_profile_id"), "canonical-json-v1")
         self.assertEqual(run_contract.get("eval_track"), "EVAL-CB")
         self.assertEqual(run_contract.get("tool_allowlist_id"), "none")
         self.assertEqual(run_contract.get("play_protocol"), "commit_only")
@@ -125,6 +127,7 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(payload.get("status"), "ok")
         run_contract = payload.get("run_contract", {})
         self.assertEqual(run_contract.get("eval_track"), "EVAL-TA")
+        self.assertEqual(run_contract.get("renderer_profile_id"), "canonical-json-v1")
         self.assertEqual(run_contract.get("tool_allowlist_id"), "local-planner-v1")
         self.assertEqual(run_contract.get("play_protocol"), "commit_only")
         self.assertEqual(run_contract.get("scored_commit_episode"), True)
@@ -173,6 +176,7 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(payload.get("status"), "ok")
         run_contract = payload.get("run_contract", {})
         self.assertEqual(run_contract.get("eval_track"), "EVAL-OC")
+        self.assertEqual(run_contract.get("renderer_profile_id"), "canonical-json-v1")
         self.assertEqual(run_contract.get("tool_allowlist_id"), "oracle-exact-search-v1")
 
     def test_play_rejects_invalid_adaptation_combo(self) -> None:

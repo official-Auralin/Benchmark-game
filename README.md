@@ -227,6 +227,12 @@ Allowed `tool_allowlist_id` values:
 `python3 -m gf01 play` enforces these constraints at runtime and logs a
 machine-checkable `run_contract` block in output.
 
+Renderer policy (`gf01.renderer_policy.v1`) is also enforced:
+
+- `renderer_track=json` requires `renderer_profile_id=canonical-json-v1`.
+- `renderer_track=visual` requires `renderer_profile_id=GF-01-R1`.
+- No other renderer profiles are accepted in current official runtime paths.
+
 Adaptation/fine-tuning metadata policy (`gf01.adaptation_policy.v1`) is also
 enforced for `play`, `evaluate`, `pilot-campaign`, and `migrate-runs`:
 
@@ -264,6 +270,8 @@ The `run_contract` also includes:
 
 - `play_protocol` (`commit_only`)
 - `scored_commit_episode` (`true`)
+- `renderer_policy_version` (`gf01.renderer_policy.v1`)
+- `renderer_profile_id` (`canonical-json-v1` for JSON track, `GF-01-R1` for visual track)
 
 Defaults:
 
