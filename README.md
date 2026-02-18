@@ -191,6 +191,7 @@ same payload to stdout.
 A reproducible notebook is provided at:
 
 - `research_pack/49_phase_g14_4_hyp018_matched_mode_campaign.ipynb`
+- `research_pack/50_phase_g14_4_hyp018_trend_analysis.ipynb`
 
 The notebook:
 
@@ -204,6 +205,7 @@ The notebook:
 Default artifact output location:
 
 - `pilot_runs/hyp018_matched_mode_v1/artifacts`
+- trend-summary outputs: `pilot_runs/hyp018_trend_summary/`
 
 ## Track policy summary
 
