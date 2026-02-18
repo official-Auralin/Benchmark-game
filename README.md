@@ -186,26 +186,19 @@ python3 -m gf01 pilot-analyze \
 This writes `pilot_analysis.json` inside the campaign directory and prints the
 same payload to stdout.
 
-## Deterministic Notebook Campaign (HYP-018)
+## Deterministic HYP-018 artifacts (CLI-first)
 
-A reproducible notebook is provided at:
+Use freeze + pilot campaign + pilot analyze commands to generate deterministic
+paired-mode artifacts (windowed `normal` vs exact-time `hard`) from explicit
+seed lists.
 
-- `research_pack/49_phase_g14_4_hyp018_matched_mode_campaign.ipynb`
-- `research_pack/50_phase_g14_4_hyp018_trend_analysis.ipynb`
+Typical output locations:
 
-The notebook:
+- paired run artifacts: `pilot_runs/hyp018_matched_mode_*/artifacts`
+- trend summaries (if you aggregate slices): `pilot_runs/hyp018_trend_summary/`
 
-- freezes matched-seed `normal` and `hard` packs,
-- runs paired campaigns with the same baseline panel,
-- computes deterministic comparison tables:
-  - wide summary (`mode_comparison_table.csv` / `.md`),
-  - tall/narrow view (`mode_comparison_tall_table.csv` / `.md`),
-- and exports SVG charts + HTML report artifacts.
-
-Default artifact output location:
-
-- `pilot_runs/hyp018_matched_mode_v1/artifacts`
-- trend-summary outputs: `pilot_runs/hyp018_trend_summary/`
+If you maintain a private research notebook workflow, keep it as an optional
+presentation layer over these same command outputs.
 
 ## Track policy summary
 
