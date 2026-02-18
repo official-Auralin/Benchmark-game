@@ -104,6 +104,10 @@ class TestPilotCampaign(unittest.TestCase):
             )
             self.assertTrue(all(bool(str(row.get("tool_log_hash", "")).strip()) for row in ta_rows))
             self.assertTrue(all(bool(str(row.get("tool_log_hash", "")).strip()) for row in oc_rows))
+            self.assertTrue(all(row.get("adaptation_condition") == "no_adaptation" for row in rows))
+            self.assertTrue(all(int(row.get("adaptation_budget_tokens", -1)) == 0 for row in rows))
+            self.assertTrue(all(row.get("adaptation_data_scope") == "none" for row in rows))
+            self.assertTrue(all(row.get("adaptation_protocol_id") == "none" for row in rows))
 
             val_payload = json.loads(val_path.read_text(encoding="utf-8"))
             self.assertEqual(val_payload.get("status"), "ok")

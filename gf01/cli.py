@@ -51,7 +51,10 @@ from .io import (
     write_run_records_jsonl,
 )
 from .meta import (
+    ADAPTATION_POLICY_VERSION,
     ALLOWED_EVAL_TRACKS,
+    ALLOWED_ADAPTATION_CONDITIONS,
+    ALLOWED_ADAPTATION_DATA_SCOPES,
     ALLOWED_MODES,
     ALLOWED_PLAY_PROTOCOLS,
     ALLOWED_TOOL_ALLOWLISTS_BY_TRACK,
@@ -214,6 +217,43 @@ def _track_tool_policy_message(
         return f"{eval_track} requires a non-empty tool_log_hash"
     if tool_hash.lower() == "unknown":
         return f"{eval_track} requires tool_log_hash != unknown"
+    return None
+
+
+def _adaptation_policy_message(
+    *,
+    adaptation_condition: str,
+    adaptation_budget_tokens: int,
+    adaptation_data_scope: str,
+    adaptation_protocol_id: str,
+) -> str | None:
+    if adaptation_condition not in ALLOWED_ADAPTATION_CONDITIONS:
+        return (
+            f"unsupported adaptation_condition {adaptation_condition}; "
+            f"expected one of {list(ALLOWED_ADAPTATION_CONDITIONS)}"
+        )
+    if adaptation_data_scope not in ALLOWED_ADAPTATION_DATA_SCOPES:
+        return (
+            f"unsupported adaptation_data_scope {adaptation_data_scope}; "
+            f"expected one of {list(ALLOWED_ADAPTATION_DATA_SCOPES)}"
+        )
+    if adaptation_budget_tokens < 0:
+        return "adaptation_budget_tokens must be >= 0"
+    protocol = str(adaptation_protocol_id).strip()
+    if adaptation_condition == "no_adaptation":
+        if adaptation_budget_tokens != 0:
+            return "no_adaptation requires adaptation_budget_tokens=0"
+        if adaptation_data_scope != "none":
+            return "no_adaptation requires adaptation_data_scope=none"
+        if protocol not in {"", "none"}:
+            return "no_adaptation requires adaptation_protocol_id=none"
+        return None
+    if adaptation_budget_tokens <= 0:
+        return f"{adaptation_condition} requires adaptation_budget_tokens>0"
+    if adaptation_data_scope == "none":
+        return f"{adaptation_condition} requires adaptation_data_scope!=none"
+    if not protocol or protocol.lower() in {"none", "unknown"}:
+        return f"{adaptation_condition} requires non-empty adaptation_protocol_id"
     return None
 
 
@@ -439,6 +479,10 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     agent_id = str(args.agent).strip().lower()
     tool_allowlist_id = str(args.tool_allowlist_id).strip()
     tool_log_hash = str(args.tool_log_hash).strip()
+    adaptation_condition = str(args.adaptation_condition).strip()
+    adaptation_budget_tokens = int(args.adaptation_budget_tokens)
+    adaptation_data_scope = str(args.adaptation_data_scope).strip()
+    adaptation_protocol_id = str(args.adaptation_protocol_id).strip()
 
     if eval_track not in ALLOWED_EVAL_TRACKS:
         print(
@@ -501,6 +545,26 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         )
         return 2
 
+    adaptation_msg = _adaptation_policy_message(
+        adaptation_condition=adaptation_condition,
+        adaptation_budget_tokens=adaptation_budget_tokens,
+        adaptation_data_scope=adaptation_data_scope,
+        adaptation_protocol_id=adaptation_protocol_id,
+    )
+    if adaptation_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "adaptation_policy_violation",
+                    "message": adaptation_msg,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     run_meta = {
         "family_id": bundle_meta.get("family_id", FAMILY_ID),
         "benchmark_version": bundle_meta.get("benchmark_version", BENCHMARK_VERSION),
@@ -513,6 +577,11 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "tool_log_hash": tool_log_hash,
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
+        "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
+        "adaptation_condition": adaptation_condition,
+        "adaptation_budget_tokens": adaptation_budget_tokens,
+        "adaptation_data_scope": adaptation_data_scope,
+        "adaptation_protocol_id": adaptation_protocol_id or "none",
     }
     records, aggregate = evaluate_suite(
         agent=agent,
@@ -540,6 +609,11 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         "tool_allowlist_id": tool_allowlist_id or "none",
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
+        "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
+        "adaptation_condition": adaptation_condition,
+        "adaptation_budget_tokens": adaptation_budget_tokens,
+        "adaptation_data_scope": adaptation_data_scope,
+        "adaptation_protocol_id": adaptation_protocol_id or "none",
         "out_jsonl": args.out,
     }
     print(json.dumps(out, indent=2, sort_keys=True))
@@ -574,8 +648,15 @@ def _build_report_payload(
     strict_mode: bool,
     coverage_payload: dict[str, object] | None,
 ) -> dict[str, object]:
-    groups: dict[tuple[str, str, str, str, str, bool], list[dict[str, object]]] = {}
+    groups: dict[
+        tuple[str, str, str, str, str, bool, str, int, str, str],
+        list[dict[str, object]],
+    ] = {}
     for row in rows:
+        try:
+            adaptation_budget_tokens = int(row.get("adaptation_budget_tokens", 0))
+        except Exception:
+            adaptation_budget_tokens = -1
         key = (
             str(row.get("eval_track", "unknown")),
             str(row.get("renderer_track", "unknown")),
@@ -583,12 +664,27 @@ def _build_report_payload(
             str(row.get("mode", "unknown")),
             str(row.get("play_protocol", "unknown")),
             bool(row.get("scored_commit_episode", True)),
+            str(row.get("adaptation_condition", "unknown")),
+            adaptation_budget_tokens,
+            str(row.get("adaptation_data_scope", "unknown")),
+            str(row.get("adaptation_protocol_id", "unknown")),
         )
         groups.setdefault(key, []).append(row)
 
     report_rows = []
     for key, entries in sorted(groups.items()):
-        eval_track, renderer_track, split_id, mode, play_protocol, scored_commit_episode = key
+        (
+            eval_track,
+            renderer_track,
+            split_id,
+            mode,
+            play_protocol,
+            scored_commit_episode,
+            adaptation_condition,
+            adaptation_budget_tokens,
+            adaptation_data_scope,
+            adaptation_protocol_id,
+        ) = key
         n = len(entries)
         cert_rate = sum(1 for e in entries if bool(e.get("valid", False))) / max(1, n)
         goal_rate = sum(1 for e in entries if bool(e.get("goal", False))) / max(1, n)
@@ -602,6 +698,10 @@ def _build_report_payload(
                 "mode": mode,
                 "play_protocol": play_protocol,
                 "scored_commit_episode": scored_commit_episode,
+                "adaptation_condition": adaptation_condition,
+                "adaptation_budget_tokens": adaptation_budget_tokens,
+                "adaptation_data_scope": adaptation_data_scope,
+                "adaptation_protocol_id": adaptation_protocol_id,
                 "count": n,
                 "certified_rate": cert_rate,
                 "goal_rate": goal_rate,
@@ -700,6 +800,30 @@ def _cmd_migrate_runs(args: argparse.Namespace) -> int:
         )
         return 2
 
+    adaptation_condition = str(args.adaptation_condition).strip()
+    adaptation_budget_tokens = int(args.adaptation_budget_tokens)
+    adaptation_data_scope = str(args.adaptation_data_scope).strip()
+    adaptation_protocol_id = str(args.adaptation_protocol_id).strip()
+    adaptation_msg = _adaptation_policy_message(
+        adaptation_condition=adaptation_condition,
+        adaptation_budget_tokens=adaptation_budget_tokens,
+        adaptation_data_scope=adaptation_data_scope,
+        adaptation_protocol_id=adaptation_protocol_id,
+    )
+    if adaptation_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "adaptation_policy_violation",
+                    "message": adaptation_msg,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     defaults: dict[str, object] = {
         "schema_version": RUN_RECORD_SCHEMA_VERSION,
         "family_id": FAMILY_ID,
@@ -713,6 +837,11 @@ def _cmd_migrate_runs(args: argparse.Namespace) -> int:
         "tool_log_hash": tool_log_hash,
         "play_protocol": "commit_only",
         "scored_commit_episode": True,
+        "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
+        "adaptation_condition": adaptation_condition,
+        "adaptation_budget_tokens": adaptation_budget_tokens,
+        "adaptation_data_scope": adaptation_data_scope,
+        "adaptation_protocol_id": adaptation_protocol_id or "none",
         "eval_track": default_eval_track,
         "renderer_track": args.default_renderer_track,
         "agent_name": args.default_agent_name,
@@ -1046,6 +1175,10 @@ def _cmd_play(args: argparse.Namespace) -> int:
     eval_track = str(args.eval_track).strip()
     tool_allowlist_id = str(args.tool_allowlist_id).strip()
     tool_log_hash = str(args.tool_log_hash).strip()
+    adaptation_condition = str(args.adaptation_condition).strip()
+    adaptation_budget_tokens = int(args.adaptation_budget_tokens)
+    adaptation_data_scope = str(args.adaptation_data_scope).strip()
+    adaptation_protocol_id = str(args.adaptation_protocol_id).strip()
 
     if eval_track not in ALLOWED_EVAL_TRACKS:
         print(
@@ -1073,6 +1206,26 @@ def _cmd_play(args: argparse.Namespace) -> int:
                     "status": "error",
                     "error_type": "track_policy_violation",
                     "message": policy_msg,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    adaptation_msg = _adaptation_policy_message(
+        adaptation_condition=adaptation_condition,
+        adaptation_budget_tokens=adaptation_budget_tokens,
+        adaptation_data_scope=adaptation_data_scope,
+        adaptation_protocol_id=adaptation_protocol_id,
+    )
+    if adaptation_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "adaptation_policy_violation",
+                    "message": adaptation_msg,
                 },
                 indent=2,
                 sort_keys=True,
@@ -1145,6 +1298,11 @@ def _cmd_play(args: argparse.Namespace) -> int:
             "tool_log_hash": tool_log_hash,
             "play_protocol": "commit_only",
             "scored_commit_episode": True,
+            "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
+            "adaptation_condition": adaptation_condition,
+            "adaptation_budget_tokens": adaptation_budget_tokens,
+            "adaptation_data_scope": adaptation_data_scope,
+            "adaptation_protocol_id": adaptation_protocol_id or "none",
         },
         "instance": instance.to_canonical_dict(),
         "episode": result,
@@ -1218,6 +1376,29 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
     instance_lookup = {inst.instance_id: inst for inst in instances}
     rows: list[dict[str, object]] = []
     panel = _panel_ids(args.baseline_panel)
+    adaptation_condition = str(args.adaptation_condition).strip()
+    adaptation_budget_tokens = int(args.adaptation_budget_tokens)
+    adaptation_data_scope = str(args.adaptation_data_scope).strip()
+    adaptation_protocol_id = str(args.adaptation_protocol_id).strip()
+    adaptation_msg = _adaptation_policy_message(
+        adaptation_condition=adaptation_condition,
+        adaptation_budget_tokens=adaptation_budget_tokens,
+        adaptation_data_scope=adaptation_data_scope,
+        adaptation_protocol_id=adaptation_protocol_id,
+    )
+    if adaptation_msg is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "adaptation_policy_violation",
+                    "message": adaptation_msg,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
 
     for idx, agent_id in enumerate(panel):
         agent = make_agent(agent_id)
@@ -1287,6 +1468,11 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
             "tool_log_hash": tool_log_hash,
             "play_protocol": "commit_only",
             "scored_commit_episode": True,
+            "adaptation_policy_version": ADAPTATION_POLICY_VERSION,
+            "adaptation_condition": adaptation_condition,
+            "adaptation_budget_tokens": adaptation_budget_tokens,
+            "adaptation_data_scope": adaptation_data_scope,
+            "adaptation_protocol_id": adaptation_protocol_id or "none",
         }
         for record in records:
             rows.append(
@@ -1346,6 +1532,10 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
         "row_count": len(rows),
         "baseline_panel": panel,
         "external_runs_count": len(args.external_runs),
+        "adaptation_condition": adaptation_condition,
+        "adaptation_budget_tokens": adaptation_budget_tokens,
+        "adaptation_data_scope": adaptation_data_scope,
+        "adaptation_protocol_id": adaptation_protocol_id or "none",
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
@@ -1394,20 +1584,41 @@ def _assign_complexity_quartiles(
 
 
 def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    grouped: dict[tuple[str, str, str, str, bool], list[dict[str, object]]] = defaultdict(list)
+    grouped: dict[
+        tuple[str, str, str, str, bool, str, int, str, str],
+        list[dict[str, object]],
+    ] = defaultdict(list)
     for row in rows:
+        try:
+            adaptation_budget_tokens = int(row.get("adaptation_budget_tokens", 0))
+        except Exception:
+            adaptation_budget_tokens = -1
         key = (
             str(row.get("agent_name", "unknown")),
             str(row.get("eval_track", "unknown")),
             str(row.get("mode", "unknown")),
             str(row.get("play_protocol", "unknown")),
             bool(row.get("scored_commit_episode", True)),
+            str(row.get("adaptation_condition", "unknown")),
+            adaptation_budget_tokens,
+            str(row.get("adaptation_data_scope", "unknown")),
+            str(row.get("adaptation_protocol_id", "unknown")),
         )
         grouped[key].append(row)
 
     summary_rows: list[dict[str, object]] = []
     for key in sorted(grouped):
-        agent_name, eval_track, mode, play_protocol, scored_commit_episode = key
+        (
+            agent_name,
+            eval_track,
+            mode,
+            play_protocol,
+            scored_commit_episode,
+            adaptation_condition,
+            adaptation_budget_tokens,
+            adaptation_data_scope,
+            adaptation_protocol_id,
+        ) = key
         entries = grouped[key]
         summary_rows.append(
             {
@@ -1416,6 +1627,10 @@ def _agent_summary_rows(rows: list[dict[str, object]]) -> list[dict[str, object]
                 "mode": mode,
                 "play_protocol": play_protocol,
                 "scored_commit_episode": scored_commit_episode,
+                "adaptation_condition": adaptation_condition,
+                "adaptation_budget_tokens": adaptation_budget_tokens,
+                "adaptation_data_scope": adaptation_data_scope,
+                "adaptation_protocol_id": adaptation_protocol_id,
                 "count": len(entries),
                 "goal_rate": _analysis_rate(entries, "goal"),
                 "certified_rate": _analysis_rate(entries, "valid"),
@@ -1656,6 +1871,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--seed", type=int, default=0)
     p_eval.add_argument("--tool-allowlist-id", type=str, default="none")
     p_eval.add_argument("--tool-log-hash", type=str, default="")
+    p_eval.add_argument(
+        "--adaptation-condition",
+        type=str,
+        default="no_adaptation",
+        choices=list(ALLOWED_ADAPTATION_CONDITIONS),
+    )
+    p_eval.add_argument("--adaptation-budget-tokens", type=int, default=0)
+    p_eval.add_argument(
+        "--adaptation-data-scope",
+        type=str,
+        default="none",
+        choices=list(ALLOWED_ADAPTATION_DATA_SCOPES),
+    )
+    p_eval.add_argument("--adaptation-protocol-id", type=str, default="none")
     p_eval.add_argument("--out", type=str, default="", help="Optional output JSONL path")
     p_eval.set_defaults(func=_cmd_evaluate)
 
@@ -1710,6 +1939,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_migrate.add_argument("--config-hash", type=str, default="legacy-backfill")
     p_migrate.add_argument("--tool-allowlist-id", type=str, default="none")
     p_migrate.add_argument("--tool-log-hash", type=str, default="")
+    p_migrate.add_argument(
+        "--adaptation-condition",
+        type=str,
+        default="no_adaptation",
+        choices=list(ALLOWED_ADAPTATION_CONDITIONS),
+    )
+    p_migrate.add_argument("--adaptation-budget-tokens", type=int, default=0)
+    p_migrate.add_argument(
+        "--adaptation-data-scope",
+        type=str,
+        default="none",
+        choices=list(ALLOWED_ADAPTATION_DATA_SCOPES),
+    )
+    p_migrate.add_argument("--adaptation-protocol-id", type=str, default="none")
     p_migrate.add_argument(
         "--default-eval-track",
         type=str,
@@ -1866,6 +2109,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to external run JSONL (repeatable)",
     )
     p_campaign.add_argument(
+        "--adaptation-condition",
+        type=str,
+        default="no_adaptation",
+        choices=list(ALLOWED_ADAPTATION_CONDITIONS),
+    )
+    p_campaign.add_argument("--adaptation-budget-tokens", type=int, default=0)
+    p_campaign.add_argument(
+        "--adaptation-data-scope",
+        type=str,
+        default="none",
+        choices=list(ALLOWED_ADAPTATION_DATA_SCOPES),
+    )
+    p_campaign.add_argument("--adaptation-protocol-id", type=str, default="none")
+    p_campaign.add_argument(
         "--force",
         action="store_true",
         help="Overwrite an existing non-empty output directory",
@@ -1932,6 +2189,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_play.add_argument("--eval-track", type=str, default="EVAL-CB", choices=list(ALLOWED_EVAL_TRACKS))
     p_play.add_argument("--tool-allowlist-id", type=str, default="none")
     p_play.add_argument("--tool-log-hash", type=str, default="")
+    p_play.add_argument(
+        "--adaptation-condition",
+        type=str,
+        default="no_adaptation",
+        choices=list(ALLOWED_ADAPTATION_CONDITIONS),
+    )
+    p_play.add_argument("--adaptation-budget-tokens", type=int, default=0)
+    p_play.add_argument(
+        "--adaptation-data-scope",
+        type=str,
+        default="none",
+        choices=list(ALLOWED_ADAPTATION_DATA_SCOPES),
+    )
+    p_play.add_argument("--adaptation-protocol-id", type=str, default="none")
     p_play.add_argument("--out", type=str, default="", help="Optional output JSON path")
     p_play.set_defaults(func=_cmd_play)
     return parser

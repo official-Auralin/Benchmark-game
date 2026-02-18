@@ -216,6 +216,40 @@ Allowed `tool_allowlist_id` values:
 
 `python3 -m gf01 play` enforces these constraints at runtime and logs a
 machine-checkable `run_contract` block in output.
+
+Adaptation/fine-tuning metadata policy (`gf01.adaptation_policy.v1`) is also
+enforced for `play`, `evaluate`, `pilot-campaign`, and `migrate-runs`:
+
+- `no_adaptation` requires:
+  - `adaptation_budget_tokens=0`
+  - `adaptation_data_scope=none`
+  - `adaptation_protocol_id=none`
+- `prompt_adaptation` or `weight_finetune` requires:
+  - `adaptation_budget_tokens>0`
+  - `adaptation_data_scope` in `public_only` or `public_plus_external`
+  - non-empty `adaptation_protocol_id`
+
+Relevant CLI flags:
+
+- `--adaptation-condition {no_adaptation,prompt_adaptation,weight_finetune}`
+- `--adaptation-budget-tokens <int>`
+- `--adaptation-data-scope {none,public_only,public_plus_external}`
+- `--adaptation-protocol-id <string>`
+
+Example adapted condition:
+
+```bash
+python3 -m gf01 evaluate \
+  --seed 1337 \
+  --eval-track EVAL-TA \
+  --tool-allowlist-id local-planner-v1 \
+  --tool-log-hash demo_tool_log_hash \
+  --adaptation-condition weight_finetune \
+  --adaptation-budget-tokens 5000 \
+  --adaptation-data-scope public_only \
+  --adaptation-protocol-id ft-public-v1
+```
+
 The `run_contract` also includes:
 
 - `play_protocol` (`commit_only`)

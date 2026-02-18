@@ -23,7 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from .meta import (
+    ADAPTATION_POLICY_VERSION,
     ALLOWED_EVAL_TRACKS,
+    ALLOWED_ADAPTATION_CONDITIONS,
+    ALLOWED_ADAPTATION_DATA_SCOPES,
     ALLOWED_MODES,
     ALLOWED_PLAY_PROTOCOLS,
     ALLOWED_TOOL_ALLOWLISTS_BY_TRACK,
@@ -65,6 +68,42 @@ def _track_tool_policy_error(
         )
     if not tool_hash or tool_hash.lower() == "unknown":
         return f"{eval_track} requires non-empty tool_log_hash"
+    return None
+
+
+def _adaptation_policy_error(
+    adaptation_condition: str,
+    adaptation_budget_tokens: int,
+    adaptation_data_scope: str,
+    adaptation_protocol_id: str,
+) -> str | None:
+    if adaptation_condition not in ALLOWED_ADAPTATION_CONDITIONS:
+        return (
+            f"adaptation_condition={adaptation_condition} not in "
+            f"{list(ALLOWED_ADAPTATION_CONDITIONS)}"
+        )
+    if adaptation_data_scope not in ALLOWED_ADAPTATION_DATA_SCOPES:
+        return (
+            f"adaptation_data_scope={adaptation_data_scope} not in "
+            f"{list(ALLOWED_ADAPTATION_DATA_SCOPES)}"
+        )
+    if adaptation_budget_tokens < 0:
+        return "adaptation_budget_tokens must be >= 0"
+    protocol = str(adaptation_protocol_id).strip()
+    if adaptation_condition == "no_adaptation":
+        if adaptation_budget_tokens != 0:
+            return "no_adaptation requires adaptation_budget_tokens=0"
+        if adaptation_data_scope != "none":
+            return "no_adaptation requires adaptation_data_scope=none"
+        if protocol not in {"", "none"}:
+            return "no_adaptation requires adaptation_protocol_id=none"
+        return None
+    if adaptation_budget_tokens <= 0:
+        return f"{adaptation_condition} requires adaptation_budget_tokens>0"
+    if adaptation_data_scope == "none":
+        return f"{adaptation_condition} requires adaptation_data_scope!=none"
+    if not protocol or protocol.lower() == "none" or protocol.lower() == "unknown":
+        return f"{adaptation_condition} requires non-empty adaptation_protocol_id"
     return None
 
 
@@ -204,6 +243,14 @@ def run_record_to_dict(
         "tool_log_hash": run_meta.get("tool_log_hash", ""),
         "play_protocol": run_meta.get("play_protocol", "commit_only"),
         "scored_commit_episode": bool(run_meta.get("scored_commit_episode", True)),
+        "adaptation_policy_version": run_meta.get(
+            "adaptation_policy_version",
+            ADAPTATION_POLICY_VERSION,
+        ),
+        "adaptation_condition": run_meta.get("adaptation_condition", "no_adaptation"),
+        "adaptation_budget_tokens": int(run_meta.get("adaptation_budget_tokens", 0)),
+        "adaptation_data_scope": run_meta.get("adaptation_data_scope", "none"),
+        "adaptation_protocol_id": run_meta.get("adaptation_protocol_id", "none"),
         "instance_id": record.instance_id,
         "eval_track": record.eval_track,
         "renderer_track": record.renderer_track,
@@ -328,6 +375,24 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
                 f"not in {list(ALLOWED_PLAY_PROTOCOLS)}"
             )
 
+        adaptation_condition = str(row.get("adaptation_condition", "")).strip()
+        adaptation_data_scope = str(row.get("adaptation_data_scope", "")).strip()
+        adaptation_protocol_id = str(row.get("adaptation_protocol_id", "")).strip()
+        try:
+            adaptation_budget_tokens = int(row.get("adaptation_budget_tokens", 0))
+        except Exception:
+            adaptation_budget_tokens = -1
+            errors.append(f"row {idx}: adaptation_budget_tokens must be integer")
+
+        adaptation_err = _adaptation_policy_error(
+            adaptation_condition=adaptation_condition,
+            adaptation_budget_tokens=adaptation_budget_tokens,
+            adaptation_data_scope=adaptation_data_scope,
+            adaptation_protocol_id=adaptation_protocol_id,
+        )
+        if adaptation_err is not None:
+            errors.append(f"row {idx}: {adaptation_err}")
+
         if not isinstance(row.get("certificate"), list):
             errors.append(f"row {idx}: certificate must be a list")
 
@@ -354,6 +419,10 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
                 "renderer_track",
                 "split_id",
                 "agent_name",
+                "adaptation_policy_version",
+                "adaptation_condition",
+                "adaptation_data_scope",
+                "adaptation_protocol_id",
             ):
                 value = str(row.get(meta_field, "")).strip()
                 if not value or value == "unknown":
@@ -510,6 +579,16 @@ def migrate_run_rows(
             defaults.get("scored_commit_episode", True),
             treat_unknown_as_missing=False,
         )
+        _fill(item, "adaptation_policy_version", defaults.get("adaptation_policy_version", ADAPTATION_POLICY_VERSION))
+        _fill(item, "adaptation_condition", defaults.get("adaptation_condition", "no_adaptation"))
+        _fill(
+            item,
+            "adaptation_budget_tokens",
+            defaults.get("adaptation_budget_tokens", 0),
+            treat_unknown_as_missing=False,
+        )
+        _fill(item, "adaptation_data_scope", defaults.get("adaptation_data_scope", "none"))
+        _fill(item, "adaptation_protocol_id", defaults.get("adaptation_protocol_id", "none"))
 
         _fill(item, "eval_track", defaults.get("eval_track", "EVAL-CB"))
         _fill(item, "renderer_track", defaults.get("renderer_track", "json"))
@@ -537,6 +616,13 @@ def migrate_run_rows(
             item["play_protocol"] = defaults.get("play_protocol", "commit_only")
             _mark(coercion_counts, "play_protocol")
 
+        if str(item.get("adaptation_policy_version", "")).strip() in {"", "unknown"}:
+            item["adaptation_policy_version"] = defaults.get(
+                "adaptation_policy_version",
+                ADAPTATION_POLICY_VERSION,
+            )
+            _mark(coercion_counts, "adaptation_policy_version")
+
         eval_track = str(item.get("eval_track", "EVAL-CB")).strip()
         allowlist = str(item.get("tool_allowlist_id", "")).strip()
         tool_hash = str(item.get("tool_log_hash", "")).strip()
@@ -563,6 +649,58 @@ def migrate_run_rows(
                     }
                 )[:16]
                 _mark(coercion_counts, "tool_log_hash")
+
+        adaptation_condition = str(item.get("adaptation_condition", "no_adaptation")).strip()
+        try:
+            adaptation_budget_tokens = int(item.get("adaptation_budget_tokens", 0))
+        except Exception:
+            adaptation_budget_tokens = 0
+            _mark(coercion_counts, "adaptation_budget_tokens")
+        adaptation_data_scope = str(item.get("adaptation_data_scope", "none")).strip()
+        adaptation_protocol_id = str(item.get("adaptation_protocol_id", "none")).strip()
+
+        if adaptation_condition not in ALLOWED_ADAPTATION_CONDITIONS:
+            adaptation_condition = str(defaults.get("adaptation_condition", "no_adaptation"))
+            item["adaptation_condition"] = adaptation_condition
+            _mark(coercion_counts, "adaptation_condition")
+        if adaptation_data_scope not in ALLOWED_ADAPTATION_DATA_SCOPES:
+            adaptation_data_scope = str(defaults.get("adaptation_data_scope", "none"))
+            item["adaptation_data_scope"] = adaptation_data_scope
+            _mark(coercion_counts, "adaptation_data_scope")
+
+        adaptation_err = _adaptation_policy_error(
+            adaptation_condition=adaptation_condition,
+            adaptation_budget_tokens=adaptation_budget_tokens,
+            adaptation_data_scope=adaptation_data_scope,
+            adaptation_protocol_id=adaptation_protocol_id,
+        )
+        if adaptation_err is not None:
+            if adaptation_condition == "no_adaptation":
+                item["adaptation_budget_tokens"] = 0
+                item["adaptation_data_scope"] = "none"
+                item["adaptation_protocol_id"] = "none"
+                _mark(coercion_counts, "adaptation_budget_tokens")
+                _mark(coercion_counts, "adaptation_data_scope")
+                _mark(coercion_counts, "adaptation_protocol_id")
+            else:
+                if adaptation_budget_tokens <= 0:
+                    item["adaptation_budget_tokens"] = 1
+                    _mark(coercion_counts, "adaptation_budget_tokens")
+                if adaptation_data_scope == "none":
+                    item["adaptation_data_scope"] = str(
+                        defaults.get("adaptation_data_scope", "public_only")
+                    )
+                    _mark(coercion_counts, "adaptation_data_scope")
+                protocol_fixed = str(item.get("adaptation_protocol_id", "")).strip()
+                if not protocol_fixed or protocol_fixed.lower() in {"none", "unknown"}:
+                    item["adaptation_protocol_id"] = stable_hash_json(
+                        {
+                            "migration_row": idx,
+                            "instance_id": item.get("instance_id", ""),
+                            "adaptation_condition": adaptation_condition,
+                        }
+                    )[:16]
+                    _mark(coercion_counts, "adaptation_protocol_id")
 
         cert_before = item.get("certificate")
         cert_after = _sanitize_certificate(cert_before)
@@ -620,6 +758,16 @@ def migrate_run_rows(
         _fill(item, "valid", False, treat_unknown_as_missing=False)
         _fill(item, "play_protocol", "commit_only", treat_unknown_as_missing=False)
         _fill(item, "scored_commit_episode", True, treat_unknown_as_missing=False)
+        _fill(
+            item,
+            "adaptation_policy_version",
+            ADAPTATION_POLICY_VERSION,
+            treat_unknown_as_missing=False,
+        )
+        _fill(item, "adaptation_condition", "no_adaptation", treat_unknown_as_missing=False)
+        _fill(item, "adaptation_budget_tokens", 0, treat_unknown_as_missing=False)
+        _fill(item, "adaptation_data_scope", "none", treat_unknown_as_missing=False)
+        _fill(item, "adaptation_protocol_id", "none", treat_unknown_as_missing=False)
         _fill(item, "ap_f1", 0.0, treat_unknown_as_missing=False)
         _fill(item, "ts_f1", 0.0, treat_unknown_as_missing=False)
 

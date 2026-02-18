@@ -38,6 +38,17 @@ PILOT_FREEZE_SCHEMA_VERSION = "gf01.pilot_freeze.v1"
 ALLOWED_EVAL_TRACKS = ("EVAL-CB", "EVAL-TA", "EVAL-OC")
 ALLOWED_MODES = ("normal", "hard")
 ALLOWED_PLAY_PROTOCOLS = ("commit_only",)
+ADAPTATION_POLICY_VERSION = "gf01.adaptation_policy.v1"
+ALLOWED_ADAPTATION_CONDITIONS = (
+    "no_adaptation",
+    "prompt_adaptation",
+    "weight_finetune",
+)
+ALLOWED_ADAPTATION_DATA_SCOPES = (
+    "none",
+    "public_only",
+    "public_plus_external",
+)
 OFFICIAL_SPLITS = ("public_dev", "public_val", "private_eval")
 SPLIT_POLICY_VERSION = "gf01.split_policy.v1"
 DEFAULT_SPLIT_RATIOS = {
@@ -82,6 +93,11 @@ REQUIRED_RUN_FIELDS = (
     "tool_allowlist_id",
     "play_protocol",
     "scored_commit_episode",
+    "adaptation_policy_version",
+    "adaptation_condition",
+    "adaptation_budget_tokens",
+    "adaptation_data_scope",
+    "adaptation_protocol_id",
 )
 
 REQUIRED_MANIFEST_FIELDS = (

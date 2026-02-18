@@ -50,6 +50,10 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(run_contract.get("tool_allowlist_id"), "none")
         self.assertEqual(run_contract.get("play_protocol"), "commit_only")
         self.assertEqual(run_contract.get("scored_commit_episode"), True)
+        self.assertEqual(run_contract.get("adaptation_condition"), "no_adaptation")
+        self.assertEqual(run_contract.get("adaptation_budget_tokens"), 0)
+        self.assertEqual(run_contract.get("adaptation_data_scope"), "none")
+        self.assertEqual(run_contract.get("adaptation_protocol_id"), "none")
         episode = payload.get("episode", {})
         self.assertIn("certificate", episode)
         self.assertIn("suff", episode)
@@ -124,6 +128,7 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(run_contract.get("tool_allowlist_id"), "local-planner-v1")
         self.assertEqual(run_contract.get("play_protocol"), "commit_only")
         self.assertEqual(run_contract.get("scored_commit_episode"), True)
+        self.assertEqual(run_contract.get("adaptation_condition"), "no_adaptation")
 
     def test_play_rejects_unknown_ta_allowlist(self) -> None:
         proc = _run_cli(
@@ -169,6 +174,28 @@ class TestPlayableLoop(unittest.TestCase):
         run_contract = payload.get("run_contract", {})
         self.assertEqual(run_contract.get("eval_track"), "EVAL-OC")
         self.assertEqual(run_contract.get("tool_allowlist_id"), "oracle-exact-search-v1")
+
+    def test_play_rejects_invalid_adaptation_combo(self) -> None:
+        proc = _run_cli(
+            [
+                "play",
+                "--seed",
+                "1337",
+                "--agent",
+                "greedy",
+                "--adaptation-condition",
+                "weight_finetune",
+                "--adaptation-budget-tokens",
+                "0",
+                "--adaptation-data-scope",
+                "public_only",
+                "--adaptation-protocol-id",
+                "ft-run-v1",
+            ]
+        )
+        self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("error_type"), "adaptation_policy_violation")
 
 
 if __name__ == "__main__":
