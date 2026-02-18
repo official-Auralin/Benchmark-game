@@ -57,13 +57,18 @@ from .meta import (
     ALLOWED_TOOL_ALLOWLISTS_BY_TRACK,
     BENCHMARK_VERSION,
     CHECKER_VERSION,
+    DEFAULT_PRIVATE_EVAL_MIN_COUNT,
+    DEFAULT_SPLIT_RATIOS,
+    DEFAULT_SPLIT_RATIO_TOLERANCE,
     DEFAULT_TOOL_ALLOWLIST_BY_TRACK,
     FAMILY_ID,
     GENERATOR_VERSION,
     HARNESS_VERSION,
     INSTANCE_BUNDLE_SCHEMA_VERSION,
+    OFFICIAL_SPLITS,
     PILOT_FREEZE_SCHEMA_VERSION,
     RUN_RECORD_SCHEMA_VERSION,
+    SPLIT_POLICY_VERSION,
     config_hash,
     current_git_commit,
     stable_hash_json,
@@ -210,6 +215,111 @@ def _track_tool_policy_message(
     if tool_hash.lower() == "unknown":
         return f"{eval_track} requires tool_log_hash != unknown"
     return None
+
+
+def _parse_split_ratio_arg(text: str) -> dict[str, float]:
+    ratio_map: dict[str, float] = {}
+    for part in text.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if "=" not in token:
+            raise ValueError(f"invalid ratio token '{token}' (expected split=value)")
+        split_id, value_text = token.split("=", 1)
+        split_key = split_id.strip()
+        if not split_key:
+            raise ValueError(f"invalid split id in token '{token}'")
+        value = float(value_text.strip())
+        if value < 0.0:
+            raise ValueError(f"ratio for {split_key} must be non-negative")
+        ratio_map[split_key] = value
+    if not ratio_map:
+        raise ValueError("split ratio map is empty")
+    total = sum(ratio_map.values())
+    if total <= 0:
+        raise ValueError("split ratio map must sum to a positive value")
+    return {k: v / total for k, v in ratio_map.items()}
+
+
+def _split_policy_report(
+    manifest: dict[str, object],
+    *,
+    target_ratios: dict[str, float],
+    tolerance: float,
+    private_split_id: str,
+    min_private_eval_count: int,
+    require_official_split_names: bool,
+) -> tuple[dict[str, object], bool]:
+    entries = manifest.get("instances", [])
+    if not isinstance(entries, list):
+        raise ValueError("manifest.instances must be a list")
+    total = len(entries)
+    counts: dict[str, int] = defaultdict(int)
+    invalid_split_entries: list[dict[str, object]] = []
+    allowed_splits = set(OFFICIAL_SPLITS)
+
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            invalid_split_entries.append({"index": idx, "reason": "entry_not_object"})
+            continue
+        split_id = str(entry.get("split_id", "")).strip()
+        if not split_id:
+            invalid_split_entries.append({"index": idx, "reason": "missing_split_id"})
+            continue
+        counts[split_id] += 1
+        if require_official_split_names and split_id not in allowed_splits:
+            invalid_split_entries.append(
+                {"index": idx, "reason": f"unsupported_split_id:{split_id}"}
+            )
+
+    observed_ratios = {
+        split_id: (count / float(total) if total > 0 else 0.0)
+        for split_id, count in sorted(counts.items())
+    }
+    target_rows = []
+    ratio_failures: list[dict[str, object]] = []
+    for split_id in sorted(target_ratios):
+        target = float(target_ratios[split_id])
+        observed = observed_ratios.get(split_id, 0.0)
+        delta = abs(observed - target)
+        row = {
+            "split_id": split_id,
+            "target_ratio": target,
+            "observed_ratio": observed,
+            "delta": delta,
+            "within_tolerance": delta <= tolerance,
+            "count": int(counts.get(split_id, 0)),
+        }
+        target_rows.append(row)
+        if delta > tolerance:
+            ratio_failures.append(row)
+
+    private_count = int(counts.get(private_split_id, 0))
+    private_min_pass = private_count >= int(min_private_eval_count)
+    no_invalid_splits = len(invalid_split_entries) == 0
+    ratio_pass = len(ratio_failures) == 0
+    passed = bool(ratio_pass and no_invalid_splits and private_min_pass)
+
+    report = {
+        "status": "ok" if passed else "error",
+        "error_type": "" if passed else "split_policy_violation",
+        "split_policy_version": SPLIT_POLICY_VERSION,
+        "manifest_schema_version": manifest.get("schema_version", "unknown"),
+        "instance_count": total,
+        "target_ratios": target_ratios,
+        "observed_counts": dict(sorted(counts.items())),
+        "observed_ratios": observed_ratios,
+        "tolerance": float(tolerance),
+        "ratio_checks": target_rows,
+        "ratio_failures": ratio_failures,
+        "require_official_split_names": bool(require_official_split_names),
+        "invalid_split_entries_preview": invalid_split_entries[:20],
+        "private_split_id": private_split_id,
+        "private_eval_count": private_count,
+        "private_eval_min_count": int(min_private_eval_count),
+        "private_min_pass": private_min_pass,
+    }
+    return report, passed
 
 
 def _cmd_demo(args: argparse.Namespace) -> int:
@@ -666,6 +776,70 @@ def _cmd_manifest(args: argparse.Namespace) -> int:
     else:
         print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0
+
+
+def _cmd_split_policy_check(args: argparse.Namespace) -> int:
+    manifest = load_json(args.manifest)
+    manifest_errors = validate_manifest(manifest, strict=bool(args.strict_manifest))
+    if manifest_errors:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "manifest_schema_validation",
+                    "strict_manifest": bool(args.strict_manifest),
+                    "error_count": len(manifest_errors),
+                    "errors_preview": manifest_errors[:50],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    try:
+        target_ratios = _parse_split_ratio_arg(args.target_ratios)
+    except ValueError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "invalid_split_ratio_arg",
+                    "message": str(exc),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    try:
+        report, passed = _split_policy_report(
+            manifest,
+            target_ratios=target_ratios,
+            tolerance=float(args.tolerance),
+            private_split_id=str(args.private_split),
+            min_private_eval_count=int(args.min_private_eval_count),
+            require_official_split_names=bool(args.require_official_split_names),
+        )
+    except ValueError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "split_policy_check_error",
+                    "message": str(exc),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if args.out:
+        write_json(args.out, report)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if passed else 2
 
 
 def _parse_seed_list(seed_text: str) -> list[int]:
@@ -1437,6 +1611,9 @@ def _cmd_pilot_analyze(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="GF-01 benchmark harness CLI")
     sub = parser.add_subparsers(dest="command", required=True)
+    default_ratio_arg = ",".join(
+        f"{split_id}={DEFAULT_SPLIT_RATIOS[split_id]}" for split_id in OFFICIAL_SPLITS
+    )
 
     p_demo = sub.add_parser("demo", help="Run a single-instance baseline demo")
     p_demo.add_argument("--seed", type=int, default=1337)
@@ -1576,6 +1753,48 @@ def build_parser() -> argparse.ArgumentParser:
     p_manifest.add_argument("--instances", type=str, required=True, help="Path to instance JSON")
     p_manifest.add_argument("--out", type=str, default="", help="Optional output manifest path")
     p_manifest.set_defaults(func=_cmd_manifest)
+
+    p_split_policy = sub.add_parser(
+        "split-policy-check",
+        help="Validate a split manifest against publication split-ratio policy",
+    )
+    p_split_policy.add_argument("--manifest", type=str, required=True, help="Path to split manifest JSON")
+    p_split_policy.add_argument(
+        "--target-ratios",
+        type=str,
+        default=default_ratio_arg,
+        help="Comma-separated split ratios (split=value, normalized internally)",
+    )
+    p_split_policy.add_argument(
+        "--tolerance",
+        type=float,
+        default=DEFAULT_SPLIT_RATIO_TOLERANCE,
+        help="Absolute per-split ratio tolerance",
+    )
+    p_split_policy.add_argument(
+        "--private-split",
+        type=str,
+        default="private_eval",
+        help="Split id treated as private official-eval split",
+    )
+    p_split_policy.add_argument(
+        "--min-private-eval-count",
+        type=int,
+        default=DEFAULT_PRIVATE_EVAL_MIN_COUNT,
+        help="Minimum required row count in private split",
+    )
+    p_split_policy.add_argument(
+        "--require-official-split-names",
+        action="store_true",
+        help="Require split IDs to be in OFFICIAL_SPLITS",
+    )
+    p_split_policy.add_argument(
+        "--strict-manifest",
+        action="store_true",
+        help="Apply strict manifest schema/family checks before ratio checks",
+    )
+    p_split_policy.add_argument("--out", type=str, default="", help="Optional output JSON path")
+    p_split_policy.set_defaults(func=_cmd_split_policy_check)
 
     p_freeze = sub.add_parser(
         "freeze-pilot",

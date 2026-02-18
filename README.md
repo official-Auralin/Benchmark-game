@@ -226,6 +226,24 @@ Defaults:
 - `play_protocol=commit_only`
 - `scored_commit_episode=true`
 
+## Split governance policy check
+
+For publication governance, run split-ratio policy checks on a split manifest:
+
+```bash
+python3 -m gf01 split-policy-check \
+  --manifest split_manifest_v1.json \
+  --target-ratios public_dev=0.2,public_val=0.2,private_eval=0.6 \
+  --tolerance 0.05 \
+  --private-split private_eval \
+  --min-private-eval-count 1 \
+  --require-official-split-names \
+  --strict-manifest
+```
+
+This emits a machine-checkable JSON report and exits nonzero on policy
+violations.
+
 ## Notes
 
 - Seeds are deterministic provenance inputs.

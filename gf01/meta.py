@@ -38,6 +38,15 @@ PILOT_FREEZE_SCHEMA_VERSION = "gf01.pilot_freeze.v1"
 ALLOWED_EVAL_TRACKS = ("EVAL-CB", "EVAL-TA", "EVAL-OC")
 ALLOWED_MODES = ("normal", "hard")
 ALLOWED_PLAY_PROTOCOLS = ("commit_only",)
+OFFICIAL_SPLITS = ("public_dev", "public_val", "private_eval")
+SPLIT_POLICY_VERSION = "gf01.split_policy.v1"
+DEFAULT_SPLIT_RATIOS = {
+    "public_dev": 0.20,
+    "public_val": 0.20,
+    "private_eval": 0.60,
+}
+DEFAULT_SPLIT_RATIO_TOLERANCE = 0.05
+DEFAULT_PRIVATE_EVAL_MIN_COUNT = 1
 TOOL_POLICY_VERSION = "gf01.tool_policy.v1"
 ALLOWED_TOOL_ALLOWLISTS_BY_TRACK = {
     "EVAL-CB": ("none",),
