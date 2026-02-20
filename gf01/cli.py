@@ -20,8 +20,12 @@ __status__ = "Development"
 
 import argparse
 import cProfile
+import contextlib
+import hashlib
+import io
 import json
 import math
+import shutil
 import statistics
 from collections import defaultdict
 from datetime import date
@@ -38,12 +42,17 @@ from .baselines import (
 from .checks import evaluate_suite, run_priority_h3_checks
 from .generator import generate_instance, generate_suite
 from .gate import run_regression_gate
+from .identifiability import (
+    identifiability_policy_error,
+    instance_identifiability_metrics,
+)
 from .io import (
     build_split_manifest,
     load_instance_bundle,
     load_json,
     load_jsonl,
     migrate_run_rows,
+    run_row_from_play_payload,
     run_record_to_dict,
     validate_manifest,
     validate_run_rows,
@@ -69,7 +78,12 @@ from .meta import (
     COMPLEXITY_KNOB_KEYS,
     COMPLEXITY_POLICY_VERSION,
     COMPLEXITY_SCORE_METHOD,
+    IDENTIFIABILITY_METRIC_ID,
+    IDENTIFIABILITY_MIN_RESPONSE_RATIO,
+    IDENTIFIABILITY_MIN_UNIQUE_SIGNATURES,
+    IDENTIFIABILITY_POLICY_VERSION,
     DEFAULT_PRIVATE_EVAL_MIN_COUNT,
+    DEFAULT_MIN_PUBLIC_NOVELTY_RATIO,
     DEFAULT_SPLIT_RATIOS,
     DEFAULT_SPLIT_RATIO_TOLERANCE,
     DEFAULT_TOOL_ALLOWLIST_BY_TRACK,
@@ -82,6 +96,7 @@ from .meta import (
     RENDERER_POLICY_VERSION,
     renderer_profile_for_track,
     RUN_RECORD_SCHEMA_VERSION,
+    ROTATION_POLICY_VERSION,
     SPLIT_POLICY_VERSION,
     config_hash,
     current_git_commit,
@@ -89,7 +104,13 @@ from .meta import (
 )
 from .models import GeneratorConfig
 from .play import baseline_policy, human_policy, parse_action_script, run_episode, scripted_policy
-from .profiling import profile_pipeline
+from .profiling import PerformanceGates, profile_pipeline
+from .q033 import (
+    Q033_PROTOCOL_VERSION,
+    build_q033_manifests,
+    q033_closure_check,
+    run_q033_sweep,
+)
 
 
 def _compute_manifest_coverage(
@@ -437,6 +458,89 @@ def _split_policy_report(
     return report, passed
 
 
+def _manifest_instance_sets_by_split(
+    manifest: dict[str, object],
+) -> dict[str, set[str]]:
+    entries = manifest.get("instances", [])
+    if not isinstance(entries, list):
+        raise ValueError("manifest.instances must be a list")
+    result: dict[str, set[str]] = defaultdict(set)
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f"manifest.instances[{idx}] must be object")
+        instance_id = str(entry.get("instance_id", "")).strip()
+        split_id = str(entry.get("split_id", "")).strip()
+        if not instance_id:
+            raise ValueError(f"manifest.instances[{idx}] missing instance_id")
+        if not split_id:
+            raise ValueError(f"manifest.instances[{idx}] missing split_id")
+        result[split_id].add(instance_id)
+    return result
+
+
+def _release_rotation_report(
+    *,
+    current_manifest: dict[str, object],
+    previous_manifest: dict[str, object] | None,
+    private_split_id: str,
+    min_public_novelty_ratio: float,
+) -> tuple[dict[str, object], bool]:
+    current_sets = _manifest_instance_sets_by_split(current_manifest)
+    public_split_ids = [s for s in OFFICIAL_SPLITS if s != private_split_id]
+    current_public = set().union(*(current_sets.get(s, set()) for s in public_split_ids))
+
+    if previous_manifest is None:
+        report = {
+            "rotation_policy_version": ROTATION_POLICY_VERSION,
+            "previous_manifest_present": False,
+            "public_split_ids": list(public_split_ids),
+            "private_split_id": private_split_id,
+            "current_public_count": len(current_public),
+            "min_public_novelty_ratio": float(min_public_novelty_ratio),
+            "public_novelty_ratio": 1.0 if current_public else 0.0,
+            "public_novelty_pass": True,
+            "private_to_public_overlap_count": 0,
+            "private_to_public_overlap_preview": [],
+            "private_to_public_pass": True,
+            "status": "ok",
+            "error_type": "",
+            "note": "rotation checks skipped (no previous manifest provided)",
+        }
+        return report, True
+
+    prev_sets = _manifest_instance_sets_by_split(previous_manifest)
+    prev_public = set().union(*(prev_sets.get(s, set()) for s in public_split_ids))
+    prev_private = set(prev_sets.get(private_split_id, set()))
+
+    public_novel = current_public - prev_public
+    novelty_ratio = (len(public_novel) / float(len(current_public))) if current_public else 0.0
+    public_novelty_pass = novelty_ratio >= float(min_public_novelty_ratio)
+
+    private_to_public_overlap = sorted(current_public & prev_private)
+    private_to_public_pass = len(private_to_public_overlap) == 0
+
+    passed = bool(public_novelty_pass and private_to_public_pass)
+    report = {
+        "rotation_policy_version": ROTATION_POLICY_VERSION,
+        "previous_manifest_present": True,
+        "public_split_ids": list(public_split_ids),
+        "private_split_id": private_split_id,
+        "current_public_count": len(current_public),
+        "previous_public_count": len(prev_public),
+        "previous_private_count": len(prev_private),
+        "public_novel_count": len(public_novel),
+        "min_public_novelty_ratio": float(min_public_novelty_ratio),
+        "public_novelty_ratio": novelty_ratio,
+        "public_novelty_pass": bool(public_novelty_pass),
+        "private_to_public_overlap_count": len(private_to_public_overlap),
+        "private_to_public_overlap_preview": private_to_public_overlap[:20],
+        "private_to_public_pass": bool(private_to_public_pass),
+        "status": "ok" if passed else "error",
+        "error_type": "" if passed else "release_rotation_policy_violation",
+    }
+    return report, passed
+
+
 def _cmd_demo(args: argparse.Namespace) -> int:
     cfg = GeneratorConfig()
     instance, witness = generate_instance(seed=args.seed, cfg=cfg, split_id="public_dev")
@@ -495,6 +599,10 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         "count": int(args.count),
         "seeds": seeds,
         "generated_on": date.today().isoformat(),
+        "identifiability_policy_version": IDENTIFIABILITY_POLICY_VERSION,
+        "identifiability_metric_id": IDENTIFIABILITY_METRIC_ID,
+        "identifiability_min_response_ratio": float(IDENTIFIABILITY_MIN_RESPONSE_RATIO),
+        "identifiability_min_unique_signatures": int(IDENTIFIABILITY_MIN_UNIQUE_SIGNATURES),
         "instances_hash": stable_hash_json(instances_payload),
         "instances": instances_payload,
     }
@@ -544,6 +652,207 @@ def _cmd_profile(args: argparse.Namespace) -> int:
         report = _run()
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
+
+
+def _cmd_q033_build_manifests(args: argparse.Namespace) -> int:
+    out_dir = Path(args.out_dir)
+    if out_dir.exists() and any(out_dir.iterdir()) and not args.force:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "output_dir_not_empty",
+                    "message": "output directory exists and is not empty; use --force to overwrite",
+                    "out_dir": str(out_dir),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cfg = GeneratorConfig()
+    try:
+        payload = build_q033_manifests(
+            seed_start=int(args.seed_start),
+            candidate_count=int(args.candidate_count),
+            replicates=int(args.replicates),
+            per_quartile=int(args.per_quartile),
+            split_id=str(args.split),
+            cfg=cfg,
+        )
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "q033_manifest_build_failed",
+                    "message": str(exc),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    manifest_paths: list[str] = []
+    for manifest in payload.get("manifests", []):
+        manifest_id = str(manifest.get("manifest_id", "q033_manifest"))
+        path = out_dir / f"{manifest_id}.json"
+        write_json(str(path), manifest)
+        manifest_paths.append(str(path))
+
+    index_payload = {
+        "status": "ok",
+        "schema_version": str(payload.get("schema_version", "")),
+        "protocol_version": str(payload.get("protocol_version", Q033_PROTOCOL_VERSION)),
+        "out_dir": str(out_dir),
+        "manifest_count": len(manifest_paths),
+        "manifest_paths": manifest_paths,
+        "seed_start": int(payload.get("seed_start", int(args.seed_start))),
+        "candidate_count": int(payload.get("candidate_count", int(args.candidate_count))),
+        "replicate_count": int(payload.get("replicate_count", int(args.replicates))),
+        "per_quartile": int(payload.get("per_quartile", int(args.per_quartile))),
+        "required_per_quartile": int(
+            payload.get(
+                "required_per_quartile",
+                int(args.per_quartile) * int(args.replicates),
+            )
+        ),
+        "available_counts": payload.get("available_counts", {}),
+        "manifest_seed_overlaps": payload.get("manifest_seed_overlaps", []),
+    }
+    index_path = out_dir / "q033_manifest_index.json"
+    write_json(str(index_path), index_payload)
+    index_payload["index_path"] = str(index_path)
+    print(json.dumps(index_payload, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_q033_sweep(args: argparse.Namespace) -> int:
+    manifest = load_json(args.manifest)
+    panel: list[str] = []
+    seen_panel: set[str] = set()
+    for part in str(args.baseline_panel).split(","):
+        token = part.strip().lower()
+        if not token:
+            continue
+        if token in seen_panel:
+            continue
+        panel.append(token)
+        seen_panel.add(token)
+    if not panel:
+        panel = list(BASELINE_PANEL_FULL)
+    unknown = sorted(set(panel) - set(BASELINE_PANEL_FULL))
+    if unknown:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "unsupported_baseline_panel",
+                    "message": f"unsupported baseline ids: {unknown}",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+    if "greedy" not in panel or "oracle" not in panel:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "q033_panel_missing_required_agents",
+                    "message": "Q-033 sweep requires panel to include greedy and oracle",
+                    "panel": panel,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    cfg = GeneratorConfig()
+    gates = PerformanceGates(
+        max_generate_ms_mean=float(args.max_generate_ms_mean),
+        max_minset_ms_mean=float(args.max_minset_ms_mean),
+        max_eval_ms_mean=float(args.max_eval_ms_mean),
+        max_checks_total_ms=float(args.max_checks_total_ms),
+        max_truncation_rate=float(args.max_truncation_rate),
+        min_oracle_minus_greedy_certified_gap=float(args.min_oracle_minus_greedy_gap),
+    )
+    try:
+        report = run_q033_sweep(
+            manifest=manifest,
+            panel=panel,
+            cfg=cfg,
+            gates=gates,
+            seed_base=int(args.seed),
+            max_quartile_truncation_rate=float(args.max_quartile_truncation_rate),
+            min_quartile_oracle_minus_greedy_gap=float(args.min_quartile_gap),
+            max_quartile_runtime_gate_failures=int(args.max_quartile_runtime_gate_failures),
+        )
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "q033_sweep_failed",
+                    "message": str(exc),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if args.out:
+        write_json(args.out, report)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if bool(report.get("gates", {}).get("passed_all", False)) else 2
+
+
+def _cmd_q033_closure_check(args: argparse.Namespace) -> int:
+    sweep_paths = list(args.sweep or [])
+    if len(sweep_paths) < 2:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "insufficient_sweeps",
+                    "message": "provide at least two --sweep inputs",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+    sweeps: list[dict[str, object]] = []
+    for path in sweep_paths:
+        sweeps.append(load_json(path))
+    try:
+        report = q033_closure_check(
+            sweeps=sweeps,
+            require_disjoint_seeds=not bool(args.allow_seed_overlap),
+        )
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "q033_closure_check_failed",
+                    "message": str(exc),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if args.out:
+        write_json(args.out, report)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if bool(report.get("close_q033", False)) else 2
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:
@@ -1094,6 +1403,357 @@ def _cmd_split_policy_check(args: argparse.Namespace) -> int:
     return 0 if passed else 2
 
 
+def _cmd_release_governance_check(args: argparse.Namespace) -> int:
+    min_public_novelty_ratio = float(args.min_public_novelty_ratio)
+    if min_public_novelty_ratio < 0.0 or min_public_novelty_ratio > 1.0:
+        out = {
+            "status": "error",
+            "error_type": "invalid_min_public_novelty_ratio",
+            "message": "min_public_novelty_ratio must be in [0, 1]",
+        }
+        if args.out:
+            write_json(args.out, out)
+        print(json.dumps(out, indent=2, sort_keys=True))
+        return 2
+
+    strict_manifest = bool(getattr(args, "strict_manifest", False)) and not bool(
+        getattr(args, "no_strict_manifest", False)
+    )
+    require_official_split_names = bool(
+        getattr(args, "require_official_split_names", False)
+    ) and not bool(getattr(args, "allow_non_official_split_names", False))
+
+    current_manifest = load_json(args.manifest)
+    manifest_errors = validate_manifest(current_manifest, strict=strict_manifest)
+    if manifest_errors:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "manifest_schema_validation",
+                    "strict_manifest": strict_manifest,
+                    "error_count": len(manifest_errors),
+                    "errors_preview": manifest_errors[:50],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    previous_manifest: dict[str, object] | None = None
+    if args.previous_manifest:
+        previous_manifest = load_json(args.previous_manifest)
+        prev_errors = validate_manifest(previous_manifest, strict=strict_manifest)
+        if prev_errors:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "previous_manifest_schema_validation",
+                        "strict_manifest": strict_manifest,
+                        "error_count": len(prev_errors),
+                        "errors_preview": prev_errors[:50],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+
+    try:
+        target_ratios = _parse_split_ratio_arg(args.target_ratios)
+    except ValueError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "invalid_split_ratio_arg",
+                    "message": str(exc),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    try:
+        split_report, split_pass = _split_policy_report(
+            current_manifest,
+            target_ratios=target_ratios,
+            tolerance=float(args.tolerance),
+            private_split_id=str(args.private_split),
+            min_private_eval_count=int(args.min_private_eval_count),
+            require_official_split_names=require_official_split_names,
+        )
+    except ValueError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "split_policy_check_error",
+                    "message": str(exc),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if bool(args.require_previous_manifest) and previous_manifest is None:
+        out = {
+            "status": "error",
+            "error_type": "release_rotation_previous_manifest_required",
+            "message": "set --previous-manifest when --require-previous-manifest is enabled",
+            "rotation_policy_version": ROTATION_POLICY_VERSION,
+        }
+        if args.out:
+            write_json(args.out, out)
+        print(json.dumps(out, indent=2, sort_keys=True))
+        return 2
+
+    try:
+        rotation_report, rotation_pass = _release_rotation_report(
+            current_manifest=current_manifest,
+            previous_manifest=previous_manifest,
+            private_split_id=str(args.private_split),
+            min_public_novelty_ratio=min_public_novelty_ratio,
+        )
+    except ValueError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "release_rotation_check_error",
+                    "message": str(exc),
+                    "rotation_policy_version": ROTATION_POLICY_VERSION,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    passed = bool(split_pass and rotation_pass)
+    report = {
+        "status": "ok" if passed else "error",
+        "error_type": "" if passed else "release_governance_violation",
+        "split_policy_version": SPLIT_POLICY_VERSION,
+        "rotation_policy_version": ROTATION_POLICY_VERSION,
+        "manifest_path": str(args.manifest),
+        "previous_manifest_path": str(args.previous_manifest or ""),
+        "strict_manifest": strict_manifest,
+        "require_official_split_names": require_official_split_names,
+        "split_policy": split_report,
+        "rotation_policy": rotation_report,
+        "passed": passed,
+    }
+    if args.out:
+        write_json(args.out, report)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if passed else 2
+
+
+def _cmd_release_report_check(args: argparse.Namespace) -> int:
+    rows = load_jsonl(args.runs)
+    err_payload, coverage_payload = _validate_runs_manifest(
+        rows,
+        manifest_path=args.manifest,
+        strict_mode=True,
+        official_mode=True,
+    )
+    if err_payload is not None:
+        print(json.dumps(err_payload, indent=2, sort_keys=True))
+        return 2
+    manifest = load_json(args.manifest)
+
+    baseline_policy_level = str(args.baseline_policy_level).strip()
+    required_agents = (
+        list(BASELINE_PANEL_FULL)
+        if baseline_policy_level == "full"
+        else list(BASELINE_PANEL_CORE)
+    )
+    required_tracks = sorted({_track_for_agent_id(agent_id) for agent_id in required_agents})
+
+    expected_instances_by_slice: dict[tuple[str, str], set[str]] = defaultdict(set)
+    entries = manifest.get("instances", [])
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            split_id = str(entry.get("split_id", "")).strip()
+            mode = str(entry.get("mode", "")).strip()
+            instance_id = str(entry.get("instance_id", "")).strip()
+            if split_id and mode and instance_id:
+                expected_instances_by_slice[(split_id, mode)].add(instance_id)
+
+    agent_slice_coverage: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    track_slice_coverage: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    seen_required_agents: set[str] = set()
+
+    for row in rows:
+        split_id = str(row.get("split_id", "")).strip()
+        mode = str(row.get("mode", "")).strip()
+        instance_id = str(row.get("instance_id", "")).strip()
+        eval_track = str(row.get("eval_track", "")).strip()
+        if not split_id or not mode or not instance_id:
+            continue
+
+        agent_name = str(row.get("agent_name", "")).strip()
+        try:
+            canonical_agent = _canonical_baseline_agent_id(agent_name)
+        except ValueError:
+            canonical_agent = ""
+        if canonical_agent not in required_agents:
+            continue
+        seen_required_agents.add(canonical_agent)
+        agent_slice_coverage[(canonical_agent, split_id, mode)].add(instance_id)
+        if eval_track in required_tracks:
+            track_slice_coverage[(eval_track, split_id, mode)].add(instance_id)
+
+    missing_agent_ids = sorted(set(required_agents) - seen_required_agents)
+    missing_agent_slice: list[dict[str, object]] = []
+    missing_track_slice: list[dict[str, object]] = []
+    for (split_id, mode), expected_instances in sorted(expected_instances_by_slice.items()):
+        expected_count = len(expected_instances)
+        for agent_id in required_agents:
+            covered_instances = agent_slice_coverage.get((agent_id, split_id, mode), set())
+            if len(covered_instances) < expected_count:
+                missing_agent_slice.append(
+                    {
+                        "agent_id": agent_id,
+                        "split_id": split_id,
+                        "mode": mode,
+                        "expected_count": expected_count,
+                        "covered_count": len(covered_instances),
+                    }
+                )
+        for eval_track in required_tracks:
+            covered_instances = track_slice_coverage.get((eval_track, split_id, mode), set())
+            if len(covered_instances) < expected_count:
+                missing_track_slice.append(
+                    {
+                        "eval_track": eval_track,
+                        "split_id": split_id,
+                        "mode": mode,
+                        "expected_count": expected_count,
+                        "covered_count": len(covered_instances),
+                    }
+                )
+
+    passed = not missing_agent_ids and not missing_agent_slice and not missing_track_slice
+    out = {
+        "status": "ok" if passed else "error",
+        "error_type": "" if passed else "release_report_policy_violation",
+        "baseline_policy_version": BASELINE_PANEL_POLICY_VERSION,
+        "baseline_policy_level": baseline_policy_level,
+        "required_agents": required_agents,
+        "required_eval_tracks": required_tracks,
+        "missing_required_agents": missing_agent_ids,
+        "missing_agent_slice_requirements_preview": missing_agent_slice[:50],
+        "missing_track_slice_requirements_preview": missing_track_slice[:50],
+        "manifest_coverage": coverage_payload or {},
+        "passed": passed,
+    }
+    if args.out:
+        write_json(args.out, out)
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0 if passed else 2
+
+
+def _cmd_identifiability_check(args: argparse.Namespace) -> int:
+    instances, bundle_meta = load_instance_bundle(args.instances)
+    min_response_ratio = float(args.min_response_ratio)
+    min_unique_signatures = int(args.min_unique_signatures)
+
+    if not instances:
+        out = {
+            "status": "error",
+            "error_type": "empty_instance_set",
+            "message": "identifiability check requires at least one instance",
+            "instances_path": args.instances,
+        }
+        if args.out:
+            write_json(args.out, out)
+        print(json.dumps(out, indent=2, sort_keys=True))
+        return 2
+
+    rows: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+    stored_field_mismatch_count = 0
+    for instance in instances:
+        computed = instance_identifiability_metrics(instance)
+        policy_error = identifiability_policy_error(
+            computed,
+            min_response_ratio=min_response_ratio,
+            min_unique_signatures=min_unique_signatures,
+        )
+        stored = dict(instance.identifiability) if instance.identifiability else {}
+
+        # Stored metrics are optional for backward compatibility. If present and
+        # mismatched, report drift without changing pass/fail semantics.
+        stored_mismatch = False
+        if stored:
+            for key in (
+                "response_ratio",
+                "unique_signature_count",
+                "candidate_atom_count",
+                "response_atom_count",
+            ):
+                if key in stored and stored.get(key) != computed.get(key):
+                    stored_mismatch = True
+                    break
+        if stored_mismatch:
+            stored_field_mismatch_count += 1
+
+        row = {
+            "instance_id": instance.instance_id,
+            "passes_threshold": policy_error is None,
+            "policy_error": policy_error or "",
+            "computed": computed,
+            "stored_available": bool(stored),
+            "stored_mismatch": bool(stored_mismatch),
+        }
+        rows.append(row)
+        if policy_error is not None:
+            failures.append(
+                {
+                    "instance_id": instance.instance_id,
+                    "policy_error": policy_error,
+                    "response_ratio": float(computed.get("response_ratio", 0.0)),
+                    "unique_signature_count": int(computed.get("unique_signature_count", 0)),
+                }
+            )
+
+    pass_count = len(instances) - len(failures)
+    passed = len(failures) == 0
+    out = {
+        "status": "ok" if passed else "error",
+        "error_type": "" if passed else "identifiability_policy_violation",
+        "policy_version": IDENTIFIABILITY_POLICY_VERSION,
+        "metric_id": IDENTIFIABILITY_METRIC_ID,
+        "instances_path": args.instances,
+        "instance_count": len(instances),
+        "pass_count": pass_count,
+        "fail_count": len(failures),
+        "min_response_ratio": min_response_ratio,
+        "min_unique_signatures": min_unique_signatures,
+        "bundle_policy_version": bundle_meta.get("identifiability_policy_version", ""),
+        "bundle_metric_id": bundle_meta.get("identifiability_metric_id", ""),
+        "bundle_min_response_ratio": bundle_meta.get("identifiability_min_response_ratio", None),
+        "bundle_min_unique_signatures": bundle_meta.get(
+            "identifiability_min_unique_signatures", None
+        ),
+        "stored_field_mismatch_count": stored_field_mismatch_count,
+        "failures_preview": failures[:50],
+        "rows": rows,
+    }
+    if args.out:
+        write_json(args.out, out)
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0 if passed else 2
+
+
 def _parse_seed_list(seed_text: str) -> list[int]:
     seeds: list[int] = []
     for part in seed_text.split(","):
@@ -1189,6 +1849,10 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         "seeds": seeds,
         "generated_on": date.today().isoformat(),
         "mode_override": mode_override or "mixed",
+        "identifiability_policy_version": IDENTIFIABILITY_POLICY_VERSION,
+        "identifiability_metric_id": IDENTIFIABILITY_METRIC_ID,
+        "identifiability_min_response_ratio": float(cfg.ident_min_response_ratio),
+        "identifiability_min_unique_signatures": int(cfg.ident_min_unique_signatures),
         "instances_hash": stable_hash_json(instances_payload),
         "instances": instances_payload,
     }
@@ -1236,6 +1900,10 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         "split_manifest_path": str(manifest_path),
         "instance_bundle_hash": stable_hash_json(bundle),
         "split_manifest_hash": stable_hash_json(manifest),
+        "identifiability_policy_version": IDENTIFIABILITY_POLICY_VERSION,
+        "identifiability_metric_id": IDENTIFIABILITY_METRIC_ID,
+        "identifiability_min_response_ratio": float(cfg.ident_min_response_ratio),
+        "identifiability_min_unique_signatures": int(cfg.ident_min_unique_signatures),
         "notes": (
             "Provisional pilot freeze for internal testing only. "
             "Does not finalize public/private split governance."
@@ -1254,6 +1922,10 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         "instance_count": len(suite),
         "split_id": args.split,
         "mode_override": mode_override or "mixed",
+        "identifiability_policy_version": IDENTIFIABILITY_POLICY_VERSION,
+        "identifiability_metric_id": IDENTIFIABILITY_METRIC_ID,
+        "identifiability_min_response_ratio": float(cfg.ident_min_response_ratio),
+        "identifiability_min_unique_signatures": int(cfg.ident_min_unique_signatures),
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
@@ -1481,6 +2153,31 @@ def _track_for_agent_id(agent_id: str) -> str:
     return "EVAL-CB"
 
 
+def _load_external_episode_payloads(path: str) -> list[dict[str, object]]:
+    file_path = Path(path)
+    if not file_path.exists():
+        raise ValueError(f"external episode path does not exist: {path}")
+
+    if file_path.suffix.lower() == ".jsonl":
+        payloads = load_jsonl(str(file_path))
+    else:
+        raw_payload = json.loads(file_path.read_text(encoding="utf-8"))
+        if isinstance(raw_payload, dict):
+            payloads = [raw_payload]
+        elif isinstance(raw_payload, list):
+            payloads = raw_payload
+        else:
+            raise ValueError(
+                "external episode payload must be an object/list (JSON) or JSONL"
+            )
+
+    if not payloads:
+        raise ValueError(f"external episode payload is empty: {path}")
+    if any(not isinstance(item, dict) for item in payloads):
+        raise ValueError("external episode payload rows must be JSON objects")
+    return [{str(k): v for k, v in item.items()} for item in payloads]
+
+
 def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
     freeze_dir = Path(args.freeze_dir)
     bundle_path = freeze_dir / "instance_bundle_v1.json"
@@ -1696,6 +2393,57 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
     for external_path in args.external_runs:
         rows.extend(load_jsonl(external_path))
 
+    external_episode_rows_count = 0
+    external_episode_run_meta = {
+        "family_id": bundle_meta.get("family_id", FAMILY_ID),
+        "benchmark_version": bundle_meta.get("benchmark_version", BENCHMARK_VERSION),
+        "generator_version": bundle_meta.get("generator_version", GENERATOR_VERSION),
+        "checker_version": bundle_meta.get("checker_version", CHECKER_VERSION),
+        "harness_version": HARNESS_VERSION,
+        "git_commit": current_git_commit(),
+        "config_hash": bundle_meta.get("config_hash", "unknown"),
+    }
+    for external_episode_path in args.external_episodes:
+        try:
+            payloads = _load_external_episode_payloads(external_episode_path)
+        except ValueError as exc:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "external_episode_invalid",
+                        "path": external_episode_path,
+                        "message": str(exc),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        for payload_idx, payload in enumerate(payloads):
+            try:
+                row = run_row_from_play_payload(
+                    payload,
+                    run_meta=external_episode_run_meta,
+                )
+            except ValueError as exc:
+                print(
+                    json.dumps(
+                        {
+                            "status": "error",
+                            "error_type": "external_episode_invalid",
+                            "path": external_episode_path,
+                            "payload_index": payload_idx,
+                            "message": str(exc),
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+                return 2
+            rows.append(row)
+            external_episode_rows_count += 1
+
     runs_path = out_dir / "runs_combined.jsonl"
     write_jsonl(str(runs_path), rows)
 
@@ -1752,6 +2500,8 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
         "renderer_profile_id": renderer_profile_id,
         "baseline_panel": panel,
         "external_runs_count": len(args.external_runs),
+        "external_episode_paths_count": len(args.external_episodes),
+        "external_episode_rows_count": int(external_episode_rows_count),
         "adaptation_condition": adaptation_condition,
         "adaptation_budget_tokens": adaptation_budget_tokens,
         "adaptation_data_scope": adaptation_data_scope,
@@ -1759,6 +2509,333 @@ def _cmd_pilot_campaign(args: argparse.Namespace) -> int:
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cmd_release_package(args: argparse.Namespace) -> int:
+    freeze_dir = Path(args.freeze_dir)
+    campaign_dir = Path(args.campaign_dir)
+    out_dir = Path(args.out_dir)
+
+    required_sources = {
+        "instance_bundle_v1.json": freeze_dir / "instance_bundle_v1.json",
+        "split_manifest_v1.json": freeze_dir / "split_manifest_v1.json",
+        "runs_combined.jsonl": campaign_dir / "runs_combined.jsonl",
+        "official_validation.json": campaign_dir / "official_validation.json",
+        "official_report.json": campaign_dir / "official_report.json",
+    }
+    missing_sources = [
+        {"name": name, "path": str(path)}
+        for name, path in required_sources.items()
+        if not path.exists()
+    ]
+    if missing_sources:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "release_package_source_missing",
+                    "missing": missing_sources,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    if out_dir.exists() and any(out_dir.iterdir()) and not args.force:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "output_dir_not_empty",
+                    "out_dir": str(out_dir),
+                    "message": "use --force to overwrite a non-empty output directory",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    rows = load_jsonl(str(required_sources["runs_combined.jsonl"]))
+    err_payload, coverage_payload = _validate_runs_manifest(
+        rows,
+        manifest_path=str(required_sources["split_manifest_v1.json"]),
+        strict_mode=True,
+        official_mode=True,
+    )
+    if err_payload is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "release_package_source_invalid",
+                    "validation_error": err_payload,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
+    artifacts_dir = out_dir / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    files_to_copy = [
+        required_sources["instance_bundle_v1.json"],
+        required_sources["split_manifest_v1.json"],
+        freeze_dir / "pilot_freeze_v1.json",
+        required_sources["runs_combined.jsonl"],
+        required_sources["official_validation.json"],
+        required_sources["official_report.json"],
+        campaign_dir / "pilot_analysis.json",
+    ]
+    copied_files: list[Path] = []
+    for src in files_to_copy:
+        if not src.exists():
+            continue
+        dst = artifacts_dir / src.name
+        shutil.copy2(src, dst)
+        copied_files.append(dst)
+
+    instructions_path = out_dir / "RERUN_INSTRUCTIONS.md"
+    instructions_lines = [
+        "# GF-01 Reproducibility Package Instructions",
+        "",
+        "## 1) Validate strict/official run schema and manifest coverage",
+        "```bash",
+        "python3 -m gf01 validate \\",
+        "  --runs artifacts/runs_combined.jsonl \\",
+        "  --manifest artifacts/split_manifest_v1.json \\",
+        "  --official",
+        "```",
+        "",
+        "## 2) Recompute grouped report from packaged runs",
+        "```bash",
+        "python3 -m gf01 report \\",
+        "  --runs artifacts/runs_combined.jsonl \\",
+        "  --manifest artifacts/split_manifest_v1.json \\",
+        "  --official \\",
+        "  --out artifacts/recomputed_report.json",
+        "```",
+        "",
+        "## 3) Run benchmark integrity checks",
+        "```bash",
+        "python3 -m gf01 checks --seed 3000",
+        "```",
+        "",
+        "## Notes",
+        "- Compare `artifacts/recomputed_report.json` against packaged",
+        "  `artifacts/official_report.json`.",
+        "- The packaged `split_manifest_v1.json` is the official coverage target.",
+    ]
+    instructions_path.write_text("\n".join(instructions_lines) + "\n", encoding="utf-8")
+
+    file_entries = []
+    for artifact in sorted(copied_files, key=lambda p: p.name):
+        file_entries.append(
+            {
+                "path": f"artifacts/{artifact.name}",
+                "size_bytes": int(artifact.stat().st_size),
+                "sha256": _sha256_file(artifact),
+            }
+        )
+    file_entries.append(
+        {
+            "path": instructions_path.name,
+            "size_bytes": int(instructions_path.stat().st_size),
+            "sha256": _sha256_file(instructions_path),
+        }
+    )
+
+    package_manifest = {
+        "schema_version": "gf01.release_package.v1",
+        "family_id": FAMILY_ID,
+        "benchmark_version": BENCHMARK_VERSION,
+        "generator_version": GENERATOR_VERSION,
+        "checker_version": CHECKER_VERSION,
+        "harness_version": HARNESS_VERSION,
+        "git_commit": current_git_commit(),
+        "created_on": date.today().isoformat(),
+        "source_paths": {
+            "freeze_dir": str(freeze_dir),
+            "campaign_dir": str(campaign_dir),
+        },
+        "strict_validation": {
+            "status": "ok",
+            "rows": len(rows),
+            "manifest_coverage": coverage_payload or {},
+        },
+        "files": file_entries,
+    }
+    manifest_path = out_dir / "release_package_manifest.json"
+    write_json(str(manifest_path), package_manifest)
+
+    summary = {
+        "status": "ok",
+        "schema_version": "gf01.release_package.v1",
+        "out_dir": str(out_dir),
+        "manifest_path": str(manifest_path),
+        "instructions_path": str(instructions_path),
+        "artifact_count": len(copied_files),
+        "source_freeze_dir": str(freeze_dir),
+        "source_campaign_dir": str(campaign_dir),
+    }
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
+def _invoke_subcommand_silently(
+    func,
+    args: argparse.Namespace,
+) -> tuple[int, dict[str, object], str]:
+    """Run a CLI subcommand while capturing JSON stdout for composition."""
+    capture = io.StringIO()
+    with contextlib.redirect_stdout(capture):
+        code = int(func(args))
+    stdout_text = capture.getvalue().strip()
+    payload: dict[str, object] = {}
+    if stdout_text:
+        try:
+            maybe_payload = json.loads(stdout_text)
+            if isinstance(maybe_payload, dict):
+                payload = maybe_payload
+            else:
+                payload = {
+                    "status": "error",
+                    "error_type": "subcommand_non_object_json",
+                    "stdout_preview": str(maybe_payload)[:1000],
+                }
+        except Exception:
+            payload = {
+                "status": "error",
+                "error_type": "subcommand_non_json_stdout",
+                "stdout_preview": stdout_text[:1000],
+            }
+    return code, payload, stdout_text
+
+
+def _cmd_release_candidate_check(args: argparse.Namespace) -> int:
+    freeze_dir = Path(args.freeze_dir)
+    campaign_dir = Path(args.campaign_dir)
+    manifest_path = freeze_dir / "split_manifest_v1.json"
+    runs_path = campaign_dir / "runs_combined.jsonl"
+
+    missing = []
+    if not manifest_path.exists():
+        missing.append(str(manifest_path))
+    if not runs_path.exists():
+        missing.append(str(runs_path))
+    if missing:
+        out = {
+            "status": "error",
+            "error_type": "release_candidate_source_missing",
+            "missing_paths": missing,
+        }
+        if args.out:
+            write_json(args.out, out)
+        print(json.dumps(out, indent=2, sort_keys=True))
+        return 2
+
+    gov_args = argparse.Namespace(
+        manifest=str(manifest_path),
+        previous_manifest=str(args.previous_manifest),
+        require_previous_manifest=bool(args.require_previous_manifest),
+        target_ratios=str(args.target_ratios),
+        tolerance=float(args.tolerance),
+        private_split=str(args.private_split),
+        min_private_eval_count=int(args.min_private_eval_count),
+        min_public_novelty_ratio=float(args.min_public_novelty_ratio),
+        allow_non_official_split_names=bool(args.allow_non_official_split_names),
+        no_strict_manifest=bool(args.no_strict_manifest),
+        strict_manifest=True,
+        require_official_split_names=True,
+        out="",
+    )
+    gov_code, gov_payload, _ = _invoke_subcommand_silently(
+        _cmd_release_governance_check,
+        gov_args,
+    )
+
+    report_args = argparse.Namespace(
+        runs=str(runs_path),
+        manifest=str(manifest_path),
+        baseline_policy_level=str(args.baseline_policy_level),
+        out="",
+    )
+    report_code, report_payload, _ = _invoke_subcommand_silently(
+        _cmd_release_report_check,
+        report_args,
+    )
+
+    package_payload: dict[str, object] = {}
+    package_code = 0
+    package_skipped = bool(args.skip_package)
+    package_out_dir = str(args.package_out_dir)
+    if package_skipped:
+        package_payload = {
+            "status": "skipped",
+            "reason": "skip_package_enabled",
+        }
+    else:
+        package_args = argparse.Namespace(
+            freeze_dir=str(freeze_dir),
+            campaign_dir=str(campaign_dir),
+            out_dir=package_out_dir,
+            force=bool(args.force_package),
+        )
+        package_code, package_payload, _ = _invoke_subcommand_silently(
+            _cmd_release_package,
+            package_args,
+        )
+
+    gov_passed = bool(gov_code == 0 and gov_payload.get("passed", False))
+    report_passed = bool(report_code == 0 and report_payload.get("passed", False))
+    package_passed = bool(package_skipped or package_code == 0)
+    passed = bool(gov_passed and report_passed and package_passed)
+
+    out = {
+        "status": "ok" if passed else "error",
+        "error_type": "" if passed else "release_candidate_check_failed",
+        "passed": passed,
+        "freeze_dir": str(freeze_dir),
+        "campaign_dir": str(campaign_dir),
+        "manifest_path": str(manifest_path),
+        "runs_path": str(runs_path),
+        "stages": {
+            "release_governance": {
+                "passed": gov_passed,
+                "returncode": gov_code,
+                "payload": gov_payload,
+            },
+            "release_report": {
+                "passed": report_passed,
+                "returncode": report_code,
+                "payload": report_payload,
+            },
+            "release_package": {
+                "passed": package_passed,
+                "returncode": package_code,
+                "skipped": package_skipped,
+                "package_out_dir": package_out_dir,
+                "payload": package_payload,
+            },
+        },
+    }
+    if args.out:
+        write_json(args.out, out)
+    print(json.dumps(out, indent=2, sort_keys=True))
+    return 0 if passed else 2
 
 
 def _analysis_rate(rows: list[dict[str, object]], field: str) -> float:
@@ -2302,6 +3379,68 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_prof.set_defaults(func=_cmd_profile)
 
+    p_q033_manifest = sub.add_parser(
+        "q033-build-manifests",
+        help="Build deterministic balanced quartile seed manifests for Q-033 sweeps",
+    )
+    p_q033_manifest.add_argument("--seed-start", type=int, default=8000)
+    p_q033_manifest.add_argument("--candidate-count", type=int, default=4000)
+    p_q033_manifest.add_argument("--replicates", type=int, default=2)
+    p_q033_manifest.add_argument("--per-quartile", type=int, default=120)
+    p_q033_manifest.add_argument("--split", type=str, default="q033_internal")
+    p_q033_manifest.add_argument(
+        "--out-dir",
+        type=str,
+        default="q033_manifests/q033_protocol_v1",
+    )
+    p_q033_manifest.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing non-empty output directory",
+    )
+    p_q033_manifest.set_defaults(func=_cmd_q033_build_manifests)
+
+    p_q033_sweep = sub.add_parser(
+        "q033-sweep",
+        help="Run one Q-033 profiling sweep replicate from a seed manifest",
+    )
+    p_q033_sweep.add_argument("--manifest", type=str, required=True)
+    p_q033_sweep.add_argument(
+        "--baseline-panel",
+        type=str,
+        default="random,greedy,search,tool,oracle",
+    )
+    p_q033_sweep.add_argument("--seed", type=int, default=1300)
+    p_q033_sweep.add_argument("--max-generate-ms-mean", type=float, default=1200.0)
+    p_q033_sweep.add_argument("--max-minset-ms-mean", type=float, default=2500.0)
+    p_q033_sweep.add_argument("--max-eval-ms-mean", type=float, default=1500.0)
+    p_q033_sweep.add_argument("--max-checks-total-ms", type=float, default=30000.0)
+    p_q033_sweep.add_argument("--max-truncation-rate", type=float, default=0.25)
+    p_q033_sweep.add_argument("--min-oracle-minus-greedy-gap", type=float, default=0.10)
+    p_q033_sweep.add_argument("--max-quartile-truncation-rate", type=float, default=0.30)
+    p_q033_sweep.add_argument("--min-quartile-gap", type=float, default=0.05)
+    p_q033_sweep.add_argument("--max-quartile-runtime-gate-failures", type=int, default=1)
+    p_q033_sweep.add_argument("--out", type=str, default="", help="Optional output JSON path")
+    p_q033_sweep.set_defaults(func=_cmd_q033_sweep)
+
+    p_q033_close = sub.add_parser(
+        "q033-closure-check",
+        help="Check Q-033 closure rule from two or more sweep outputs",
+    )
+    p_q033_close.add_argument(
+        "--sweep",
+        action="append",
+        default=[],
+        help="Path to one q033-sweep output JSON (repeat flag for multiple replicates)",
+    )
+    p_q033_close.add_argument(
+        "--allow-seed-overlap",
+        action="store_true",
+        help="Disable disjoint-seed requirement across replicates",
+    )
+    p_q033_close.add_argument("--out", type=str, default="", help="Optional output JSON path")
+    p_q033_close.set_defaults(func=_cmd_q033_closure_check)
+
     p_eval = sub.add_parser("evaluate", help="Evaluate one baseline agent on external instances")
     p_eval.add_argument("--instances", type=str, required=True, help="Path to instance JSON")
     p_eval.add_argument("--agent", type=str, default="greedy", help="random|greedy|search|tool|oracle")
@@ -2478,6 +3617,142 @@ def build_parser() -> argparse.ArgumentParser:
     p_split_policy.add_argument("--out", type=str, default="", help="Optional output JSON path")
     p_split_policy.set_defaults(func=_cmd_split_policy_check)
 
+    p_release_governance = sub.add_parser(
+        "release-governance-check",
+        help=(
+            "Validate release split policy plus seed/instance-rotation "
+            "contamination safeguards (machine-checkable)."
+        ),
+    )
+    p_release_governance.add_argument(
+        "--manifest",
+        type=str,
+        required=True,
+        help="Path to current split manifest JSON",
+    )
+    p_release_governance.add_argument(
+        "--previous-manifest",
+        type=str,
+        default="",
+        help="Optional path to previous-cycle split manifest JSON",
+    )
+    p_release_governance.add_argument(
+        "--require-previous-manifest",
+        action="store_true",
+        help="Fail if --previous-manifest is not provided",
+    )
+    p_release_governance.add_argument(
+        "--target-ratios",
+        type=str,
+        default=default_ratio_arg,
+        help="Comma-separated split ratios (split=value, normalized internally)",
+    )
+    p_release_governance.add_argument(
+        "--tolerance",
+        type=float,
+        default=DEFAULT_SPLIT_RATIO_TOLERANCE,
+        help="Absolute per-split ratio tolerance",
+    )
+    p_release_governance.add_argument(
+        "--private-split",
+        type=str,
+        default="private_eval",
+        help="Split id treated as private official-eval split",
+    )
+    p_release_governance.add_argument(
+        "--min-private-eval-count",
+        type=int,
+        default=DEFAULT_PRIVATE_EVAL_MIN_COUNT,
+        help="Minimum required row count in private split",
+    )
+    p_release_governance.add_argument(
+        "--min-public-novelty-ratio",
+        type=float,
+        default=DEFAULT_MIN_PUBLIC_NOVELTY_RATIO,
+        help=(
+            "Minimum ratio of current public instances not present in previous "
+            "public set; ignored when no previous manifest is provided."
+        ),
+    )
+    p_release_governance.add_argument(
+        "--allow-non-official-split-names",
+        action="store_true",
+        help="Allow split IDs outside OFFICIAL_SPLITS (default is strict names)",
+    )
+    p_release_governance.add_argument(
+        "--no-strict-manifest",
+        action="store_true",
+        help="Disable strict manifest schema/family checks",
+    )
+    p_release_governance.add_argument(
+        "--out",
+        type=str,
+        default="",
+        help="Optional output JSON path",
+    )
+    p_release_governance.set_defaults(
+        func=_cmd_release_governance_check,
+        strict_manifest=True,
+        require_official_split_names=True,
+    )
+
+    p_release_report = sub.add_parser(
+        "release-report-check",
+        help=(
+            "Validate release baseline-panel and per-track/per-slice reporting "
+            "coverage from strict run artifacts."
+        ),
+    )
+    p_release_report.add_argument(
+        "--runs",
+        type=str,
+        required=True,
+        help="Path to strict run JSONL artifact",
+    )
+    p_release_report.add_argument(
+        "--manifest",
+        type=str,
+        required=True,
+        help="Path to split manifest JSON used for expected slice coverage",
+    )
+    p_release_report.add_argument(
+        "--baseline-policy-level",
+        type=str,
+        default="full",
+        choices=list(ALLOWED_BASELINE_PANEL_LEVELS),
+        help=(
+            "Required baseline policy level for release report coverage checks "
+            "(full or core)."
+        ),
+    )
+    p_release_report.add_argument(
+        "--out",
+        type=str,
+        default="",
+        help="Optional output JSON path",
+    )
+    p_release_report.set_defaults(func=_cmd_release_report_check)
+
+    p_ident = sub.add_parser(
+        "identifiability-check",
+        help="Validate instance bundles against partial-observability identifiability thresholds",
+    )
+    p_ident.add_argument("--instances", type=str, required=True, help="Path to instance bundle/list JSON")
+    p_ident.add_argument(
+        "--min-response-ratio",
+        type=float,
+        default=IDENTIFIABILITY_MIN_RESPONSE_RATIO,
+        help="Minimum required single-atom observable response ratio",
+    )
+    p_ident.add_argument(
+        "--min-unique-signatures",
+        type=int,
+        default=IDENTIFIABILITY_MIN_UNIQUE_SIGNATURES,
+        help="Minimum required number of unique observable signatures",
+    )
+    p_ident.add_argument("--out", type=str, default="", help="Optional output JSON path")
+    p_ident.set_defaults(func=_cmd_identifiability_check)
+
     p_freeze = sub.add_parser(
         "freeze-pilot",
         help="Freeze a provisional internal pilot pack (bundle + manifest + freeze metadata)",
@@ -2564,6 +3839,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to external run JSONL (repeatable)",
     )
     p_campaign.add_argument(
+        "--external-episodes",
+        action="append",
+        default=[],
+        help=(
+            "Optional play-output artifact path (JSON or JSONL). "
+            "Each payload is converted to strict run rows and merged."
+        ),
+    )
+    p_campaign.add_argument(
         "--adaptation-condition",
         type=str,
         default="no_adaptation",
@@ -2583,6 +3867,134 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite an existing non-empty output directory",
     )
     p_campaign.set_defaults(func=_cmd_pilot_campaign)
+
+    p_release_pkg = sub.add_parser(
+        "release-package",
+        help=(
+            "Build a reproducibility package from a frozen pack and campaign "
+            "artifacts with strict validation."
+        ),
+    )
+    p_release_pkg.add_argument(
+        "--freeze-dir",
+        type=str,
+        required=True,
+        help="Directory containing frozen pilot artifacts (bundle + manifest)",
+    )
+    p_release_pkg.add_argument(
+        "--campaign-dir",
+        type=str,
+        required=True,
+        help="Directory containing campaign artifacts (runs + validation + report)",
+    )
+    p_release_pkg.add_argument(
+        "--out-dir",
+        type=str,
+        default="release_packages/gf01_release_package_v1",
+        help="Output directory for packaged artifacts and manifest",
+    )
+    p_release_pkg.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing non-empty output directory",
+    )
+    p_release_pkg.set_defaults(func=_cmd_release_package)
+
+    p_release_candidate = sub.add_parser(
+        "release-candidate-check",
+        help=(
+            "Run release governance/report/package checks end-to-end from a "
+            "frozen pack and campaign artifact directory."
+        ),
+    )
+    p_release_candidate.add_argument(
+        "--freeze-dir",
+        type=str,
+        required=True,
+        help="Directory containing split_manifest_v1.json for the candidate run",
+    )
+    p_release_candidate.add_argument(
+        "--campaign-dir",
+        type=str,
+        required=True,
+        help="Directory containing runs_combined.jsonl for the candidate run",
+    )
+    p_release_candidate.add_argument(
+        "--previous-manifest",
+        type=str,
+        default="",
+        help="Optional previous-cycle manifest used for rotation checks",
+    )
+    p_release_candidate.add_argument(
+        "--require-previous-manifest",
+        action="store_true",
+        help="Fail if --previous-manifest is not provided",
+    )
+    p_release_candidate.add_argument(
+        "--target-ratios",
+        type=str,
+        default=default_ratio_arg,
+        help="Comma-separated split ratios (split=value, normalized internally)",
+    )
+    p_release_candidate.add_argument(
+        "--tolerance",
+        type=float,
+        default=DEFAULT_SPLIT_RATIO_TOLERANCE,
+        help="Absolute per-split ratio tolerance for governance checks",
+    )
+    p_release_candidate.add_argument(
+        "--private-split",
+        type=str,
+        default="private_eval",
+        help="Split id treated as private official-eval split",
+    )
+    p_release_candidate.add_argument(
+        "--min-private-eval-count",
+        type=int,
+        default=DEFAULT_PRIVATE_EVAL_MIN_COUNT,
+        help="Minimum required row count in private split",
+    )
+    p_release_candidate.add_argument(
+        "--min-public-novelty-ratio",
+        type=float,
+        default=DEFAULT_MIN_PUBLIC_NOVELTY_RATIO,
+        help="Minimum novelty ratio in public splits against previous cycle",
+    )
+    p_release_candidate.add_argument(
+        "--allow-non-official-split-names",
+        action="store_true",
+        help="Allow split IDs outside OFFICIAL_SPLITS",
+    )
+    p_release_candidate.add_argument(
+        "--no-strict-manifest",
+        action="store_true",
+        help="Disable strict manifest schema/family checks for governance stage",
+    )
+    p_release_candidate.add_argument(
+        "--baseline-policy-level",
+        type=str,
+        default="full",
+        choices=list(ALLOWED_BASELINE_PANEL_LEVELS),
+        help="Required baseline policy level for release report stage",
+    )
+    p_release_candidate.add_argument(
+        "--skip-package",
+        action="store_true",
+        help="Skip reproducibility package assembly stage",
+    )
+    p_release_candidate.add_argument(
+        "--package-out-dir",
+        type=str,
+        default="release_packages/gf01_release_candidate_v1",
+        help="Output directory for release-package stage",
+    )
+    p_release_candidate.add_argument(
+        "--force-package",
+        action="store_true",
+        help="Allow non-empty package output directory overwrite in package stage",
+    )
+    p_release_candidate.add_argument("--out", type=str, default="", help="Optional output JSON path")
+    p_release_candidate.set_defaults(func=_cmd_release_candidate_check)
 
     p_analysis = sub.add_parser(
         "pilot-analyze",

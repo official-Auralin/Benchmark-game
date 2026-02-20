@@ -158,11 +158,52 @@ def run_regression_gate(
     if fail_fast and not ok:
         return _finalize(steps)
 
+    bundle_path = fixture_root / "instance_bundle_v1.json"
     runs_path = fixture_root / "runs_v1_valid.jsonl"
     manifest_path = fixture_root / "split_manifest_v1.json"
+    bundle_exists = bundle_path.exists()
     fixture_exists = runs_path.exists() and manifest_path.exists()
 
-    # Step 5: strict official validate on fixture
+    # Step 5: identifiability policy check on fixture bundle
+    if not bundle_exists:
+        r_ident = {
+            "cmd": "",
+            "returncode": 1,
+            "duration_ms": 0.0,
+            "stdout_preview": [],
+            "stderr_preview": [],
+            "stdout_text": "",
+        }
+        ok = add_step(
+            "identifiability_policy_fixture",
+            r_ident,
+            False,
+            notes={"bundle_exists": False, "bundle_path": str(bundle_path)},
+        )
+        if fail_fast and not ok:
+            return _finalize(steps)
+    else:
+        r_ident = _run_subprocess(
+            [
+                sys.executable,
+                "-m",
+                "gf01",
+                "identifiability-check",
+                "--instances",
+                str(bundle_path),
+            ],
+            cwd=root,
+        )
+        ok = add_step(
+            "identifiability_policy_fixture",
+            r_ident,
+            r_ident["returncode"] == 0,
+            notes={"bundle_exists": True},
+        )
+        if fail_fast and not ok:
+            return _finalize(steps)
+
+    # Step 6: strict official validate on fixture
     if not fixture_exists:
         r_validate = {
             "cmd": "",
@@ -204,7 +245,7 @@ def run_regression_gate(
         if fail_fast and not ok:
             return _finalize(steps)
 
-    # Step 6: strict official report on fixture
+    # Step 7: strict official report on fixture
     if not fixture_exists:
         r_report = {
             "cmd": "",

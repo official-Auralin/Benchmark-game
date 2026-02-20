@@ -22,8 +22,14 @@ import random
 from dataclasses import dataclass
 
 from .models import GF01Instance, InterventionAtom
-from .semantics import apply_certificate, run_automaton, sorted_certificate, timestep_cost
-from .verifier import candidate_atoms, evaluate_certificate, find_valid_certificates
+from .semantics import (
+    apply_certificate,
+    effect_satisfied,
+    run_automaton,
+    sorted_certificate,
+    timestep_cost,
+)
+from .verifier import candidate_atoms, find_valid_certificates
 
 
 @dataclass
@@ -66,6 +72,12 @@ def _effect_hit_count(instance: GF01Instance, certificate: list[InterventionAtom
     return sum(int(outputs[t].get(instance.effect_ap, 0)) for t in range(start, end + 1))
 
 
+def _is_sufficient(instance: GF01Instance, certificate: list[InterventionAtom]) -> bool:
+    trace = apply_certificate(instance.base_trace, certificate)
+    _, outputs = run_automaton(instance.automaton, trace)
+    return effect_satisfied(instance, outputs)
+
+
 class GreedyLocalAgent(BaselineAgent):
     def __init__(self) -> None:
         super().__init__(name="BL-01-GreedyLocal")
@@ -81,10 +93,10 @@ class GreedyLocalAgent(BaselineAgent):
                 trial = sorted_certificate(cert + [atom])
                 if timestep_cost(trial) > instance.budget_timestep:
                     continue
-                res = evaluate_certificate(instance, trial)
+                suff = _is_sufficient(instance, trial)
                 hits = _effect_hit_count(instance, trial)
                 score = (
-                    int(res.suff),  # prioritize making the effect happen
+                    int(suff),      # prioritize making the effect happen
                     hits,           # then maximize local effect activations
                     f"{atom.timestep}:{atom.ap}:{atom.value}",
                 )
@@ -100,13 +112,13 @@ class GreedyLocalAgent(BaselineAgent):
             cert = trial
             current_hits = hits
             remaining = [a for a in remaining if a != best_atom]
-            if evaluate_certificate(instance, cert).suff:
+            if _is_sufficient(instance, cert):
                 break
         # Greedy prune to reduce obvious over-intervention while keeping sufficiency.
         pruned = cert[:]
         for atom in cert:
             trial = [a for a in pruned if a != atom]
-            if evaluate_certificate(instance, trial).suff:
+            if _is_sufficient(instance, trial):
                 pruned = trial
         return sorted_certificate(pruned)
 

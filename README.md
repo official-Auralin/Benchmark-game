@@ -142,6 +142,28 @@ python3 -m gf01 pilot-campaign \
   --seed 1100
 ```
 
+To merge human/external play sessions produced by `play --out`, pass
+`--external-episodes` (repeatable). Accepted formats are JSON (single payload
+or list of payloads) and JSONL (one payload per line):
+
+```bash
+python3 -m gf01 play \
+  --instances pilot_freeze/gf01_pilot_freeze_v1/instance_bundle_v1.json \
+  --instance-index 0 \
+  --script demo_actions.json \
+  --renderer-track json \
+  --out pilot_runs/external_episode_000.json
+
+python3 -m gf01 pilot-campaign \
+  --freeze-dir pilot_freeze/gf01_pilot_freeze_v1 \
+  --out-dir pilot_runs/gf01_pilot_campaign_v1_plus_external \
+  --baseline-panel random,greedy,oracle \
+  --baseline-policy-level core \
+  --renderer-track json \
+  --seed 1100 \
+  --external-episodes pilot_runs/external_episode_000.json
+```
+
 Run campaigns for each matched-mode freeze:
 
 ```bash
@@ -196,6 +218,19 @@ python3 -m gf01 pilot-analyze \
 This writes `pilot_analysis.json` inside the campaign directory and prints the
 same payload to stdout.
 
+Build a reproducibility package from frozen+campaign artifacts (strict
+validation is enforced before packaging):
+
+```bash
+python3 -m gf01 release-package \
+  --freeze-dir pilot_freeze/gf01_pilot_freeze_v1 \
+  --campaign-dir pilot_runs/gf01_pilot_campaign_v1 \
+  --out-dir release_packages/gf01_release_package_v1
+```
+
+This emits `release_package_manifest.json`, `RERUN_INSTRUCTIONS.md`, and an
+`artifacts/` directory with pinned bundle/manifest/runs/report files.
+
 `pilot-analyze` now emits `complexity_policy_version=gf01.complexity_policy.v1`
 with machine-checkable complexity diagnostics:
 
@@ -220,6 +255,47 @@ Typical output locations:
 
 If you maintain a private research notebook workflow, keep it as an optional
 presentation layer over these same command outputs.
+
+## Q-033 high-performance closure workflow
+
+The pre-registered `Q-033` protocol is executable via three commands.
+
+1) Build deterministic balanced quartile seed manifests:
+
+```bash
+python3 -m gf01 q033-build-manifests \
+  --seed-start 8000 \
+  --candidate-count 4000 \
+  --replicates 2 \
+  --per-quartile 120 \
+  --split q033_internal \
+  --out-dir q033_manifests/q033_protocol_v1
+```
+
+2) Run one sweep per replicate manifest (default thresholds are protocol values
+baked into the CLI for `gf01.q033_protocol.v1`):
+
+```bash
+python3 -m gf01 q033-sweep \
+  --manifest q033_manifests/q033_protocol_v1/q033-rep-01.json \
+  --out q033_runs/q033_rep01_sweep.json
+
+python3 -m gf01 q033-sweep \
+  --manifest q033_manifests/q033_protocol_v1/q033-rep-02.json \
+  --out q033_runs/q033_rep02_sweep.json
+```
+
+3) Apply closure rule across replicates:
+
+```bash
+python3 -m gf01 q033-closure-check \
+  --sweep q033_runs/q033_rep01_sweep.json \
+  --sweep q033_runs/q033_rep02_sweep.json \
+  --out q033_runs/q033_closure_report.json
+```
+
+`q033-closure-check` exits nonzero unless all replicate gates pass and seed sets
+are disjoint (unless `--allow-seed-overlap` is explicitly supplied).
 
 ## Track policy summary
 
@@ -306,6 +382,75 @@ python3 -m gf01 split-policy-check \
 
 This emits a machine-checkable JSON report and exits nonzero on policy
 violations.
+
+To enforce release-cycle rotation and contamination safeguards against a prior
+manifest, run:
+
+```bash
+python3 -m gf01 release-governance-check \
+  --manifest split_manifest_current_v1.json \
+  --previous-manifest split_manifest_previous_v1.json \
+  --require-previous-manifest \
+  --target-ratios public_dev=0.2,public_val=0.2,private_eval=0.6 \
+  --tolerance 0.05 \
+  --private-split private_eval \
+  --min-private-eval-count 1 \
+  --min-public-novelty-ratio 0.10
+```
+
+This checks both:
+- split policy (`gf01.split_policy.v1`), and
+- release rotation policy (`gf01.rotation_policy.v1`):
+  - no previous-private instances are exposed in current public splits,
+  - current public split has enough novel instances versus previous public.
+
+For release reporting policy (required baseline panel + per-track/per-slice
+coverage), run:
+
+```bash
+python3 -m gf01 release-report-check \
+  --runs runs_combined.jsonl \
+  --manifest split_manifest_v1.json \
+  --baseline-policy-level full
+```
+
+This enforces `gf01.baseline_panel_policy.v1` coverage by manifest slice and
+fails if required baseline agents/tracks are missing from release artifacts.
+
+To execute governance + report + package checks in one deterministic command,
+run:
+
+```bash
+python3 -m gf01 release-candidate-check \
+  --freeze-dir pilot_freeze/gf01_pilot_freeze_v1 \
+  --campaign-dir pilot_runs/gf01_pilot_campaign_v1 \
+  --baseline-policy-level full \
+  --package-out-dir release_packages/gf01_release_candidate_v1 \
+  --out release_candidate_check.json
+```
+
+Optional rotation hardening flags for the integrated command:
+- `--previous-manifest <path>`
+- `--require-previous-manifest`
+- `--min-public-novelty-ratio <float>`
+
+Use `--skip-package` if you want to validate governance/report stages without
+building a release package in the same invocation.
+
+## Identifiability policy check (partial observability)
+
+To validate that an instance bundle satisfies the locked identifiability policy
+(`gf01.identifiability_policy.v1`), run:
+
+```bash
+python3 -m gf01 identifiability-check \
+  --instances tests/fixtures/official_example/instance_bundle_v1.json \
+  --min-response-ratio 0.60 \
+  --min-unique-signatures 8
+```
+
+This emits a machine-checkable JSON report and exits nonzero if any instance
+falls below threshold.
 
 ## Notes
 

@@ -21,6 +21,10 @@ __status__ = "Development"
 import hashlib
 import random
 
+from .identifiability import (
+    identifiability_policy_error,
+    instance_identifiability_metrics,
+)
 from .models import GF01Instance, GeneratorConfig, MealyAutomaton, Valuation
 from .semantics import all_input_valuations, effect_satisfied, input_key, run_automaton
 from .verifier import exact_existence_check
@@ -139,6 +143,7 @@ def generate_instance(
             budget_atoms=b_a,
             seed=seed,
             complexity=complexity,
+            identifiability={},
             split_id=split_id,
             renderer_track="json",
         )
@@ -146,10 +151,22 @@ def generate_instance(
         _, base_outputs = run_automaton(instance.automaton, instance.base_trace)
         if effect_satisfied(instance, base_outputs):
             continue
+        ident_metrics = instance_identifiability_metrics(instance)
+        ident_err = identifiability_policy_error(
+            ident_metrics,
+            min_response_ratio=cfg.ident_min_response_ratio,
+            min_unique_signatures=cfg.ident_min_unique_signatures,
+        )
+        ident_metrics["min_response_ratio"] = float(cfg.ident_min_response_ratio)
+        ident_metrics["min_unique_signatures"] = int(cfg.ident_min_unique_signatures)
+        ident_metrics["passes_threshold"] = ident_err is None
+        if ident_err is not None:
+            continue
+        instance.identifiability = ident_metrics
         exists, witness, truncated = exact_existence_check(
             instance, max_nodes=cfg.max_exact_nodes
         )
-        if exists and witness is not None:
+        if exists and witness is not None and len(witness) >= int(cfg.min_witness_atoms):
             return instance, witness
         # If search truncates, retry to avoid accepting unknown/no-witness instances.
         if truncated:

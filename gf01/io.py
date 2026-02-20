@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .metrics import compute_ap_ts_metrics
 from .meta import (
     ADAPTATION_POLICY_VERSION,
     ALLOWED_EVAL_TRACKS,
@@ -46,6 +47,8 @@ from .meta import (
     stable_hash_json,
 )
 from .models import GF01Instance, InterventionAtom, MealyAutomaton, RunRecord
+from .semantics import sorted_certificate, timestep_cost
+from .verifier import evaluate_certificate, find_valid_certificates
 
 
 def _track_tool_policy_error(
@@ -164,6 +167,9 @@ def instance_from_dict(data: dict[str, Any]) -> GF01Instance:
         budget_atoms=int(data["budget_atoms"]),
         seed=int(data["seed"]),
         complexity={str(k): float(v) for k, v in data.get("complexity", {}).items()},
+        identifiability={
+            str(k): v for k, v in data.get("identifiability", {}).items()
+        },
         split_id=str(data.get("split_id", "public_dev")),
         renderer_track=str(data.get("renderer_track", "json")),
     )
@@ -310,6 +316,10 @@ def run_record_to_dict(
                 "budget_atoms": int(instance.budget_atoms),
                 "seed": int(instance.seed),
                 "complexity": {k: float(instance.complexity[k]) for k in sorted(instance.complexity)},
+                "identifiability": {
+                    k: instance.identifiability[k]
+                    for k in sorted(instance.identifiability)
+                },
             }
         )
     return out
@@ -353,6 +363,166 @@ def write_json(path: str, payload: dict[str, Any]) -> None:
 def write_jsonl(path: str, rows: list[dict[str, Any]]) -> None:
     lines = [json.dumps(row, sort_keys=True) for row in rows]
     Path(path).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def _certificate_from_episode_payload(raw_cert: Any) -> list[InterventionAtom]:
+    if not isinstance(raw_cert, list):
+        raise ValueError("episode.certificate must be a list")
+    atoms: list[InterventionAtom] = []
+    for idx, item in enumerate(raw_cert):
+        if isinstance(item, (list, tuple)) and len(item) == 3:
+            raw_t, raw_ap, raw_value = item
+        elif isinstance(item, dict):
+            raw_t = item.get("timestep")
+            raw_ap = item.get("ap")
+            raw_value = item.get("value")
+        else:
+            raise ValueError(
+                f"episode.certificate[{idx}] must be [t, ap, value] or object form"
+            )
+        try:
+            timestep = int(raw_t)
+        except Exception as exc:
+            raise ValueError(
+                f"episode.certificate[{idx}].timestep must be integer"
+            ) from exc
+        ap = str(raw_ap).strip()
+        if not ap:
+            raise ValueError(f"episode.certificate[{idx}].ap must be non-empty")
+        try:
+            value = int(raw_value)
+        except Exception as exc:
+            raise ValueError(
+                f"episode.certificate[{idx}].value must be integer"
+            ) from exc
+        atoms.append(InterventionAtom(timestep=timestep, ap=ap, value=value))
+    return sorted_certificate(atoms)
+
+
+def run_row_from_play_payload(
+    payload: dict[str, Any],
+    *,
+    run_meta: dict[str, Any] | None = None,
+    max_nodes: int = 120_000,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("play payload must be a JSON object")
+    if str(payload.get("status", "")).strip().lower() != "ok":
+        raise ValueError("play payload status must be 'ok'")
+
+    instance_raw = payload.get("instance")
+    if not isinstance(instance_raw, dict):
+        raise ValueError("play payload must include object field 'instance'")
+    instance = instance_from_dict(instance_raw)
+
+    episode = payload.get("episode")
+    if not isinstance(episode, dict):
+        raise ValueError("play payload must include object field 'episode'")
+    run_contract = payload.get("run_contract")
+    if not isinstance(run_contract, dict):
+        raise ValueError("play payload must include object field 'run_contract'")
+
+    episode_instance_id = str(episode.get("instance_id", "")).strip()
+    if episode_instance_id and episode_instance_id != instance.instance_id:
+        raise ValueError(
+            "episode.instance_id does not match instance.instance_id "
+            f"({episode_instance_id} != {instance.instance_id})"
+        )
+
+    certificate = _certificate_from_episode_payload(episode.get("certificate", []))
+    verification = evaluate_certificate(instance, certificate)
+    for bool_field, expected in {
+        "suff": verification.suff,
+        "min1": verification.min1,
+        "valid": verification.valid,
+        "goal": verification.goal,
+    }.items():
+        if bool_field in episode and bool(episode.get(bool_field)) != bool(expected):
+            raise ValueError(
+                f"episode.{bool_field}={episode.get(bool_field)!r} does not match "
+                f"verifier result {bool(expected)!r}"
+            )
+
+    minimal_set = find_valid_certificates(
+        instance,
+        max_nodes=max_nodes,
+        max_results=32,
+    ).certificates
+    ap_p, ap_r, ap_f1, ts_p, ts_r, ts_f1 = compute_ap_ts_metrics(
+        certificate,
+        minimal_set,
+    )
+
+    eval_track = str(run_contract.get("eval_track", "EVAL-CB")).strip() or "EVAL-CB"
+    renderer_track = (
+        str(run_contract.get("renderer_track", instance.renderer_track)).strip()
+        or instance.renderer_track
+    )
+    agent_name = str(payload.get("actor", "external-episode")).strip() or "external-episode"
+    record = RunRecord(
+        instance_id=instance.instance_id,
+        eval_track=eval_track,
+        renderer_track=renderer_track,
+        agent_name=agent_name,
+        certificate=certificate,
+        suff=verification.suff,
+        min1=verification.min1,
+        valid=verification.valid,
+        goal=verification.goal,
+        eff_t=timestep_cost(certificate),
+        eff_a=len(certificate),
+        ap_precision=ap_p,
+        ap_recall=ap_r,
+        ap_f1=ap_f1,
+        ts_precision=ts_p,
+        ts_recall=ts_r,
+        ts_f1=ts_f1,
+    )
+
+    merged_meta = dict(run_meta or {})
+    merged_meta.setdefault("tool_allowlist_id", str(run_contract.get("tool_allowlist_id", "")))
+    merged_meta.setdefault("tool_log_hash", str(run_contract.get("tool_log_hash", "")))
+    merged_meta.setdefault("play_protocol", str(run_contract.get("play_protocol", "commit_only")))
+    merged_meta.setdefault(
+        "scored_commit_episode",
+        bool(run_contract.get("scored_commit_episode", True)),
+    )
+    merged_meta.setdefault(
+        "renderer_policy_version",
+        str(run_contract.get("renderer_policy_version", RENDERER_POLICY_VERSION)),
+    )
+    merged_meta.setdefault(
+        "renderer_profile_id",
+        str(run_contract.get("renderer_profile_id", renderer_profile_for_track(renderer_track))),
+    )
+    merged_meta.setdefault(
+        "adaptation_policy_version",
+        str(run_contract.get("adaptation_policy_version", ADAPTATION_POLICY_VERSION)),
+    )
+    merged_meta.setdefault(
+        "adaptation_condition",
+        str(run_contract.get("adaptation_condition", "no_adaptation")),
+    )
+    try:
+        merged_meta.setdefault(
+            "adaptation_budget_tokens",
+            int(run_contract.get("adaptation_budget_tokens", 0)),
+        )
+    except Exception as exc:
+        raise ValueError("run_contract.adaptation_budget_tokens must be integer") from exc
+    merged_meta.setdefault(
+        "adaptation_data_scope",
+        str(run_contract.get("adaptation_data_scope", "none")),
+    )
+    merged_meta.setdefault(
+        "adaptation_protocol_id",
+        str(run_contract.get("adaptation_protocol_id", "none")),
+    )
+    return run_record_to_dict(
+        record,
+        instance=instance,
+        run_meta=merged_meta,
+    )
 
 
 def _missing_fields(payload: dict[str, Any], required: tuple[str, ...]) -> list[str]:

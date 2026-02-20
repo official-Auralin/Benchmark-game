@@ -21,6 +21,11 @@ __status__ = "Development"
 from dataclasses import dataclass, field
 from typing import Any
 
+from .meta import (
+    IDENTIFIABILITY_MIN_RESPONSE_RATIO,
+    IDENTIFIABILITY_MIN_UNIQUE_SIGNATURES,
+)
+
 
 Bit = int
 Valuation = dict[str, Bit]
@@ -77,6 +82,7 @@ class GF01Instance:
     budget_atoms: int
     seed: int
     complexity: dict[str, float] = field(default_factory=dict)
+    identifiability: dict[str, Any] = field(default_factory=dict)
     split_id: str = "public_dev"
     renderer_track: str = "json"
 
@@ -95,6 +101,10 @@ class GF01Instance:
             "budget_atoms": int(self.budget_atoms),
             "seed": int(self.seed),
             "complexity": {k: float(self.complexity[k]) for k in sorted(self.complexity)},
+            "identifiability": {
+                k: self.identifiability[k]
+                for k in sorted(self.identifiability)
+            },
             "split_id": self.split_id,
             "renderer_track": self.renderer_track,
         }
@@ -114,6 +124,9 @@ class GeneratorConfig:
     budget_tightness: float = 0.25
     max_generation_attempts: int = 20
     max_exact_nodes: int = 120_000
+    min_witness_atoms: int = 1
+    ident_min_response_ratio: float = IDENTIFIABILITY_MIN_RESPONSE_RATIO
+    ident_min_unique_signatures: int = IDENTIFIABILITY_MIN_UNIQUE_SIGNATURES
 
 
 @dataclass

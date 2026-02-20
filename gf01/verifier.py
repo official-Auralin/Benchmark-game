@@ -18,7 +18,6 @@ __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
-import itertools
 from dataclasses import dataclass
 
 from .models import GF01Instance, InterventionAtom
@@ -122,19 +121,75 @@ def find_valid_certificates(
     if max_results is not None and len(found) >= max_results:
         return SearchResult(found, nodes, False)
 
-    for k in range(1, instance.budget_atoms + 1):
-        for combo in itertools.combinations(atoms, k):
+    max_atoms_given_timestep_budget = int(
+        instance.budget_timestep * len(instance.automaton.input_aps)
+    )
+
+    truncated = False
+
+    def _search_k(
+        *,
+        target_k: int,
+        start_idx: int,
+        chosen: list[InterventionAtom],
+        used_timesteps: set[int],
+    ) -> None:
+        nonlocal nodes, truncated
+        if truncated:
+            return
+        if max_results is not None and len(found) >= max_results:
+            return
+
+        if len(chosen) == target_k:
             nodes += 1
             if nodes > max_nodes:
-                return SearchResult(found, nodes, True)
-            cert = sorted_certificate(combo)
-            if timestep_cost(cert) > instance.budget_timestep:
-                continue
+                truncated = True
+                return
+            cert = sorted_certificate(chosen)
             res = evaluate_certificate(instance, cert)
             if res.valid:
                 found.append(cert)
-                if max_results is not None and len(found) >= max_results:
-                    return SearchResult(found, nodes, False)
+            return
+
+        remaining = target_k - len(chosen)
+        upper = len(atoms) - remaining
+        for idx in range(start_idx, upper + 1):
+            atom = atoms[idx]
+            timestep_added = atom.timestep not in used_timesteps
+            if timestep_added and (len(used_timesteps) + 1) > instance.budget_timestep:
+                continue
+
+            chosen.append(atom)
+            if timestep_added:
+                used_timesteps.add(atom.timestep)
+            _search_k(
+                target_k=target_k,
+                start_idx=idx + 1,
+                chosen=chosen,
+                used_timesteps=used_timesteps,
+            )
+            if timestep_added:
+                used_timesteps.remove(atom.timestep)
+            chosen.pop()
+
+            if truncated:
+                return
+            if max_results is not None and len(found) >= max_results:
+                return
+
+    for k in range(1, instance.budget_atoms + 1):
+        if k > max_atoms_given_timestep_budget:
+            break
+        _search_k(
+            target_k=k,
+            start_idx=0,
+            chosen=[],
+            used_timesteps=set(),
+        )
+        if truncated:
+            return SearchResult(found, nodes, True)
+        if max_results is not None and len(found) >= max_results:
+            return SearchResult(found, nodes, False)
     return SearchResult(found, nodes, False)
 
 

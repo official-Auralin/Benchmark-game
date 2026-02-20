@@ -61,6 +61,22 @@ class TestPilotFreeze(unittest.TestCase):
             summary = json.loads(proc.stdout)
             self.assertEqual(summary.get("status"), "ok")
             self.assertEqual(summary.get("instance_count"), 3)
+            self.assertEqual(
+                summary.get("identifiability_policy_version"),
+                "gf01.identifiability_policy.v1",
+            )
+            self.assertEqual(
+                summary.get("identifiability_metric_id"),
+                "single_atom_observation_divergence.v1",
+            )
+            self.assertAlmostEqual(
+                float(summary.get("identifiability_min_response_ratio", 0.0)),
+                0.60,
+            )
+            self.assertEqual(
+                int(summary.get("identifiability_min_unique_signatures", 0)),
+                8,
+            )
 
             bundle_path = Path(summary["bundle_path"])
             manifest_path = Path(summary["manifest_path"])
@@ -75,12 +91,24 @@ class TestPilotFreeze(unittest.TestCase):
 
             self.assertEqual(bundle.get("schema_version"), "gf01.instance_bundle.v1")
             self.assertEqual(len(bundle.get("instances", [])), 3)
+            self.assertEqual(
+                bundle.get("identifiability_policy_version"),
+                "gf01.identifiability_policy.v1",
+            )
+            self.assertEqual(
+                bundle.get("identifiability_metric_id"),
+                "single_atom_observation_divergence.v1",
+            )
             self.assertEqual(manifest.get("schema_version"), "gf01.split_manifest.v1")
             self.assertEqual(manifest.get("instance_count"), 3)
             self.assertEqual(freeze_meta.get("schema_version"), "gf01.pilot_freeze.v1")
             self.assertEqual(freeze_meta.get("freeze_id"), "gf01-pilot-freeze-test")
             self.assertEqual(freeze_meta.get("seed_count"), 3)
             self.assertTrue(freeze_meta.get("provisional"))
+            self.assertEqual(
+                freeze_meta.get("identifiability_policy_version"),
+                "gf01.identifiability_policy.v1",
+            )
 
     def test_freeze_pilot_requires_force_for_non_empty_output_dir(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-freeze-") as tmp:
