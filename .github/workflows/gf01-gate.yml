@@ -1,0 +1,104 @@
+name: GF01 Gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: gf01-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache Python Bytecode
+        uses: actions/cache@v4
+        with:
+          path: .ci_pycache
+          key: gf01-pycache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('gf01/**/*.py', 'tests/**/*.py') }}
+
+      - name: Run GF01 Gate
+        shell: bash
+        env:
+          PYTHONHASHSEED: "0"
+          PYTHONPYCACHEPREFIX: .ci_pycache
+        run: |
+          set -o pipefail
+          timeout 18m python -m gf01 gate --fixture-root tests/fixtures/official_example | tee gf01_gate_summary.json
+
+      - name: Upload Gate Summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gf01-gate-summary
+          path: gf01_gate_summary.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  release-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - gate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cache Python Bytecode
+        uses: actions/cache@v4
+        with:
+          path: .ci_pycache
+          key: gf01-pycache-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('gf01/**/*.py', 'tests/**/*.py') }}
+
+      - name: Run Integrated Release Candidate Check
+        shell: bash
+        env:
+          PYTHONHASHSEED: "0"
+          PYTHONPYCACHEPREFIX: .ci_pycache
+        run: |
+          set -o pipefail
+          timeout 8m python -m gf01 release-candidate-check \
+            --freeze-dir research_pack/pilot_runs/release_candidate_smoke_v1/current_freeze \
+            --campaign-dir research_pack/pilot_runs/release_candidate_smoke_v1/campaign \
+            --previous-manifest research_pack/pilot_runs/release_candidate_smoke_v1/previous_freeze/split_manifest_v1.json \
+            --require-previous-manifest \
+            --min-private-eval-count 1 \
+            --min-public-novelty-ratio 1.0 \
+            --package-out-dir "${RUNNER_TEMP}/gf01_release_candidate_package" \
+            --force-package \
+            --out release_candidate_check_ci.json | tee release_candidate_check_ci_stdout.json
+
+      - name: Upload Release Candidate Check Summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gf01-release-candidate-check
+          path: |
+            release_candidate_check_ci.json
+            release_candidate_check_ci_stdout.json
+          if-no-files-found: warn
+          retention-days: 14
