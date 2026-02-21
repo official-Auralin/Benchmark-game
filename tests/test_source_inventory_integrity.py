@@ -20,27 +20,22 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 import csv
-import os
 import re
 import unittest
 from pathlib import Path
 
+try:
+    from .repo_scope import is_public_mirror
+except ImportError:  # pragma: no cover - discover mode imports test modules top-level.
+    from repo_scope import is_public_mirror
+
 
 ROOT = Path(__file__).resolve().parents[1]
-PRIVATE_SPEC_PATH = ROOT / "Spec.tex"
 SOURCES_CSV_PATH = ROOT / "research_pack" / "01_sources" / "sources.csv"
 SOURCES_BIB_PATH = ROOT / "research_pack" / "01_sources" / "sources.bib"
 SOURCE_NOTES_DIR = ROOT / "research_pack" / "03_notes"
 
-_repo_scope = os.environ.get("GF01_REPO_SCOPE", "").strip().lower()
-if _repo_scope in {"public", "public_mirror"}:
-    IS_PUBLIC_MIRROR = True
-elif _repo_scope in {"private", "source"}:
-    IS_PUBLIC_MIRROR = False
-else:
-    # Fallback repo detection for local runs:
-    # private source repo includes Spec.tex, public mirror does not.
-    IS_PUBLIC_MIRROR = not PRIVATE_SPEC_PATH.exists()
+IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
 
 _MISSING_PDF_JUSTIFICATION_KEYWORDS = (
     "no public pdf",
@@ -112,6 +107,22 @@ class TestSourceInventoryIntegrity(unittest.TestCase):
                 r"note\s*=\s*\{[^}]*source_id\s*:\s*(SRC-\d{3})[^}]*\}",
                 bib_text,
             )
+        )
+        csv_citation_keys = set(citation_keys)
+        csv_source_ids = set(source_ids)
+        self.assertTrue(
+            bib_keys.issubset(csv_citation_keys),
+            msg=(
+                "Every citation key in sources.bib must exist as a "
+                "citation_key in sources.csv"
+            ),
+        )
+        self.assertTrue(
+            bib_source_ids.issubset(csv_source_ids),
+            msg=(
+                "Every source_id referenced in sources.bib must exist as a "
+                "source_id in sources.csv"
+            ),
         )
 
         required_statuses = {"skimming", "deep-read", "extracted"}
