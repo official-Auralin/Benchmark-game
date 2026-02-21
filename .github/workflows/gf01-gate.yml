@@ -60,11 +60,13 @@ jobs:
         env:
           GH_API: ${{ github.api_url }}
           GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           JOB_STATUS: ${{ job.status }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
+          commit_sha="${HEAD_SHA:-${SHA}}"
           case "${JOB_STATUS}" in
             success)
               state="success"
@@ -86,7 +88,7 @@ jobs:
           curl -fsSL -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "${GH_API}/repos/${REPO}/statuses/${SHA}" \
+            "${GH_API}/repos/${REPO}/statuses/${commit_sha}" \
             -d "{\"state\":\"${state}\",\"context\":\"GF01 Gate / gate\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}"
 
   release-candidate:
@@ -229,11 +231,13 @@ jobs:
         env:
           GH_API: ${{ github.api_url }}
           GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           JOB_STATUS: ${{ job.status }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
+          commit_sha="${HEAD_SHA:-${SHA}}"
           case "${JOB_STATUS}" in
             success)
               state="success"
@@ -255,5 +259,5 @@ jobs:
           curl -fsSL -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "${GH_API}/repos/${REPO}/statuses/${SHA}" \
+            "${GH_API}/repos/${REPO}/statuses/${commit_sha}" \
             -d "{\"state\":\"${state}\",\"context\":\"GF01 Gate / release-candidate\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}"
