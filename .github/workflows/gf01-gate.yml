@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   gate:
@@ -53,6 +54,40 @@ jobs:
           path: gf01_gate_summary.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Publish Gate Status Context
+        if: always()
+        env:
+          GH_API: ${{ github.api_url }}
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          case "${JOB_STATUS}" in
+            success)
+              state="success"
+              desc="GF01 gate passed"
+              ;;
+            failure)
+              state="failure"
+              desc="GF01 gate failed"
+              ;;
+            cancelled)
+              state="error"
+              desc="GF01 gate cancelled"
+              ;;
+            *)
+              state="error"
+              desc="GF01 gate status ${JOB_STATUS}"
+              ;;
+          esac
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GH_API}/repos/${REPO}/statuses/${SHA}" \
+            -d "{\"state\":\"${state}\",\"context\":\"GF01 Gate / gate\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}"
 
   release-candidate:
     runs-on: ubuntu-latest
@@ -188,3 +223,37 @@ jobs:
             release_candidate_check_ci_stdout.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Publish Release Candidate Status Context
+        if: always()
+        env:
+          GH_API: ${{ github.api_url }}
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          case "${JOB_STATUS}" in
+            success)
+              state="success"
+              desc="GF01 release-candidate passed"
+              ;;
+            failure)
+              state="failure"
+              desc="GF01 release-candidate failed"
+              ;;
+            cancelled)
+              state="error"
+              desc="GF01 release-candidate cancelled"
+              ;;
+            *)
+              state="error"
+              desc="GF01 release-candidate status ${JOB_STATUS}"
+              ;;
+          esac
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GH_API}/repos/${REPO}/statuses/${SHA}" \
+            -d "{\"state\":\"${state}\",\"context\":\"GF01 Gate / release-candidate\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}"
