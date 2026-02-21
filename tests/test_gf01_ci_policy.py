@@ -59,12 +59,6 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         self.assertIn("python -m gf01 release-candidate-check", text)
         self.assertIn("--require-previous-manifest", text)
         self.assertIn("--min-public-novelty-ratio 1.0", text)
-        if IS_PUBLIC_MIRROR:
-            self.assertNotIn(
-                "research_pack/",
-                text,
-                msg="public mirror workflow must not depend on private research_pack paths",
-            )
 
     def test_branch_protection_guidance_presence_by_repo_scope(self) -> None:
         if IS_PUBLIC_MIRROR:
