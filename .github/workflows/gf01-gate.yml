@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   gate:
@@ -41,7 +42,9 @@ jobs:
           PYTHONPYCACHEPREFIX: .ci_pycache
         run: |
           set -o pipefail
-          timeout 18m python -m gf01 gate --fixture-root tests/fixtures/official_example | tee gf01_gate_summary.json
+          timeout 18m python -m gf01 gate \
+            --fixture-root tests/fixtures/official_example \
+            --seed-profile 4200 | tee gf01_gate_summary.json
 
       - name: Upload Gate Summary
         if: always()
@@ -52,9 +55,45 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Publish Gate Status Context
+        if: always()
+        env:
+          GH_API: ${{ github.api_url }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          JOB_STATUS: ${{ job.status }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          commit_sha="${HEAD_SHA:-${SHA}}"
+          case "${JOB_STATUS}" in
+            success)
+              state="success"
+              desc="GF01 gate passed"
+              ;;
+            failure)
+              state="failure"
+              desc="GF01 gate failed"
+              ;;
+            cancelled)
+              state="error"
+              desc="GF01 gate cancelled"
+              ;;
+            *)
+              state="error"
+              desc="GF01 gate status ${JOB_STATUS}"
+              ;;
+          esac
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GH_API}/repos/${REPO}/statuses/${commit_sha}" \
+            -d "{\"state\":\"${state}\",\"context\":\"GF01 Gate / gate\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}"
+
   release-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs:
       - gate
 
@@ -81,14 +120,98 @@ jobs:
           PYTHONPYCACHEPREFIX: .ci_pycache
         run: |
           set -o pipefail
-          timeout 8m python -m gf01 release-candidate-check \
-            --freeze-dir research_pack/pilot_runs/release_candidate_smoke_v1/current_freeze \
-            --campaign-dir research_pack/pilot_runs/release_candidate_smoke_v1/campaign \
-            --previous-manifest research_pack/pilot_runs/release_candidate_smoke_v1/previous_freeze/split_manifest_v1.json \
+          smoke_root="${RUNNER_TEMP}/gf01_release_candidate_smoke"
+          current_freeze="${smoke_root}/current_freeze"
+          previous_freeze="${smoke_root}/previous_freeze"
+          campaign_dir="${smoke_root}/campaign"
+          package_dir="${smoke_root}/package"
+
+          python -m gf01 freeze-pilot \
+            --freeze-id gf01-release-candidate-current \
+            --split pilot_internal_release_candidate \
+            --seed-start 9600 \
+            --count 3 \
+            --mode normal \
+            --out-dir "${current_freeze}"
+
+          python -m gf01 freeze-pilot \
+            --freeze-id gf01-release-candidate-previous \
+            --split pilot_internal_release_candidate_prev \
+            --seed-start 9700 \
+            --count 3 \
+            --mode normal \
+            --out-dir "${previous_freeze}"
+
+          CURRENT_FREEZE="${current_freeze}" PREVIOUS_FREEZE="${previous_freeze}" python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          split_order = ["public_dev", "public_val", "private_eval"]
+          for freeze_dir in (
+              pathlib.Path(os.environ["CURRENT_FREEZE"]),
+              pathlib.Path(os.environ["PREVIOUS_FREEZE"]),
+          ):
+              bundle_path = freeze_dir / "instance_bundle_v1.json"
+              manifest_path = freeze_dir / "split_manifest_v1.json"
+              bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+              instances = bundle.get("instances", [])
+              if not isinstance(instances, list) or len(instances) != 3:
+                  raise RuntimeError(
+                      f"expected exactly 3 instances for deterministic remap: {freeze_dir}"
+                  )
+
+              for instance, split_id in zip(instances, split_order):
+                  if not isinstance(instance, dict):
+                      raise RuntimeError(f"instance row is not an object: {freeze_dir}")
+                  instance["split_id"] = split_id
+
+              manifest_rows = []
+              for instance in instances:
+                  manifest_rows.append(
+                      {
+                          "instance_id": str(instance.get("instance_id", "")),
+                          "split_id": str(instance.get("split_id", "")),
+                          "mode": str(instance.get("mode", "normal")),
+                          "seed": int(instance.get("seed", 0)),
+                          "t_star": int(instance.get("t_star", 0)),
+                          "window_size": int(instance.get("window_size", 0)),
+                          "budget_timestep": int(instance.get("budget_timestep", 0)),
+                          "budget_atoms": int(instance.get("budget_atoms", 0)),
+                      }
+                  )
+
+              manifest["instance_count"] = len(manifest_rows)
+              manifest["instances"] = manifest_rows
+
+              bundle_path.write_text(
+                  json.dumps(bundle, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
+              manifest_path.write_text(
+                  json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
+          PY
+
+          python -m gf01 pilot-campaign \
+            --freeze-dir "${current_freeze}" \
+            --out-dir "${campaign_dir}" \
+            --baseline-panel random,greedy,search,tool,oracle \
+            --baseline-policy-level full \
+            --renderer-track json \
+            --seed 55
+
+          timeout 12m python -m gf01 release-candidate-check \
+            --freeze-dir "${current_freeze}" \
+            --campaign-dir "${campaign_dir}" \
+            --previous-manifest "${previous_freeze}/split_manifest_v1.json" \
             --require-previous-manifest \
             --min-private-eval-count 1 \
+            --target-ratios public_dev=0.3333333333,public_val=0.3333333333,private_eval=0.3333333333 \
             --min-public-novelty-ratio 1.0 \
-            --package-out-dir "${RUNNER_TEMP}/gf01_release_candidate_package" \
+            --package-out-dir "${package_dir}" \
             --force-package \
             --out release_candidate_check_ci.json | tee release_candidate_check_ci_stdout.json
 
@@ -102,3 +225,39 @@ jobs:
             release_candidate_check_ci_stdout.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Publish Release Candidate Status Context
+        if: always()
+        env:
+          GH_API: ${{ github.api_url }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          JOB_STATUS: ${{ job.status }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          commit_sha="${HEAD_SHA:-${SHA}}"
+          case "${JOB_STATUS}" in
+            success)
+              state="success"
+              desc="GF01 release-candidate passed"
+              ;;
+            failure)
+              state="failure"
+              desc="GF01 release-candidate failed"
+              ;;
+            cancelled)
+              state="error"
+              desc="GF01 release-candidate cancelled"
+              ;;
+            *)
+              state="error"
+              desc="GF01 release-candidate status ${JOB_STATUS}"
+              ;;
+          esac
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GH_API}/repos/${REPO}/statuses/${commit_sha}" \
+            -d "{\"state\":\"${state}\",\"context\":\"GF01 Gate / release-candidate\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}"
