@@ -57,6 +57,8 @@ jobs:
 
       - name: Publish Gate Status Context
         if: always()
+        continue-on-error: true
+        shell: bash
         env:
           GH_API: ${{ github.api_url }}
           GH_TOKEN: ${{ github.token }}
@@ -65,31 +67,49 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
+          STATUS_CONTEXT: GF01 Gate / gate
+          STATUS_LABEL: gate
         run: |
           commit_sha="${HEAD_SHA:-${SHA}}"
           case "${JOB_STATUS}" in
             success)
               state="success"
-              desc="GF01 gate passed"
+              desc="GF01 ${STATUS_LABEL} passed"
               ;;
             failure)
               state="failure"
-              desc="GF01 gate failed"
+              desc="GF01 ${STATUS_LABEL} failed"
               ;;
             cancelled)
               state="error"
-              desc="GF01 gate cancelled"
+              desc="GF01 ${STATUS_LABEL} cancelled"
               ;;
             *)
               state="error"
-              desc="GF01 gate status ${JOB_STATUS}"
+              desc="GF01 ${STATUS_LABEL} status ${JOB_STATUS}"
               ;;
           esac
-          curl -fsSL -X POST \
+          payload="$(jq -n \
+            --arg state "${state}" \
+            --arg context "${STATUS_CONTEXT}" \
+            --arg description "${desc}" \
+            --arg target_url "${RUN_URL}" \
+            '{state:$state, context:$context, description:$description, target_url:$target_url}')"
+          http_code="$(curl -sS -L \
+            --retry 3 \
+            --retry-delay 2 \
+            --retry-connrefused \
+            -o /tmp/gf01_gate_status_response.json \
+            -w "%{http_code}" \
+            -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "${GH_API}/repos/${REPO}/statuses/${commit_sha}" \
-            -d "{\"state\":\"${state}\",\"context\":\"GF01 Gate / gate\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}"
+            --data "${payload}")"
+          if [[ ! "${http_code}" =~ ^2 ]]; then
+            echo "::warning::Status publish returned HTTP ${http_code} for ${STATUS_CONTEXT}."
+            cat /tmp/gf01_gate_status_response.json || true
+          fi
 
   release-candidate:
     runs-on: ubuntu-latest
@@ -228,6 +248,8 @@ jobs:
 
       - name: Publish Release Candidate Status Context
         if: always()
+        continue-on-error: true
+        shell: bash
         env:
           GH_API: ${{ github.api_url }}
           GH_TOKEN: ${{ github.token }}
@@ -236,28 +258,46 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
+          STATUS_CONTEXT: GF01 Gate / release-candidate
+          STATUS_LABEL: release-candidate
         run: |
           commit_sha="${HEAD_SHA:-${SHA}}"
           case "${JOB_STATUS}" in
             success)
               state="success"
-              desc="GF01 release-candidate passed"
+              desc="GF01 ${STATUS_LABEL} passed"
               ;;
             failure)
               state="failure"
-              desc="GF01 release-candidate failed"
+              desc="GF01 ${STATUS_LABEL} failed"
               ;;
             cancelled)
               state="error"
-              desc="GF01 release-candidate cancelled"
+              desc="GF01 ${STATUS_LABEL} cancelled"
               ;;
             *)
               state="error"
-              desc="GF01 release-candidate status ${JOB_STATUS}"
+              desc="GF01 ${STATUS_LABEL} status ${JOB_STATUS}"
               ;;
           esac
-          curl -fsSL -X POST \
+          payload="$(jq -n \
+            --arg state "${state}" \
+            --arg context "${STATUS_CONTEXT}" \
+            --arg description "${desc}" \
+            --arg target_url "${RUN_URL}" \
+            '{state:$state, context:$context, description:$description, target_url:$target_url}')"
+          http_code="$(curl -sS -L \
+            --retry 3 \
+            --retry-delay 2 \
+            --retry-connrefused \
+            -o /tmp/gf01_release_status_response.json \
+            -w "%{http_code}" \
+            -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "${GH_API}/repos/${REPO}/statuses/${commit_sha}" \
-            -d "{\"state\":\"${state}\",\"context\":\"GF01 Gate / release-candidate\",\"description\":\"${desc}\",\"target_url\":\"${RUN_URL}\"}"
+            --data "${payload}")"
+          if [[ ! "${http_code}" =~ ^2 ]]; then
+            echo "::warning::Status publish returned HTTP ${http_code} for ${STATUS_CONTEXT}."
+            cat /tmp/gf01_release_status_response.json || true
+          fi
