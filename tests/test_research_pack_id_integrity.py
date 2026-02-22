@@ -6,18 +6,7 @@ resolve to defined entries in the private source repository. In the public
 mirror, private research_pack artifacts are intentionally absent and content
 checks are skipped after scope validation.
 """
-# -*- coding: utf-8 -*-
-#!/usr/bin/env python3
-
 from __future__ import annotations
-
-__author__ = "Bobby Veihman"
-__copyright__ = "Academic Commons"
-__license__ = "License Name"
-__version__ = "1.0.0"
-__maintainer__ = "Bobby Veihman"
-__email__ = "bv2340@columbia.edu"
-__status__ = "Development"
 
 import re
 import unittest
@@ -37,6 +26,34 @@ PRINCIPLES_PATH = RESEARCH_PACK / "06_design_principles.md"
 OPEN_QUESTIONS_PATH = RESEARCH_PACK / "05_open_questions.md"
 SOURCES_CSV_PATH = RESEARCH_PACK / "01_sources" / "sources.csv"
 DECISION_LOG_PATH = RESEARCH_PACK / "09_decision_log.md"
+RESEARCH_PACK_MARKER_PATHS = (
+    RESEARCH_PACK,
+    SPEC_PATH,
+)
+REQUIRED_ID_INTEGRITY_PATHS = (
+    CLAIMS_LEDGER_PATH,
+    PRINCIPLES_PATH,
+    OPEN_QUESTIONS_PATH,
+    SOURCES_CSV_PATH,
+    DECISION_LOG_PATH,
+)
+PRIVATE_ID_INTEGRITY_PATHS = RESEARCH_PACK_MARKER_PATHS + REQUIRED_ID_INTEGRITY_PATHS
+ID_DEFINITION_PATTERNS = {
+    "SRC": re.compile(r"^(SRC-\d{3}),", flags=re.M),
+    "CLM": re.compile(r"^(CLM-\d{3})\s+—", flags=re.M),
+    "HYP": re.compile(r"^(HYP-\d{3})\s+—", flags=re.M),
+    "PRN": re.compile(r"^(PRN-\d{3})\s+—", flags=re.M),
+    "Q": re.compile(r"^(Q-\d{3})\s+—", flags=re.M),
+    "DEC": re.compile(r"^(DEC-\d{3}(?:[a-z])?)\s+—", flags=re.M),
+}
+ID_REFERENCE_PATTERNS = {
+    "SRC": re.compile(r"SRC-\d{3}"),
+    "CLM": re.compile(r"CLM-\d{3}"),
+    "HYP": re.compile(r"HYP-\d{3}"),
+    "PRN": re.compile(r"PRN-\d{3}"),
+    "Q": re.compile(r"Q-\d{3}"),
+    "DEC": re.compile(r"DEC-\d{3}[a-z]?"),
+}
 
 IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
 
@@ -54,11 +71,15 @@ class TestResearchPackIdIntegrity(unittest.TestCase):
             RESEARCH_PACK.exists(),
             msg=f"missing research_pack in private source repo: {RESEARCH_PACK}",
         )
-        self.assertTrue(SPEC_PATH.exists(), msg=f"missing Spec.tex: {SPEC_PATH}")
+        for path in PRIVATE_ID_INTEGRITY_PATHS:
+            self.assertTrue(
+                path.exists(),
+                msg=f"missing required research-pack integrity artifact: {path}",
+            )
 
     @unittest.skipUnless(
-        RESEARCH_PACK.exists() and SPEC_PATH.exists(),
-        "research_pack/Spec.tex absent in this repository scope",
+        all(path.exists() for path in PRIVATE_ID_INTEGRITY_PATHS),
+        "required research_pack artifacts absent in this repository scope",
     )
     def test_identifier_references_resolve(self) -> None:
         claims_text = CLAIMS_LEDGER_PATH.read_text(encoding="utf-8")
@@ -68,28 +89,19 @@ class TestResearchPackIdIntegrity(unittest.TestCase):
         dec_text = DECISION_LOG_PATH.read_text(encoding="utf-8")
 
         defined = {
-            "SRC": set(re.findall(r"^(SRC-\d{3}),", sources_csv_text, flags=re.M)),
-            "CLM": set(re.findall(r"^(CLM-\d{3})\s+—", claims_text, flags=re.M)),
-            "HYP": set(re.findall(r"^(HYP-\d{3})\s+—", claims_text, flags=re.M)),
-            "PRN": set(re.findall(r"^(PRN-\d{3})\s+—", prn_text, flags=re.M)),
-            "Q": set(re.findall(r"^(Q-\d{3})\s+—", q_text, flags=re.M)),
-            "DEC": set(re.findall(r"^(DEC-\d{3}(?:[a-z])?)\s+—", dec_text, flags=re.M)),
+            "SRC": set(ID_DEFINITION_PATTERNS["SRC"].findall(sources_csv_text)),
+            "CLM": set(ID_DEFINITION_PATTERNS["CLM"].findall(claims_text)),
+            "HYP": set(ID_DEFINITION_PATTERNS["HYP"].findall(claims_text)),
+            "PRN": set(ID_DEFINITION_PATTERNS["PRN"].findall(prn_text)),
+            "Q": set(ID_DEFINITION_PATTERNS["Q"].findall(q_text)),
+            "DEC": set(ID_DEFINITION_PATTERNS["DEC"].findall(dec_text)),
         }
 
-        patterns = {
-            "SRC": re.compile(r"SRC-\d{3}"),
-            "CLM": re.compile(r"CLM-\d{3}"),
-            "HYP": re.compile(r"HYP-\d{3}"),
-            "PRN": re.compile(r"PRN-\d{3}"),
-            "Q": re.compile(r"Q-\d{3}"),
-            "DEC": re.compile(r"DEC-\d{3}[a-z]?"),
-        }
-
-        refs = {kind: set() for kind in patterns}
+        refs = {kind: set() for kind in ID_REFERENCE_PATTERNS}
         files = [*RESEARCH_PACK.rglob("*.md"), SPEC_PATH]
         for path in files:
             text = path.read_text(encoding="utf-8")
-            for kind, pat in patterns.items():
+            for kind, pat in ID_REFERENCE_PATTERNS.items():
                 refs[kind].update(pat.findall(text))
 
         for kind in ("SRC", "CLM", "HYP", "PRN", "Q", "DEC"):
