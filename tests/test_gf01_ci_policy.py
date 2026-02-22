@@ -18,7 +18,7 @@ __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
-import os
+import re
 import unittest
 from pathlib import Path
 
@@ -30,7 +30,6 @@ except ImportError:  # pragma: no cover - discover mode imports test modules top
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "gf01-gate.yml"
-PRIVATE_SPEC_PATH = ROOT / "Spec.tex"
 BRANCH_GUIDANCE_PATH = (
     ROOT
     / "research_pack"
@@ -41,12 +40,24 @@ IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
 
 
 class TestCiPolicyWorkflow(unittest.TestCase):
-    def test_workflow_contains_required_jobs_and_release_candidate_command(self) -> None:
+    def _read_workflow_text(self) -> str:
         self.assertTrue(
             WORKFLOW_PATH.exists(),
             msg=f"missing workflow file: {WORKFLOW_PATH}",
         )
-        text = WORKFLOW_PATH.read_text(encoding="utf-8")
+        return WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    def _step_block(self, text: str, step_name: str) -> str:
+        pattern = re.compile(
+            rf"(?ms)^      - name: {re.escape(step_name)}\n(?P<body>.*?)(?=^      - name: |\Z)"
+        )
+        match = pattern.search(text)
+        self.assertIsNotNone(match, msg=f"missing workflow step: {step_name}")
+        assert match is not None  # narrow type for mypy/linters
+        return match.group(0)
+
+    def test_workflow_contains_required_jobs_and_release_candidate_command(self) -> None:
+        text = self._read_workflow_text()
 
         self.assertIn("jobs:", text)
         self.assertIn("gate:", text)
@@ -56,11 +67,32 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         self.assertIn("python -m gf01 release-candidate-check", text)
         self.assertIn("--require-previous-manifest", text)
         self.assertIn("--min-public-novelty-ratio 1.0", text)
-        if IS_PUBLIC_MIRROR:
+
+        # Scope workflow-hardening checks to the relevant status-publish steps
+        # so unrelated formatting changes elsewhere in the file do not break the
+        # test.
+        gate_status_step = self._step_block(text, "Publish Gate Status Context")
+        rc_status_step = self._step_block(text, "Publish Release Candidate Status Context")
+        for step_block in (gate_status_step, rc_status_step):
+            self.assertIn("continue-on-error: true", step_block)
+            self.assertIn("jq -n", step_block)
+            self.assertIn("--retry 3", step_block)
+
+        self.assertIn("STATUS_CONTEXT: GF01 Gate / gate", gate_status_step)
+        self.assertIn(
+            "STATUS_CONTEXT: GF01 Gate / release-candidate", rc_status_step
+        )
+
+    def test_workflow_avoids_private_paths(self) -> None:
+        text = self._read_workflow_text()
+        for forbidden in ("research_pack/", "readings/"):
             self.assertNotIn(
-                "research_pack/",
+                forbidden,
                 text,
-                msg="public mirror workflow must not depend on private research_pack paths",
+                msg=(
+                    "public mirror workflow must not depend on private/local-only "
+                    f"paths ({forbidden})"
+                ),
             )
 
     def test_branch_protection_guidance_presence_by_repo_scope(self) -> None:
