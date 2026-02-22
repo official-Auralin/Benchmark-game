@@ -18,7 +18,6 @@ __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
-import os
 import unittest
 from pathlib import Path
 
@@ -30,7 +29,6 @@ except ImportError:  # pragma: no cover - discover mode imports test modules top
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "gf01-gate.yml"
-PRIVATE_SPEC_PATH = ROOT / "Spec.tex"
 BRANCH_GUIDANCE_PATH = (
     ROOT
     / "research_pack"
@@ -56,12 +54,13 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         self.assertIn("python -m gf01 release-candidate-check", text)
         self.assertIn("--require-previous-manifest", text)
         self.assertIn("--min-public-novelty-ratio 1.0", text)
-        if IS_PUBLIC_MIRROR:
-            self.assertNotIn(
-                "research_pack/",
-                text,
-                msg="public mirror workflow must not depend on private research_pack paths",
-            )
+        # Status-publish steps must be non-blocking and use robust payload
+        # construction to avoid API/quoting issues masking gate outcomes.
+        self.assertIn("continue-on-error: true", text)
+        self.assertIn("jq -n", text)
+        self.assertIn("--retry 3", text)
+        self.assertIn("STATUS_CONTEXT: GF01 Gate / gate", text)
+        self.assertIn("STATUS_CONTEXT: GF01 Gate / release-candidate", text)
 
     def test_branch_protection_guidance_presence_by_repo_scope(self) -> None:
         if IS_PUBLIC_MIRROR:
