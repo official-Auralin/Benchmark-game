@@ -50,6 +50,21 @@ def _strip_latex_comments(text: str) -> str:
     return "\n".join(stripped_lines)
 
 
+class TestSpecTexCommentHelpers(unittest.TestCase):
+    def test_strip_latex_comments_behavior(self) -> None:
+        src = "foo % this is a comment\nbar % another comment"
+        self.assertEqual(_strip_latex_comments(src), "foo \nbar ")
+
+        src_escaped = r"Value is 50\% of total % trailing comment"
+        self.assertEqual(
+            _strip_latex_comments(src_escaped),
+            r"Value is 50\% of total ",
+        )
+
+        src_mixed = "prefix % comment\nno_comment_line"
+        self.assertEqual(_strip_latex_comments(src_mixed), "prefix \nno_comment_line")
+
+
 class TestSpecTexIntegrity(unittest.TestCase):
     def test_spec_presence_by_repo_scope(self) -> None:
         if IS_PUBLIC_MIRROR:
