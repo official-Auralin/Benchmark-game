@@ -23,8 +23,24 @@ from pathlib import Path
 
 try:
     from .repo_scope import is_public_mirror
+    from .workflow_parser_subset import (
+        WorkflowSubsetParseError,
+        job_needs,
+        job_steps,
+        parse_workflow_jobs_subset,
+        step_env,
+        steps_by_name,
+    )
 except ImportError:  # pragma: no cover - discover mode imports test modules top-level.
     from repo_scope import is_public_mirror
+    from workflow_parser_subset import (
+        WorkflowSubsetParseError,
+        job_needs,
+        job_steps,
+        parse_workflow_jobs_subset,
+        step_env,
+        steps_by_name,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,201 +55,6 @@ IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
 
 
 class TestCiPolicyWorkflow(unittest.TestCase):
-    def _parse_workflow_jobs(self, text: str) -> dict[str, dict[str, object]]:
-        """Parse the subset of workflow YAML needed by these regression checks.
-
-        This avoids adding a PyYAML dependency in the test runtime while still
-        validating workflow structure (jobs/steps/env/run) instead of relying on
-        broad global string fragments.
-        """
-
-        def indent_of(line: str) -> int:
-            return len(line) - len(line.lstrip(" "))
-
-        def parse_value(raw: str) -> object:
-            value = raw.strip()
-            if not value:
-                return ""
-            if (
-                len(value) >= 2
-                and value[0] == value[-1]
-                and value[0] in {"'", '"'}
-            ):
-                return value[1:-1]
-            if value.lower() == "true":
-                return True
-            if value.lower() == "false":
-                return False
-            return value
-
-        jobs: dict[str, dict[str, object]] = {}
-        lines = text.splitlines()
-
-        in_jobs = False
-        current_job_name: str | None = None
-        current_job: dict[str, object] | None = None
-        current_step: dict[str, object] | None = None
-        current_nested_map_key: str | None = None
-        current_nested_map_indent: int | None = None
-        collect_job_needs = False
-        run_block_key: str | None = None
-        run_block_indent: int | None = None
-        run_block_lines: list[str] = []
-
-        i = 0
-        while i < len(lines):
-            raw = lines[i]
-            stripped = raw.strip()
-            indent = indent_of(raw)
-
-            # Continue/finalize multiline step blocks (e.g., run: |).
-            if run_block_key is not None and current_step is not None:
-                if stripped == "":
-                    run_block_lines.append("")
-                    i += 1
-                    continue
-                assert run_block_indent is not None
-                if indent >= run_block_indent:
-                    run_block_lines.append(raw[run_block_indent:])
-                    i += 1
-                    continue
-                current_step[run_block_key] = "\n".join(run_block_lines)
-                run_block_key = None
-                run_block_indent = None
-                run_block_lines = []
-                # Reprocess this line after finalizing the block scalar.
-                continue
-
-            if stripped == "" or stripped.startswith("#"):
-                i += 1
-                continue
-
-            if not in_jobs:
-                if indent == 0 and stripped == "jobs:":
-                    in_jobs = True
-                i += 1
-                continue
-
-            # End any nested step map if indentation drops.
-            if current_nested_map_key is not None and current_step is not None:
-                assert current_nested_map_indent is not None
-                if indent < current_nested_map_indent:
-                    current_nested_map_key = None
-                    current_nested_map_indent = None
-
-            # jobs: child job key (2-space indent)
-            if indent == 2 and stripped.endswith(":") and not stripped.startswith("- "):
-                current_job_name = stripped[:-1]
-                current_job = {"steps": [], "needs": []}
-                jobs[current_job_name] = current_job
-                current_step = None
-                current_nested_map_key = None
-                current_nested_map_indent = None
-                collect_job_needs = False
-                i += 1
-                continue
-
-            if current_job is None:
-                i += 1
-                continue
-
-            # Job-level "needs" list
-            if collect_job_needs:
-                if indent == 6 and stripped.startswith("- "):
-                    needs = current_job.setdefault("needs", [])
-                    assert isinstance(needs, list)
-                    needs.append(stripped[2:].strip())
-                    i += 1
-                    continue
-                collect_job_needs = False
-
-            # Job-level keys (4-space indent)
-            if indent == 4 and ":" in stripped and not stripped.startswith("- "):
-                key, value_part = stripped.split(":", 1)
-                key = key.strip()
-                value_part = value_part.strip()
-                if key == "needs":
-                    if value_part:
-                        current_job["needs"] = [str(parse_value(value_part))]
-                    else:
-                        current_job["needs"] = []
-                        collect_job_needs = True
-                    i += 1
-                    continue
-                if key == "steps":
-                    i += 1
-                    continue
-                current_job[key] = parse_value(value_part)
-                i += 1
-                continue
-
-            # Step start (6-space indent, list item)
-            if indent == 6 and stripped.startswith("- "):
-                current_step = {}
-                current_nested_map_key = None
-                current_nested_map_indent = None
-                item_body = stripped[2:].strip()
-                if ":" in item_body:
-                    key, value_part = item_body.split(":", 1)
-                    key = key.strip()
-                    value_part = value_part.strip()
-                    current_step[key] = parse_value(value_part)
-                steps = current_job.setdefault("steps", [])
-                assert isinstance(steps, list)
-                steps.append(current_step)
-                i += 1
-                continue
-
-            # Step-level nested maps like env:/with:
-            if (
-                current_step is not None
-                and current_nested_map_key is not None
-                and current_nested_map_indent is not None
-                and indent >= current_nested_map_indent
-                and ":" in stripped
-                and not stripped.startswith("- ")
-            ):
-                key, value_part = stripped.split(":", 1)
-                nested = current_step.setdefault(current_nested_map_key, {})
-                assert isinstance(nested, dict)
-                nested[key.strip()] = parse_value(value_part.strip())
-                i += 1
-                continue
-
-            # Step-level keys (8-space indent)
-            if current_step is not None and indent == 8 and ":" in stripped:
-                key, value_part = stripped.split(":", 1)
-                key = key.strip()
-                value_part = value_part.strip()
-
-                if value_part in {"|", ">"}:
-                    run_block_key = key
-                    run_block_indent = 10
-                    run_block_lines = []
-                    i += 1
-                    continue
-
-                if value_part == "":
-                    current_step[key] = {}
-                    current_nested_map_key = key
-                    current_nested_map_indent = 10
-                    i += 1
-                    continue
-
-                current_step[key] = parse_value(value_part)
-                current_nested_map_key = None
-                current_nested_map_indent = None
-                i += 1
-                continue
-
-            i += 1
-
-        # Finalize trailing multiline block if file ends inside it.
-        if run_block_key is not None and current_step is not None:
-            current_step[run_block_key] = "\n".join(run_block_lines)
-
-        return jobs
-
     def _read_workflow_text(self) -> str:
         self.assertTrue(
             WORKFLOW_PATH.exists(),
@@ -243,28 +64,15 @@ class TestCiPolicyWorkflow(unittest.TestCase):
 
     def test_workflow_contains_required_jobs_and_release_candidate_command(self) -> None:
         text = self._read_workflow_text()
-        jobs = self._parse_workflow_jobs(text)
+        jobs = parse_workflow_jobs_subset(text)
         self.assertIn("gate", jobs)
         self.assertIn("release-candidate", jobs)
 
-        rc_needs = jobs["release-candidate"].get("needs", [])
-        self.assertIsInstance(rc_needs, list)
+        rc_needs = job_needs(jobs["release-candidate"])
         self.assertIn("gate", rc_needs)
 
-        def steps_by_name(job_name: str) -> dict[str, dict[str, object]]:
-            job = jobs[job_name]
-            steps = job.get("steps", [])
-            self.assertIsInstance(steps, list, msg=f"{job_name} steps must be a list")
-            by_name: dict[str, dict[str, object]] = {}
-            for step in steps:
-                self.assertIsInstance(step, dict)
-                name = step.get("name")
-                if isinstance(name, str):
-                    by_name[name] = step
-            return by_name
-
-        gate_steps = steps_by_name("gate")
-        rc_steps = steps_by_name("release-candidate")
+        gate_steps = steps_by_name(jobs["gate"])
+        rc_steps = steps_by_name(jobs["release-candidate"])
 
         self.assertIn("Run GF01 Gate", gate_steps)
         self.assertIn("Run Integrated Release Candidate Check", rc_steps)
@@ -289,15 +97,14 @@ class TestCiPolicyWorkflow(unittest.TestCase):
             run = str(step.get("run", ""))
             self.assertIn("jq -n", run)
             self.assertIn("--retry 3", run)
-            env = step.get("env", {})
-            self.assertIsInstance(env, dict)
+            step_env(step)
 
         self.assertEqual(
-            gate_status_step.get("env", {}).get("STATUS_CONTEXT"),
+            step_env(gate_status_step).get("STATUS_CONTEXT"),
             "GF01 Gate / gate",
         )
         self.assertEqual(
-            rc_status_step.get("env", {}).get("STATUS_CONTEXT"),
+            step_env(rc_status_step).get("STATUS_CONTEXT"),
             "GF01 Gate / release-candidate",
         )
 
@@ -339,6 +146,179 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         text = BRANCH_GUIDANCE_PATH.read_text(encoding="utf-8")
         self.assertIn("GF01 Gate / gate", text)
         self.assertIn("GF01 Gate / release-candidate", text)
+
+class TestParseWorkflowJobsUnit(unittest.TestCase):
+    """Focused unit tests for ``parse_workflow_jobs_subset``."""
+
+    def _parse(self, yaml_text: str) -> dict[str, dict[str, object]]:
+        return parse_workflow_jobs_subset(yaml_text)
+
+    def test_multiple_needs_inline_and_list(self) -> None:
+        yaml_text = """
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo build
+
+  test:
+    needs: [build, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo test
+
+  deploy:
+    needs:
+      - build
+      - test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo deploy
+"""
+        jobs = self._parse(yaml_text)
+        self.assertIn("build", jobs)
+        self.assertIn("test", jobs)
+        self.assertIn("deploy", jobs)
+        self.assertCountEqual(job_needs(jobs["test"]), ["build", "lint"])
+        self.assertCountEqual(job_needs(jobs["deploy"]), ["build", "test"])
+
+    def test_nested_env_and_with_at_varying_indents(self) -> None:
+        yaml_text = """
+jobs:
+  complex:
+    runs-on: ubuntu-latest
+    env:
+      TOP_LEVEL: 1
+    steps:
+      - name: step-with-env-and-with
+        env:
+          STEP_LEVEL: 2
+        with:
+          some-input: value
+        run: echo "$TOP_LEVEL $STEP_LEVEL"
+
+      - name: step-with-only-env
+        env:
+          ONLY_ENV: 3
+        run: echo "$ONLY_ENV"
+
+      - name: step-with-only-with
+        with:
+          another-input: other
+        run: echo "with only"
+"""
+        jobs = self._parse(yaml_text)
+        complex_job = jobs["complex"]
+        self.assertEqual(complex_job.get("env", {}).get("TOP_LEVEL"), "1")
+
+        steps = job_steps(complex_job)
+        self.assertGreaterEqual(len(steps), 3)
+
+        step0 = steps[0]
+        self.assertIn("env", step0)
+        self.assertIn("with", step0)
+
+        step1 = steps[1]
+        self.assertIn("env", step1)
+        self.assertNotIn("with", step1)
+
+        step2 = steps[2]
+        self.assertNotIn("env", step2)
+        self.assertIn("with", step2)
+
+    def test_multiline_run_block_literal_with_trailing_blank_lines(self) -> None:
+        yaml_text = """
+jobs:
+  multiline_literal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: literal-block
+        run: |
+          echo "line1"
+          echo "line2"
+
+          echo "line4"
+
+"""
+        jobs = self._parse(yaml_text)
+        run_script = str(job_steps(jobs["multiline_literal"])[0]["run"])
+        self.assertIn('echo "line1"', run_script)
+        self.assertIn('echo "line2"', run_script)
+        self.assertIn('echo "line4"', run_script)
+        self.assertTrue(run_script.strip().endswith('echo "line4"'))
+
+    def test_multiline_run_block_folded_with_trailing_blank_lines(self) -> None:
+        yaml_text = """
+jobs:
+  multiline_folded:
+    runs-on: ubuntu-latest
+    steps:
+      - name: folded-block
+        run: >
+          echo "line1"
+          echo "line2"
+
+          echo "line4"
+
+"""
+        jobs = self._parse(yaml_text)
+        run_script = str(job_steps(jobs["multiline_folded"])[0]["run"])
+        self.assertIn('echo "line1"', run_script)
+        self.assertIn('echo "line2"', run_script)
+        self.assertIn('echo "line4"', run_script)
+
+    def test_nested_with_multiline_block_scalar(self) -> None:
+        yaml_text = """
+jobs:
+  artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-name
+          path: |
+            one.txt
+            two.txt
+
+            three.txt
+"""
+        jobs = self._parse(yaml_text)
+        step = job_steps(jobs["artifact"])[0]
+        with_map = step.get("with", {})
+        self.assertIsInstance(with_map, dict)
+        self.assertEqual(with_map.get("name"), "artifact-name")
+        path_value = str(with_map.get("path", ""))
+        self.assertIn("one.txt", path_value)
+        self.assertIn("two.txt", path_value)
+        self.assertIn("three.txt", path_value)
+
+    def test_file_ending_inside_multiline_block(self) -> None:
+        yaml_text = """
+jobs:
+  end_in_block:
+    runs-on: ubuntu-latest
+    steps:
+      - name: end-inside-block
+        run: |
+          echo "last line"
+"""
+        jobs = self._parse(yaml_text)
+        run_script = str(job_steps(jobs["end_in_block"])[0]["run"])
+        self.assertIn('echo "last line"', run_script)
+        self.assertTrue(run_script.strip().endswith('echo "last line"'))
+
+    def test_raises_on_invalid_odd_indentation(self) -> None:
+        yaml_text = """
+jobs:
+  bad:
+    runs-on: ubuntu-latest
+    steps:
+      - name: bad-indent
+         run: echo nope
+"""
+        with self.assertRaises(WorkflowSubsetParseError):
+            self._parse(yaml_text)
 
 
 if __name__ == "__main__":
