@@ -18,14 +18,29 @@ __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
-import re
 import unittest
 from pathlib import Path
 
 try:
     from .repo_scope import is_public_mirror
+    from .workflow_parser_subset import (
+        WorkflowSubsetParseError,
+        job_needs,
+        job_steps,
+        parse_workflow_jobs_subset,
+        step_env,
+        steps_by_name,
+    )
 except ImportError:  # pragma: no cover - discover mode imports test modules top-level.
     from repo_scope import is_public_mirror
+    from workflow_parser_subset import (
+        WorkflowSubsetParseError,
+        job_needs,
+        job_steps,
+        parse_workflow_jobs_subset,
+        step_env,
+        steps_by_name,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,40 +62,50 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         )
         return WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    def _step_block(self, text: str, step_name: str) -> str:
-        pattern = re.compile(
-            rf"(?ms)^      - name: {re.escape(step_name)}\n(?P<body>.*?)(?=^      - name: |\Z)"
-        )
-        match = pattern.search(text)
-        self.assertIsNotNone(match, msg=f"missing workflow step: {step_name}")
-        assert match is not None  # narrow type for mypy/linters
-        return match.group(0)
-
     def test_workflow_contains_required_jobs_and_release_candidate_command(self) -> None:
         text = self._read_workflow_text()
+        jobs = parse_workflow_jobs_subset(text)
+        self.assertIn("gate", jobs)
+        self.assertIn("release-candidate", jobs)
 
-        self.assertIn("jobs:", text)
-        self.assertIn("gate:", text)
-        self.assertIn("release-candidate:", text)
-        self.assertIn("needs:", text)
-        self.assertIn("python -m gf01 gate", text)
-        self.assertIn("python -m gf01 release-candidate-check", text)
-        self.assertIn("--require-previous-manifest", text)
-        self.assertIn("--min-public-novelty-ratio 1.0", text)
+        rc_needs = job_needs(jobs["release-candidate"])
+        self.assertIn("gate", rc_needs)
 
-        # Scope workflow-hardening checks to the relevant status-publish steps
-        # so unrelated formatting changes elsewhere in the file do not break the
-        # test.
-        gate_status_step = self._step_block(text, "Publish Gate Status Context")
-        rc_status_step = self._step_block(text, "Publish Release Candidate Status Context")
-        for step_block in (gate_status_step, rc_status_step):
-            self.assertIn("continue-on-error: true", step_block)
-            self.assertIn("jq -n", step_block)
-            self.assertIn("--retry 3", step_block)
+        gate_steps = steps_by_name(jobs["gate"])
+        rc_steps = steps_by_name(jobs["release-candidate"])
 
-        self.assertIn("STATUS_CONTEXT: GF01 Gate / gate", gate_status_step)
-        self.assertIn(
-            "STATUS_CONTEXT: GF01 Gate / release-candidate", rc_status_step
+        self.assertIn("Run GF01 Gate", gate_steps)
+        self.assertIn("Run Integrated Release Candidate Check", rc_steps)
+        self.assertIn("Publish Gate Status Context", gate_steps)
+        self.assertIn("Publish Release Candidate Status Context", rc_steps)
+
+        gate_run = str(gate_steps["Run GF01 Gate"].get("run", ""))
+        self.assertIn("python -m gf01 gate", gate_run)
+
+        rc_run = str(rc_steps["Run Integrated Release Candidate Check"].get("run", ""))
+        self.assertIn("python -m gf01 release-candidate-check", rc_run)
+        self.assertIn("--require-previous-manifest", rc_run)
+        self.assertIn("--min-public-novelty-ratio 1.0", rc_run)
+
+        gate_status_step = gate_steps["Publish Gate Status Context"]
+        rc_status_step = rc_steps["Publish Release Candidate Status Context"]
+        for step in (gate_status_step, rc_status_step):
+            self.assertTrue(
+                step.get("continue-on-error") is True,
+                msg="status-publish step must be non-blocking (continue-on-error: true)",
+            )
+            run = str(step.get("run", ""))
+            self.assertIn("jq -n", run)
+            self.assertIn("--retry 3", run)
+            step_env(step)
+
+        self.assertEqual(
+            step_env(gate_status_step).get("STATUS_CONTEXT"),
+            "GF01 Gate / gate",
+        )
+        self.assertEqual(
+            step_env(rc_status_step).get("STATUS_CONTEXT"),
+            "GF01 Gate / release-candidate",
         )
 
     def test_workflow_avoids_private_paths(self) -> None:
@@ -121,6 +146,179 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         text = BRANCH_GUIDANCE_PATH.read_text(encoding="utf-8")
         self.assertIn("GF01 Gate / gate", text)
         self.assertIn("GF01 Gate / release-candidate", text)
+
+class TestParseWorkflowJobsUnit(unittest.TestCase):
+    """Focused unit tests for ``parse_workflow_jobs_subset``."""
+
+    def _parse(self, yaml_text: str) -> dict[str, dict[str, object]]:
+        return parse_workflow_jobs_subset(yaml_text)
+
+    def test_multiple_needs_inline_and_list(self) -> None:
+        yaml_text = """
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo build
+
+  test:
+    needs: [build, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo test
+
+  deploy:
+    needs:
+      - build
+      - test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo deploy
+"""
+        jobs = self._parse(yaml_text)
+        self.assertIn("build", jobs)
+        self.assertIn("test", jobs)
+        self.assertIn("deploy", jobs)
+        self.assertCountEqual(job_needs(jobs["test"]), ["build", "lint"])
+        self.assertCountEqual(job_needs(jobs["deploy"]), ["build", "test"])
+
+    def test_nested_env_and_with_at_varying_indents(self) -> None:
+        yaml_text = """
+jobs:
+  complex:
+    runs-on: ubuntu-latest
+    env:
+      TOP_LEVEL: 1
+    steps:
+      - name: step-with-env-and-with
+        env:
+          STEP_LEVEL: 2
+        with:
+          some-input: value
+        run: echo "$TOP_LEVEL $STEP_LEVEL"
+
+      - name: step-with-only-env
+        env:
+          ONLY_ENV: 3
+        run: echo "$ONLY_ENV"
+
+      - name: step-with-only-with
+        with:
+          another-input: other
+        run: echo "with only"
+"""
+        jobs = self._parse(yaml_text)
+        complex_job = jobs["complex"]
+        self.assertEqual(complex_job.get("env", {}).get("TOP_LEVEL"), "1")
+
+        steps = job_steps(complex_job)
+        self.assertGreaterEqual(len(steps), 3)
+
+        step0 = steps[0]
+        self.assertIn("env", step0)
+        self.assertIn("with", step0)
+
+        step1 = steps[1]
+        self.assertIn("env", step1)
+        self.assertNotIn("with", step1)
+
+        step2 = steps[2]
+        self.assertNotIn("env", step2)
+        self.assertIn("with", step2)
+
+    def test_multiline_run_block_literal_with_trailing_blank_lines(self) -> None:
+        yaml_text = """
+jobs:
+  multiline_literal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: literal-block
+        run: |
+          echo "line1"
+          echo "line2"
+
+          echo "line4"
+
+"""
+        jobs = self._parse(yaml_text)
+        run_script = str(job_steps(jobs["multiline_literal"])[0]["run"])
+        self.assertIn('echo "line1"', run_script)
+        self.assertIn('echo "line2"', run_script)
+        self.assertIn('echo "line4"', run_script)
+        self.assertTrue(run_script.strip().endswith('echo "line4"'))
+
+    def test_multiline_run_block_folded_with_trailing_blank_lines(self) -> None:
+        yaml_text = """
+jobs:
+  multiline_folded:
+    runs-on: ubuntu-latest
+    steps:
+      - name: folded-block
+        run: >
+          echo "line1"
+          echo "line2"
+
+          echo "line4"
+
+"""
+        jobs = self._parse(yaml_text)
+        run_script = str(job_steps(jobs["multiline_folded"])[0]["run"])
+        self.assertIn('echo "line1"', run_script)
+        self.assertIn('echo "line2"', run_script)
+        self.assertIn('echo "line4"', run_script)
+
+    def test_nested_with_multiline_block_scalar(self) -> None:
+        yaml_text = """
+jobs:
+  artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-name
+          path: |
+            one.txt
+            two.txt
+
+            three.txt
+"""
+        jobs = self._parse(yaml_text)
+        step = job_steps(jobs["artifact"])[0]
+        with_map = step.get("with", {})
+        self.assertIsInstance(with_map, dict)
+        self.assertEqual(with_map.get("name"), "artifact-name")
+        path_value = str(with_map.get("path", ""))
+        self.assertIn("one.txt", path_value)
+        self.assertIn("two.txt", path_value)
+        self.assertIn("three.txt", path_value)
+
+    def test_file_ending_inside_multiline_block(self) -> None:
+        yaml_text = """
+jobs:
+  end_in_block:
+    runs-on: ubuntu-latest
+    steps:
+      - name: end-inside-block
+        run: |
+          echo "last line"
+"""
+        jobs = self._parse(yaml_text)
+        run_script = str(job_steps(jobs["end_in_block"])[0]["run"])
+        self.assertIn('echo "last line"', run_script)
+        self.assertTrue(run_script.strip().endswith('echo "last line"'))
+
+    def test_raises_on_invalid_odd_indentation(self) -> None:
+        yaml_text = """
+jobs:
+  bad:
+    runs-on: ubuntu-latest
+    steps:
+      - name: bad-indent
+         run: echo nope
+"""
+        with self.assertRaises(WorkflowSubsetParseError):
+            self._parse(yaml_text)
 
 
 if __name__ == "__main__":
