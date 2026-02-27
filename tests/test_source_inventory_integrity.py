@@ -49,6 +49,32 @@ _MISSING_PDF_JUSTIFICATION_KEYWORDS = (
 )
 
 
+def _bib_entries_by_key(bib_text: str) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for chunk in re.split(r"\n(?=@\w+\{)", bib_text.strip()):
+        match = re.match(r"@\w+\{([^,]+),", chunk)
+        if match is not None:
+            entries[match.group(1)] = chunk
+    return entries
+
+
+def _bib_field_value(entry_text: str, field_name: str) -> str:
+    field_pattern = rf"{re.escape(field_name)}\s*=\s*(\{{[^}}]*\}}|\"[^\"]*\")"
+    match = re.search(field_pattern, entry_text, flags=re.IGNORECASE)
+    if match is None:
+        return ""
+    value = match.group(1).strip()
+    if (value.startswith("{") and value.endswith("}")) or (
+        value.startswith('"') and value.endswith('"')
+    ):
+        return value[1:-1].strip()
+    return value
+
+
+def _normalize_url(url: str) -> str:
+    return url.strip().rstrip("/")
+
+
 class TestSourceInventoryIntegrity(unittest.TestCase):
     def test_source_inventory_presence_by_repo_scope(self) -> None:
         if IS_PUBLIC_MIRROR:
@@ -108,6 +134,7 @@ class TestSourceInventoryIntegrity(unittest.TestCase):
                 bib_text,
             )
         )
+        bib_entries = _bib_entries_by_key(bib_text)
         csv_citation_keys = set(citation_keys)
         csv_source_ids = set(source_ids)
         self.assertTrue(
@@ -133,6 +160,9 @@ class TestSourceInventoryIntegrity(unittest.TestCase):
             pdf_url = row["pdf_url"].strip()
             rights_notes = row["license/rights_notes"].lower()
             status = row["status"].strip().lower()
+            doi = row["doi"].strip().lower()
+            arxiv_id = row["arxiv_id"].strip()
+            bib_entry = bib_entries.get(citation_key, "")
 
             self.assertTrue(
                 landing_url,
@@ -148,6 +178,68 @@ class TestSourceInventoryIntegrity(unittest.TestCase):
                 bib_source_ids,
                 msg=f"{source_id} missing note={{source_id: ...}} mapping in sources.bib",
             )
+            self.assertTrue(
+                bib_entry,
+                msg=f"{source_id} missing BibTeX entry for citation_key={citation_key}",
+            )
+
+            normalized_landing = _normalize_url(landing_url)
+            bib_urls = {
+                _normalize_url(url)
+                for url in re.findall(r"https?://[^}\s,]+", bib_entry)
+            }
+            self.assertIn(
+                normalized_landing,
+                bib_urls,
+                msg=(
+                    f"{source_id} publisher_landing_url must match a URL in "
+                    "its BibTeX entry"
+                ),
+            )
+
+            if doi:
+                bib_doi = _bib_field_value(bib_entry, "doi").lower()
+                self.assertEqual(
+                    bib_doi,
+                    doi,
+                    msg=f"{source_id} DOI mismatch between sources.csv and sources.bib",
+                )
+                doi_suffix = doi.split("/", 1)[1] if "/" in doi else doi
+                doi_tail = doi_suffix.split("/")[-1]
+                landing_lower = landing_url.lower()
+                doi_tokens = [
+                    token
+                    for token in re.split(r"[^a-z0-9]+", doi)
+                    if len(token) >= 5
+                ]
+                landing_matches_expected_id = (
+                    doi in landing_lower
+                    or doi_suffix in landing_lower
+                    or doi_tail in landing_lower
+                    or any(token in landing_lower for token in doi_tokens)
+                    or bool(arxiv_id and arxiv_id in landing_lower)
+                )
+                self.assertTrue(
+                    landing_matches_expected_id,
+                    msg=(
+                        f"{source_id} publisher_landing_url should include DOI "
+                        f"or canonical identifier derived from DOI/arXiv metadata "
+                        f"(doi={doi}, arxiv_id={arxiv_id or 'N/A'})"
+                    ),
+                )
+
+            if arxiv_id:
+                bib_eprint = _bib_field_value(bib_entry, "eprint")
+                self.assertEqual(
+                    bib_eprint,
+                    arxiv_id,
+                    msg=f"{source_id} arXiv ID mismatch between sources.csv and sources.bib",
+                )
+                self.assertIn(
+                    arxiv_id,
+                    bib_entry,
+                    msg=f"{source_id} BibTeX entry should include arXiv ID {arxiv_id}",
+                )
 
             if not pdf_url or pdf_url.upper() == "N/A":
                 self.assertTrue(
