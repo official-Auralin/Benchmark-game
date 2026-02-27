@@ -15,8 +15,10 @@ import unittest
 from pathlib import Path
 
 try:
+    from .dec_id_utils import BASE_DEC_RE, DEC_ENTRY_RE, DEC_REFERENCE_RE, dec_sort_key, invalid_dec_ids
     from .repo_scope import is_public_mirror
 except ImportError:  # pragma: no cover
+    from dec_id_utils import BASE_DEC_RE, DEC_ENTRY_RE, DEC_REFERENCE_RE, dec_sort_key, invalid_dec_ids
     from repo_scope import is_public_mirror
 
 
@@ -29,20 +31,23 @@ ANCHOR_DECISIONS_LINE_RE = re.compile(
     r"^- Decisions:\s+`DEC-001`\.\.`DEC-(\d{3})`\s+\(plus amendments (.+)\)",
     flags=re.M,
 )
-DEC_ID_RE = re.compile(r"DEC-\d{3}[a-z]?")
-DEC_ENTRY_RE = re.compile(r"^(DEC-\d{3}[a-z]?)\s+—", flags=re.M)
 
 IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
 
 
-def _dec_sort_key(dec_id: str) -> tuple[int, int]:
-    match = re.fullmatch(r"DEC-(\d{3})([a-z]?)", dec_id)
-    if match is None:
-        raise ValueError(f"invalid DEC identifier: {dec_id}")
-    number = int(match.group(1))
-    suffix = match.group(2)
-    suffix_rank = 0 if suffix == "" else ord(suffix) - ord("a") + 1
-    return (number, suffix_rank)
+class TestDecSortKeyHelper(unittest.TestCase):
+    def test_dec_sort_key_sort_order(self) -> None:
+        dec_ids = ["DEC-010b", "DEC-001a", "DEC-002", "DEC-001"]
+        self.assertEqual(
+            sorted(dec_ids, key=dec_sort_key),
+            ["DEC-001", "DEC-001a", "DEC-002", "DEC-010b"],
+        )
+
+    def test_dec_sort_key_invalid_ids_raise_value_error(self) -> None:
+        invalid_ids = ["DEC-1", "FOO-001", "DEC-001aa"]
+        for dec_id in invalid_ids:
+            with self.assertRaises(ValueError):
+                dec_sort_key(dec_id)
 
 
 class TestComplianceAuditConsistency(unittest.TestCase):
@@ -80,16 +85,27 @@ class TestComplianceAuditConsistency(unittest.TestCase):
             return
 
         max_dec_in_audit = int(line_match.group(1))
-        amendments_in_audit = DEC_ID_RE.findall(line_match.group(2))
+        amendments_in_audit = DEC_REFERENCE_RE.findall(line_match.group(2))
         self.assertGreater(
             len(amendments_in_audit),
             0,
             msg="compliance audit decisions line should list amendment identifiers",
         )
+        malformed_amendments = invalid_dec_ids(amendments_in_audit)
+        self.assertFalse(
+            malformed_amendments,
+            msg=f"compliance audit contains malformed DEC identifiers: {malformed_amendments}",
+        )
 
         decision_ids = DEC_ENTRY_RE.findall(decision_log_text)
         self.assertGreater(len(decision_ids), 0, msg="decision log must contain DEC entries")
-        base_ids = [dec_id for dec_id in decision_ids if re.fullmatch(r"DEC-\d{3}", dec_id)]
+        malformed_decisions = invalid_dec_ids(decision_ids)
+        self.assertFalse(
+            malformed_decisions,
+            msg=f"decision log contains malformed DEC identifiers: {malformed_decisions}",
+        )
+
+        base_ids = [dec_id for dec_id in decision_ids if BASE_DEC_RE.fullmatch(dec_id)]
         self.assertGreater(len(base_ids), 0, msg="decision log must contain base DEC entries")
         max_base_dec = max(int(dec_id.split("-")[1]) for dec_id in base_ids)
 
@@ -103,15 +119,15 @@ class TestComplianceAuditConsistency(unittest.TestCase):
         )
 
         decision_id_set = set(decision_ids)
-        missing_amendments = sorted(set(amendments_in_audit) - decision_id_set, key=_dec_sort_key)
+        missing_amendments = sorted(set(amendments_in_audit) - decision_id_set, key=dec_sort_key)
         self.assertFalse(
             missing_amendments,
             msg=f"amendments listed in compliance audit missing from decision log: {missing_amendments}",
         )
 
         non_amendments_listed = sorted(
-            [dec_id for dec_id in amendments_in_audit if re.fullmatch(r"DEC-\d{3}", dec_id)],
-            key=_dec_sort_key,
+            [dec_id for dec_id in amendments_in_audit if BASE_DEC_RE.fullmatch(dec_id)],
+            key=dec_sort_key,
         )
         self.assertFalse(
             non_amendments_listed,
@@ -123,7 +139,7 @@ class TestComplianceAuditConsistency(unittest.TestCase):
 
         self.assertEqual(
             amendments_in_audit,
-            sorted(amendments_in_audit, key=_dec_sort_key),
+            sorted(amendments_in_audit, key=dec_sort_key),
             msg="compliance audit amendment list should be sorted by DEC identifier order",
         )
 
