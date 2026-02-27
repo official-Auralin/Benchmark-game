@@ -41,10 +41,81 @@ def _extract_recent_artifact_paths(index_text: str) -> list[str]:
     for line in section:
         if line.startswith("## "):
             break
-        match = ARTIFACT_PATH_RE.search(line)
-        if match is not None:
-            paths.append(match.group(1))
+        paths.extend(ARTIFACT_PATH_RE.findall(line))
     return paths
+
+
+class TestExtractRecentArtifactPathsUnit(unittest.TestCase):
+    def test_header_missing_returns_empty(self) -> None:
+        text = """
+# Some Other Section
+
+- `research_pack/01_valid_artifact.md`
+"""
+        self.assertEqual(_extract_recent_artifact_paths(text), [])
+
+    def test_header_present_without_artifacts_returns_empty(self) -> None:
+        text = f"""
+# Top
+
+{RECENT_ARTIFACTS_HEADER}
+Here is some descriptive text with no code spans.
+
+- Bullet item without code
+"""
+        self.assertEqual(_extract_recent_artifact_paths(text), [])
+
+    def test_parsing_stops_at_next_header(self) -> None:
+        text = f"""
+# Top
+
+{RECENT_ARTIFACTS_HEADER}
+- `research_pack/01_first_artifact.md`
+- `research_pack/02_second_artifact.md`
+
+## Some Other Section
+- `research_pack/03_should_not_be_included.md`
+"""
+        self.assertEqual(
+            _extract_recent_artifact_paths(text),
+            [
+                "research_pack/01_first_artifact.md",
+                "research_pack/02_second_artifact.md",
+            ],
+        )
+
+    def test_multiple_code_spans_per_line_capture_only_matching_paths(self) -> None:
+        text = f"""
+# Top
+
+{RECENT_ARTIFACTS_HEADER}
+- `research_pack/10_valid_artifact.md` and `not/a/valid_path.txt`
+- `research_pack/11_another_valid.md` and `research_pack/12_third_valid.md`
+"""
+        self.assertEqual(
+            _extract_recent_artifact_paths(text),
+            [
+                "research_pack/10_valid_artifact.md",
+                "research_pack/11_another_valid.md",
+                "research_pack/12_third_valid.md",
+            ],
+        )
+
+    def test_ignores_malformed_paths(self) -> None:
+        text = f"""
+# Top
+
+{RECENT_ARTIFACTS_HEADER}
+- `research_pack/not_a_number_prefix.md`
+- `research_pack/12_missing_extension`
+- `research_pack/13_invalid+chars!.md`
+- `different_prefix/14_valid.md`
+- `research_pack/15_valid-okay.md`
+"""
+        self.assertEqual(
+            _extract_recent_artifact_paths(text),
+            ["research_pack/15_valid-okay.md"],
+        )
 
 
 class TestResearchPackArtifactPaths(unittest.TestCase):
@@ -65,6 +136,14 @@ class TestResearchPackArtifactPaths(unittest.TestCase):
     )
     def test_recent_execution_artifact_paths_resolve(self) -> None:
         index_text = INDEX_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            RECENT_ARTIFACTS_HEADER,
+            index_text,
+            msg=(
+                "index is missing the recent execution artifacts header; "
+                "the index structure may have regressed"
+            ),
+        )
         recent_paths = _extract_recent_artifact_paths(index_text)
         self.assertGreater(
             len(recent_paths),
