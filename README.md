@@ -42,6 +42,14 @@ Accepted forms:
 - `in0=1`: set one input proposition
 - `in0=1,in2=0`: set multiple input propositions in the same timestep
 
+Visual renderer notes:
+
+- `--renderer-track visual` now shows a structured snapshot (time/mode/effect,
+  budgets, current outputs, intervention history) to make human play easier to
+  read in terminal sessions.
+- This is still a CLI renderer (not a graphical game window); canonical scoring
+  semantics are unchanged.
+
 Rules:
 
 - Use only AP names shown in `Valid APs` at the prompt.
