@@ -129,6 +129,63 @@ def parse_json(rendered: str) -> dict[str, object]:
     return json.loads(rendered)
 
 
+def _format_y_t_for_visual(y_t: object) -> str:
+    if not isinstance(y_t, dict):
+        return "(invalid)"
+    tokens: list[str] = []
+    for key, value in sorted(y_t.items()):
+        try:
+            tokens.append(f"{key}={int(value)}")
+        except (TypeError, ValueError):
+            return "(invalid)"
+    return " ".join(tokens) if tokens else "(none)"
+
+
+def _format_history_atoms_for_visual(history_atoms: object) -> list[str]:
+    lines = ["Interventions so far:"]
+    grouped: dict[int, list[tuple[str, int]]] = {}
+    if isinstance(history_atoms, list):
+        for item in history_atoms:
+            if not isinstance(item, (list, tuple)) or len(item) != 3:
+                continue
+            try:
+                t_item = int(item[0])
+                ap_item = str(item[1])
+                value_item = int(item[2])
+            except (TypeError, ValueError):
+                continue
+            grouped.setdefault(t_item, []).append((ap_item, value_item))
+    if grouped:
+        for t_item in sorted(grouped):
+            parts = [f"{ap}={value}" for ap, value in sorted(grouped[t_item])]
+            lines.append(f"  t={t_item}: " + ", ".join(parts))
+    else:
+        lines.append("  (none)")
+    return lines
+
+
+def _parse_legacy_visual(lines: list[str]) -> dict[str, object]:
+    kv: dict[str, str] = {}
+    for line in lines:
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        kv[key] = value
+    required = {"T", "MODE", "TSTAR", "EFFECT", "YT", "BT", "BA", "H"}
+    if not required.issubset(kv):
+        raise ValueError("unsupported visual rendering format")
+    return {
+        "t": int(kv["T"]),
+        "mode": kv["MODE"],
+        "t_star": int(kv["TSTAR"]),
+        "effect_status_t": kv["EFFECT"],
+        "y_t": json.loads(kv["YT"]),
+        "budget_t_remaining": int(kv["BT"]),
+        "budget_a_remaining": int(kv["BA"]),
+        "history_atoms": json.loads(kv["H"]),
+    }
+
+
 def render_visual(obs: dict[str, object]) -> str:
     # Human-facing view with an embedded canonical payload for exact parsing.
     t_now = int(obs["t"])
@@ -137,29 +194,8 @@ def render_visual(obs: dict[str, object]) -> str:
     effect_status = str(obs["effect_status_t"])
     budget_t = int(obs["budget_t_remaining"])
     budget_a = int(obs["budget_a_remaining"])
-    y_t = obs.get("y_t", {})
-    history_atoms = obs.get("history_atoms", [])
-
-    if isinstance(y_t, dict):
-        y_tokens = [f"{k}={int(v)}" for k, v in sorted(y_t.items())]
-        y_text = " ".join(y_tokens) if y_tokens else "(none)"
-    else:
-        y_text = "(invalid)"
-
-    history_lines = ["Interventions so far:"]
-    grouped: dict[int, list[tuple[str, int]]] = {}
-    if isinstance(history_atoms, list):
-        for item in history_atoms:
-            if not isinstance(item, (list, tuple)) or len(item) != 3:
-                continue
-            t_item = int(item[0])
-            grouped.setdefault(t_item, []).append((str(item[1]), int(item[2])))
-    if grouped:
-        for t_item in sorted(grouped):
-            parts = [f"{ap}={value}" for ap, value in sorted(grouped[t_item])]
-            history_lines.append(f"  t={t_item}: " + ", ".join(parts))
-    else:
-        history_lines.append("  (none)")
+    y_text = _format_y_t_for_visual(obs.get("y_t", {}))
+    history_lines = _format_history_atoms_for_visual(obs.get("history_atoms", []))
 
     lines = [
         "=== GF-01 Visual Snapshot ===",
@@ -180,24 +216,4 @@ def parse_visual(rendered: str) -> dict[str, object]:
         if line.startswith("OBS_JSON="):
             payload = line.split("=", 1)[1]
             return json.loads(payload)
-
-    # Backward compatibility for legacy visual renderer snapshots.
-    kv: dict[str, str] = {}
-    for line in lines:
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        kv[key] = value
-    required = {"T", "MODE", "TSTAR", "EFFECT", "YT", "BT", "BA", "H"}
-    if not required.issubset(kv):
-        raise ValueError("unsupported visual rendering format")
-    return {
-        "t": int(kv["T"]),
-        "mode": kv["MODE"],
-        "t_star": int(kv["TSTAR"]),
-        "effect_status_t": kv["EFFECT"],
-        "y_t": json.loads(kv["YT"]),
-        "budget_t_remaining": int(kv["BT"]),
-        "budget_a_remaining": int(kv["BA"]),
-        "history_atoms": json.loads(kv["H"]),
-    }
+    return _parse_legacy_visual(lines)

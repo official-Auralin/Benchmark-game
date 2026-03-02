@@ -27,11 +27,16 @@ class TestVisualRenderer(unittest.TestCase):
     def test_visual_renderer_includes_human_summary_and_parse_anchor(self) -> None:
         obs = {
             "t": 3,
-            "y_t": {"out0": 1, "out1": 0},
+            "y_t": {"out1": 0, "out0": 1},
             "effect_status_t": "not-triggered",
             "budget_t_remaining": 2,
             "budget_a_remaining": 4,
-            "history_atoms": [(0, "in0", 1), (2, "in1", 0)],
+            "history_atoms": [
+                (2, "in1", 0),
+                (0, "in1", 0),
+                (0, "in0", 1),
+                (2, "in0", 1),
+            ],
             "mode": "normal",
             "t_star": 5,
         }
@@ -41,6 +46,8 @@ class TestVisualRenderer(unittest.TestCase):
         self.assertIn("Budget remaining: timesteps=2, atoms=4", rendered)
         self.assertIn("Outputs y_t: out0=1 out1=0", rendered)
         self.assertIn("Interventions so far:", rendered)
+        self.assertIn("  t=0: in0=1, in1=0", rendered)
+        self.assertIn("  t=2: in0=1, in1=0", rendered)
         self.assertIn("OBS_JSON=", rendered)
 
     def test_visual_roundtrip_matches_canonical_json(self) -> None:
@@ -56,6 +63,73 @@ class TestVisualRenderer(unittest.TestCase):
         }
         parsed = parse_visual(render_visual(obs))
         self.assertEqual(render_json(parsed), render_json(obs))
+
+    def test_visual_roundtrip_with_empty_y_t_and_history(self) -> None:
+        obs = {
+            "t": 0,
+            "y_t": {},
+            "effect_status_t": "not-triggered",
+            "budget_t_remaining": 3,
+            "budget_a_remaining": 5,
+            "history_atoms": [],
+            "mode": "normal",
+            "t_star": 2,
+        }
+        rendered = render_visual(obs)
+        self.assertIn("Outputs y_t: (none)", rendered)
+        self.assertIn("Interventions so far:", rendered)
+        self.assertIn("  (none)", rendered)
+        parsed = parse_visual(rendered)
+        self.assertEqual(parsed, obs)
+
+    def test_visual_roundtrip_with_invalid_y_t_and_malformed_history(self) -> None:
+        obs = {
+            "t": 4,
+            "y_t": None,
+            "effect_status_t": "triggered",
+            "budget_t_remaining": 1,
+            "budget_a_remaining": 2,
+            "history_atoms": [
+                {"bad": "shape"},
+                [0, "in0"],
+                [1, "in1", "not-a-bit"],
+            ],
+            "mode": "hard",
+            "t_star": 4,
+        }
+        rendered = render_visual(obs)
+        self.assertIn("Outputs y_t: (invalid)", rendered)
+        self.assertIn("Interventions so far:", rendered)
+        self.assertIn("  (none)", rendered)
+        parsed = parse_visual(rendered)
+        self.assertEqual(parsed, obs)
+
+    def test_parse_visual_prefers_obs_json_anchor_over_legacy_lines(self) -> None:
+        anchor_obs = {
+            "t": 7,
+            "y_t": {"out0": 1},
+            "effect_status_t": "triggered",
+            "budget_t_remaining": 0,
+            "budget_a_remaining": 1,
+            "history_atoms": [[0, "in0", 1]],
+            "mode": "hard",
+            "t_star": 7,
+        }
+        rendered = "\n".join(
+            [
+                "T=2",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT={\"out0\":0}",
+                "BT=3",
+                "BA=9",
+                "H=[]",
+                f"OBS_JSON={render_json(anchor_obs)}",
+            ]
+        )
+        parsed = parse_visual(rendered)
+        self.assertEqual(parsed, anchor_obs)
 
     def test_parse_visual_accepts_legacy_key_value_format(self) -> None:
         rendered = "\n".join(
@@ -82,6 +156,22 @@ class TestVisualRenderer(unittest.TestCase):
             "history_atoms": [[0, "in0", 1]],
         }
         self.assertEqual(parsed, expected)
+
+    def test_parse_visual_rejects_incomplete_legacy_format(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=2",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT={\"out0\":1}",
+                "BT=1",
+                "BA=2",
+                # H is intentionally omitted.
+            ]
+        )
+        with self.assertRaises(ValueError):
+            parse_visual(rendered)
 
 
 if __name__ == "__main__":
