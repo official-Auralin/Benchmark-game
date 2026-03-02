@@ -173,6 +173,42 @@ class TestVisualRenderer(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_visual(rendered)
 
+    def test_parse_visual_rejects_malformed_legacy_json_payloads(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=2",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT={bad-json",
+                "BT=1",
+                "BA=2",
+                "H=[[0,\"in0\",1]]",
+            ]
+        )
+        with self.assertRaisesRegex(
+            ValueError, "malformed legacy visual rendering format"
+        ):
+            parse_visual(rendered)
+
+    def test_parse_visual_rejects_malformed_legacy_scalar_fields(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=NaN",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT={\"out0\":1}",
+                "BT=1",
+                "BA=2",
+                "H=[[0,\"in0\",1]]",
+            ]
+        )
+        with self.assertRaisesRegex(
+            ValueError, "malformed legacy visual rendering format"
+        ):
+            parse_visual(rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
