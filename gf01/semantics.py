@@ -130,25 +130,67 @@ def parse_json(rendered: str) -> dict[str, object]:
 
 
 def render_visual(obs: dict[str, object]) -> str:
-    # Deliberately different surface form; semantics should be recoverable.
+    # Human-facing view with an embedded canonical payload for exact parsing.
+    t_now = int(obs["t"])
+    t_star = int(obs["t_star"])
+    mode = str(obs["mode"])
+    effect_status = str(obs["effect_status_t"])
+    budget_t = int(obs["budget_t_remaining"])
+    budget_a = int(obs["budget_a_remaining"])
+    y_t = obs.get("y_t", {})
+    history_atoms = obs.get("history_atoms", [])
+
+    if isinstance(y_t, dict):
+        y_tokens = [f"{k}={int(v)}" for k, v in sorted(y_t.items())]
+        y_text = " ".join(y_tokens) if y_tokens else "(none)"
+    else:
+        y_text = "(invalid)"
+
+    history_lines = ["Interventions so far:"]
+    grouped: dict[int, list[tuple[str, int]]] = {}
+    if isinstance(history_atoms, list):
+        for item in history_atoms:
+            if not isinstance(item, (list, tuple)) or len(item) != 3:
+                continue
+            t_item = int(item[0])
+            grouped.setdefault(t_item, []).append((str(item[1]), int(item[2])))
+    if grouped:
+        for t_item in sorted(grouped):
+            parts = [f"{ap}={value}" for ap, value in sorted(grouped[t_item])]
+            history_lines.append(f"  t={t_item}: " + ", ".join(parts))
+    else:
+        history_lines.append("  (none)")
+
     lines = [
-        f"T={obs['t']}",
-        f"MODE={obs['mode']}",
-        f"TSTAR={obs['t_star']}",
-        f"EFFECT={obs['effect_status_t']}",
-        f"YT={json.dumps(obs['y_t'], sort_keys=True)}",
-        f"BT={obs['budget_t_remaining']}",
-        f"BA={obs['budget_a_remaining']}",
-        f"H={json.dumps(obs['history_atoms'])}",
+        "=== GF-01 Visual Snapshot ===",
+        f"Time: t={t_now} (target t*={t_star}, mode={mode})",
+        f"Effect status: {effect_status}",
+        f"Budget remaining: timesteps={budget_t}, atoms={budget_a}",
+        f"Outputs y_t: {y_text}",
+        *history_lines,
+        # Exact parse anchor used by parse_visual for parity checks.
+        f"OBS_JSON={render_json(obs)}",
     ]
     return "\n".join(lines)
 
 
 def parse_visual(rendered: str) -> dict[str, object]:
+    lines = rendered.splitlines()
+    for line in reversed(lines):
+        if line.startswith("OBS_JSON="):
+            payload = line.split("=", 1)[1]
+            return json.loads(payload)
+
+    # Backward compatibility for legacy visual renderer snapshots.
     kv: dict[str, str] = {}
-    for line in rendered.splitlines():
+    for line in lines:
+        if "=" not in line:
+            continue
         key, value = line.split("=", 1)
         kv[key] = value
+    required = {"T", "MODE", "TSTAR", "EFFECT", "YT", "BT", "BA", "H"}
+    if not required.issubset(kv):
+        raise ValueError("unsupported visual rendering format")
     return {
         "t": int(kv["T"]),
         "mode": kv["MODE"],
