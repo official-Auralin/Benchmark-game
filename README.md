@@ -45,8 +45,11 @@ Accepted forms:
 Visual renderer notes:
 
 - `--renderer-track visual` now shows a structured snapshot (time/mode/effect,
-  budgets, current outputs, intervention history) to make human play easier to
-  read in terminal sessions.
+  timeline rail, budgets, current outputs, intervention history) to make human
+  play easier to read in terminal sessions.
+- The timeline rail includes:
+  - `mark` row (`N` = now, `T` = target, `B` = now and target are same step)
+  - `edits` row (count of interventions applied at each timestep so far)
 - This is still a CLI renderer (not a graphical game window); canonical scoring
   semantics are unchanged.
 
