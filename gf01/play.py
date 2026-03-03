@@ -71,6 +71,19 @@ def _effect_triggered_prefix(instance: GF01Instance, outputs: list[Valuation]) -
     return False
 
 
+def _objective_text(instance: GF01Instance) -> str:
+    if instance.mode == "hard":
+        return (
+            f"Goal: set {instance.effect_ap}=1 at exact target timestep "
+            f"t*={instance.t_star}."
+        )
+    start = max(0, instance.t_star - instance.window_size)
+    return (
+        f"Goal: set {instance.effect_ap}=1 at least once in window "
+        f"t={start}..{instance.t_star}."
+    )
+
+
 def _coerce_bit(value: Any) -> int:
     if isinstance(value, bool):
         return int(value)
@@ -224,6 +237,7 @@ def human_policy(renderer_track: str = "visual") -> PolicyFn:
                     _ = parse_json(rendered)
                 else:
                     _ = parse_visual(rendered)
+            print(_objective_text(instance))
             budget_t_remaining = int(last_obs["budget_t_remaining"]) if last_obs else int(
                 instance.budget_timestep
             )

@@ -24,6 +24,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from gf01.models import GF01Instance, MealyAutomaton
+from gf01.play import _objective_text
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,7 +41,44 @@ def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _toy_instance(mode: str) -> GF01Instance:
+    automaton = MealyAutomaton(
+        states=["s0"],
+        initial_state="s0",
+        input_aps=["in0"],
+        output_aps=["out0"],
+        transitions={
+            "s0": {
+                "in0=0": ("s0", {"out0": 0}),
+                "in0=1": ("s0", {"out0": 1}),
+            }
+        },
+    )
+    return GF01Instance(
+        instance_id=f"toy-{mode}",
+        automaton=automaton,
+        base_trace=[{"in0": 0} for _ in range(6)],
+        effect_ap="out0",
+        t_star=4,
+        mode=mode,
+        window_size=2,
+        budget_timestep=3,
+        budget_atoms=3,
+        seed=1,
+    )
+
+
 class TestPlayableLoop(unittest.TestCase):
+    def test_objective_text_for_hard_mode_uses_exact_target(self) -> None:
+        text = _objective_text(_toy_instance("hard"))
+        self.assertIn("out0=1", text)
+        self.assertIn("exact target timestep t*=4", text)
+
+    def test_objective_text_for_normal_mode_uses_window_range(self) -> None:
+        text = _objective_text(_toy_instance("normal"))
+        self.assertIn("out0=1", text)
+        self.assertIn("window t=2..4", text)
+
     def test_play_baseline_agent_emits_structured_payload(self) -> None:
         proc = _run_cli(["play", "--seed", "1337", "--agent", "greedy", "--renderer-track", "json"])
         self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
