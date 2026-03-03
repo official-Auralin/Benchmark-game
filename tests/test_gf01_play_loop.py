@@ -79,6 +79,15 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertIn("out0=1", text)
         self.assertIn("window t=2..4", text)
 
+    def test_objective_text_window_start_clamped_to_zero(self) -> None:
+        instance = _toy_instance("normal")
+        instance.t_star = 1
+        instance.window_size = 3
+        text = _objective_text(instance)
+        self.assertIn("out0=1", text)
+        self.assertIn("window t=0..1", text)
+        self.assertNotIn("t=2", text)
+
     def test_play_baseline_agent_emits_structured_payload(self) -> None:
         proc = _run_cli(["play", "--seed", "1337", "--agent", "greedy", "--renderer-track", "json"])
         self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
