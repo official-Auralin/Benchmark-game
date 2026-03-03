@@ -172,17 +172,38 @@ def _parse_legacy_visual(lines: list[str]) -> dict[str, object]:
         key, value = line.split("=", 1)
         kv[key] = value
     required = {"T", "MODE", "TSTAR", "EFFECT", "YT", "BT", "BA", "H"}
-    if not required.issubset(kv):
-        raise ValueError("unsupported visual rendering format")
+    missing = sorted(required.difference(kv))
+    if missing:
+        raise ValueError(
+            "unsupported visual rendering format: missing keys "
+            + ", ".join(missing)
+        )
+    try:
+        t_now = int(kv["T"])
+        t_star = int(kv["TSTAR"])
+        budget_t = int(kv["BT"])
+        budget_a = int(kv["BA"])
+        y_t = json.loads(kv["YT"])
+        history_atoms = json.loads(kv["H"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"malformed legacy visual rendering format: {exc}") from exc
+
+    if not isinstance(y_t, dict):
+        raise ValueError("malformed legacy visual rendering format: YT must decode to object")
+    if not isinstance(history_atoms, list):
+        raise ValueError(
+            "malformed legacy visual rendering format: H must decode to list"
+        )
+
     return {
-        "t": int(kv["T"]),
+        "t": t_now,
         "mode": kv["MODE"],
-        "t_star": int(kv["TSTAR"]),
+        "t_star": t_star,
         "effect_status_t": kv["EFFECT"],
-        "y_t": json.loads(kv["YT"]),
-        "budget_t_remaining": int(kv["BT"]),
-        "budget_a_remaining": int(kv["BA"]),
-        "history_atoms": json.loads(kv["H"]),
+        "y_t": y_t,
+        "budget_t_remaining": budget_t,
+        "budget_a_remaining": budget_a,
+        "history_atoms": history_atoms,
     }
 
 
