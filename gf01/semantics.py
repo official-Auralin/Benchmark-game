@@ -185,14 +185,18 @@ def _parse_legacy_visual(lines: list[str]) -> dict[str, object]:
         budget_a = int(kv["BA"])
         y_t = json.loads(kv["YT"])
         history_atoms = json.loads(kv["H"])
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError(f"malformed legacy visual rendering format: {exc}") from exc
 
     if not isinstance(y_t, dict):
-        raise ValueError("malformed legacy visual rendering format: YT must decode to object")
+        raise ValueError(
+            "legacy visual rendering field YT must decode to a JSON object, got "
+            f"{type(y_t).__name__}"
+        )
     if not isinstance(history_atoms, list):
         raise ValueError(
-            "malformed legacy visual rendering format: H must decode to list"
+            "legacy visual rendering field H must decode to a JSON array, got "
+            f"{type(history_atoms).__name__}"
         )
 
     return {

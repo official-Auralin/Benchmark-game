@@ -209,6 +209,44 @@ class TestVisualRenderer(unittest.TestCase):
         ):
             parse_visual(rendered)
 
+    def test_parse_visual_rejects_legacy_yt_with_non_object_json(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=2",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT=[1,2]",
+                "BT=1",
+                "BA=2",
+                "H=[[0,\"in0\",1]]",
+            ]
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            r"legacy visual rendering field YT must decode to a JSON object, got \w+",
+        ):
+            parse_visual(rendered)
+
+    def test_parse_visual_rejects_legacy_h_with_non_list_json(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=2",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT={\"out0\":1}",
+                "BT=1",
+                "BA=2",
+                "H={\"foo\":\"bar\"}",
+            ]
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            r"legacy visual rendering field H must decode to a JSON array, got \w+",
+        ):
+            parse_visual(rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
