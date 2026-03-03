@@ -173,6 +173,80 @@ class TestVisualRenderer(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_visual(rendered)
 
+    def test_parse_visual_rejects_malformed_legacy_json_payloads(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=2",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT={bad-json",
+                "BT=1",
+                "BA=2",
+                "H=[[0,\"in0\",1]]",
+            ]
+        )
+        with self.assertRaisesRegex(
+            ValueError, "malformed legacy visual rendering format"
+        ):
+            parse_visual(rendered)
+
+    def test_parse_visual_rejects_malformed_legacy_scalar_fields(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=NaN",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT={\"out0\":1}",
+                "BT=1",
+                "BA=2",
+                "H=[[0,\"in0\",1]]",
+            ]
+        )
+        with self.assertRaisesRegex(
+            ValueError, "malformed legacy visual rendering format"
+        ):
+            parse_visual(rendered)
+
+    def test_parse_visual_rejects_legacy_yt_with_non_object_json(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=2",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT=[1,2]",
+                "BT=1",
+                "BA=2",
+                "H=[[0,\"in0\",1]]",
+            ]
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            r"legacy visual rendering field YT must decode to a JSON object, got \w+",
+        ):
+            parse_visual(rendered)
+
+    def test_parse_visual_rejects_legacy_h_with_non_list_json(self) -> None:
+        rendered = "\n".join(
+            [
+                "T=2",
+                "MODE=normal",
+                "TSTAR=4",
+                "EFFECT=not-triggered",
+                "YT={\"out0\":1}",
+                "BT=1",
+                "BA=2",
+                "H={\"foo\":\"bar\"}",
+            ]
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            r"legacy visual rendering field H must decode to a JSON array, got \w+",
+        ):
+            parse_visual(rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
