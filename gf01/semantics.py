@@ -141,9 +141,10 @@ def _format_y_t_for_visual(y_t: object) -> str:
     return " ".join(tokens) if tokens else "(none)"
 
 
-def _format_history_atoms_for_visual(history_atoms: object) -> list[str]:
-    lines = ["Interventions so far:"]
-    grouped: dict[int, list[tuple[str, int]]] = {}
+def _iter_valid_history_atoms(
+    history_atoms: object,
+) -> list[tuple[int, str, int]]:
+    parsed: list[tuple[int, str, int]] = []
     if isinstance(history_atoms, list):
         for item in history_atoms:
             if not isinstance(item, (list, tuple)) or len(item) != 3:
@@ -154,7 +155,15 @@ def _format_history_atoms_for_visual(history_atoms: object) -> list[str]:
                 value_item = int(item[2])
             except (TypeError, ValueError):
                 continue
-            grouped.setdefault(t_item, []).append((ap_item, value_item))
+            parsed.append((t_item, ap_item, value_item))
+    return parsed
+
+
+def _format_history_atoms_for_visual(history_atoms: object) -> list[str]:
+    lines = ["Interventions so far:"]
+    grouped: dict[int, list[tuple[str, int]]] = {}
+    for t_item, ap_item, value_item in _iter_valid_history_atoms(history_atoms):
+        grouped.setdefault(t_item, []).append((ap_item, value_item))
     if grouped:
         for t_item in sorted(grouped):
             parts = [f"{ap}={value}" for ap, value in sorted(grouped[t_item])]
@@ -162,6 +171,41 @@ def _format_history_atoms_for_visual(history_atoms: object) -> list[str]:
     else:
         lines.append("  (none)")
     return lines
+
+
+def _format_timeline_for_visual(
+    t_now: int, t_star: int, history_atoms: object
+) -> list[str]:
+    history_counts: dict[int, int] = {}
+    for t_item, _ap_item, _value_item in _iter_valid_history_atoms(history_atoms):
+        history_counts[t_item] = history_counts.get(t_item, 0) + 1
+
+    horizon = max([0, t_now, t_star, *history_counts.keys()])
+    times = list(range(horizon + 1))
+    t_row = " ".join(f"{t:>2}" for t in times)
+
+    markers: list[str] = []
+    for t in times:
+        if t == t_now and t == t_star:
+            markers.append("B")
+        elif t == t_now:
+            markers.append("N")
+        elif t == t_star:
+            markers.append("T")
+        else:
+            markers.append(".")
+    marker_row = " ".join(f"{mark:>2}" for mark in markers)
+
+    edits = [str(history_counts[t]) if t in history_counts else "." for t in times]
+    edits_row = " ".join(f"{token:>2}" for token in edits)
+
+    return [
+        "Timeline:",
+        f"  t:     {t_row}",
+        f"  mark:  {marker_row}",
+        f"  edits: {edits_row}",
+        "  legend: N=now, T=target, B=now+target, edits=#interventions at t",
+    ]
 
 
 def _parse_legacy_visual(lines: list[str]) -> dict[str, object]:
@@ -220,11 +264,14 @@ def render_visual(obs: dict[str, object]) -> str:
     budget_t = int(obs["budget_t_remaining"])
     budget_a = int(obs["budget_a_remaining"])
     y_text = _format_y_t_for_visual(obs.get("y_t", {}))
-    history_lines = _format_history_atoms_for_visual(obs.get("history_atoms", []))
+    history_atoms = obs.get("history_atoms", [])
+    timeline_lines = _format_timeline_for_visual(t_now, t_star, history_atoms)
+    history_lines = _format_history_atoms_for_visual(history_atoms)
 
     lines = [
         "=== GF-01 Visual Snapshot ===",
         f"Time: t={t_now} (target t*={t_star}, mode={mode})",
+        *timeline_lines,
         f"Effect status: {effect_status}",
         f"Budget remaining: timesteps={budget_t}, atoms={budget_a}",
         f"Outputs y_t: {y_text}",

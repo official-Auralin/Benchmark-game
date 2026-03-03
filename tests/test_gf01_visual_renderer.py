@@ -43,12 +43,39 @@ class TestVisualRenderer(unittest.TestCase):
         rendered = render_visual(obs)
         self.assertIn("=== GF-01 Visual Snapshot ===", rendered)
         self.assertIn("Time: t=3 (target t*=5, mode=normal)", rendered)
+        self.assertIn("Timeline:", rendered)
+        self.assertIn("  legend: N=now, T=target, B=now+target, edits=#interventions at t", rendered)
         self.assertIn("Budget remaining: timesteps=2, atoms=4", rendered)
         self.assertIn("Outputs y_t: out0=1 out1=0", rendered)
         self.assertIn("Interventions so far:", rendered)
         self.assertIn("  t=0: in0=1, in1=0", rendered)
         self.assertIn("  t=2: in0=1, in1=0", rendered)
         self.assertIn("OBS_JSON=", rendered)
+
+        lines = rendered.splitlines()
+        mark_line = next(line for line in lines if line.startswith("  mark:"))
+        edits_line = next(line for line in lines if line.startswith("  edits:"))
+        self.assertIn(" N", mark_line)
+        self.assertIn(" T", mark_line)
+        self.assertIn(" 2", edits_line)
+
+    def test_visual_timeline_uses_b_marker_when_now_equals_target(self) -> None:
+        obs = {
+            "t": 2,
+            "y_t": {"out0": 0},
+            "effect_status_t": "not-triggered",
+            "budget_t_remaining": 2,
+            "budget_a_remaining": 2,
+            "history_atoms": [[1, "in0", 1]],
+            "mode": "hard",
+            "t_star": 2,
+        }
+        rendered = render_visual(obs)
+        lines = rendered.splitlines()
+        mark_line = next(line for line in lines if line.startswith("  mark:"))
+        self.assertIn(" B", mark_line)
+        self.assertNotIn(" N", mark_line)
+        self.assertNotIn(" T", mark_line)
 
     def test_visual_roundtrip_matches_canonical_json(self) -> None:
         obs = {
@@ -101,6 +128,7 @@ class TestVisualRenderer(unittest.TestCase):
         self.assertIn("Outputs y_t: (invalid)", rendered)
         self.assertIn("Interventions so far:", rendered)
         self.assertIn("  (none)", rendered)
+        self.assertIn("  edits:", rendered)
         parsed = parse_visual(rendered)
         self.assertEqual(parsed, obs)
 
