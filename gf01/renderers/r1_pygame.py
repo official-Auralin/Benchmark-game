@@ -112,6 +112,51 @@ def _clamp_page_size(value: int, *, minimum: int = 4, maximum: int = 16) -> int:
     return min(max(int(value), int(minimum)), int(maximum))
 
 
+def _clamp_timeline_span(value: int, *, minimum: int = 8, maximum: int = 48) -> int:
+    return min(max(int(value), int(minimum)), int(maximum))
+
+
+def _timeline_window_bounds(
+    *,
+    timestep: int,
+    t_star: int,
+    history_counts: dict[int, int],
+    span: int,
+) -> tuple[int, int]:
+    max_t = max([0, int(timestep), int(t_star), *history_counts.keys()])
+    span_clamped = _clamp_timeline_span(span)
+    if max_t + 1 <= span_clamped:
+        return (0, max_t)
+
+    low = min(int(timestep), int(t_star))
+    high = max(int(timestep), int(t_star))
+    required = high - low + 1
+    if required <= span_clamped:
+        pad_total = span_clamped - required
+        pad_left = pad_total // 2
+        start = max(0, low - pad_left)
+        end = start + span_clamped - 1
+        if end > max_t:
+            end = max_t
+            start = max(0, end - span_clamped + 1)
+        return (start, end)
+
+    # If now/target cannot both fit, prioritize "now" so current play remains legible.
+    start = max(0, min(int(timestep) - span_clamped // 2, max_t - span_clamped + 1))
+    end = min(max_t, start + span_clamped - 1)
+    return (start, end)
+
+
+def _objective_window_bounds(
+    *, mode: str, t_star: int, window_size: int
+) -> tuple[int, int]:
+    if str(mode).strip().lower() == "hard":
+        t = int(t_star)
+        return (t, t)
+    start = max(0, int(t_star) - max(0, int(window_size)))
+    return (start, int(t_star))
+
+
 def _help_overlay_lines() -> list[str]:
     return [
         "GF-01-R1 quick help",
@@ -119,6 +164,7 @@ def _help_overlay_lines() -> list[str]:
         "Mouse: click 0/1 to set AP, clear to unset AP.",
         "Keys: 1..9,0 cycle AP slots on current page.",
         "Keys: Left/Right page APs | +/- AP density.",
+        "Keys: [ / ] timeline zoom (narrow/wide).",
         "Keys: G AP group filter | C collapse/expand map rows.",
         "Keys: Enter commit | Esc skip | Backspace clear all.",
         "Tip: read Previous command, Output delta, and Wave strip together.",
@@ -271,37 +317,65 @@ def _effect_status_badge(effect_status: object) -> tuple[str, tuple[int, int, in
     return (f"Objective status: {effect_status}", (64, 72, 90))
 
 
+class _WaveStripModel:
+    def __init__(self) -> None:
+        self._trend_history: list[tuple[int, str]] = []
+
+    @staticmethod
+    def compute_state(
+        previous_y_t: object, current_y_t: object
+    ) -> tuple[str, int, tuple[int, int, int], str]:
+        current = _normalize_binary_map(current_y_t)
+        if not current:
+            return ("Wave pressure: awaiting observation", 0, (64, 72, 90), "none")
+        prev = _normalize_binary_map(previous_y_t)
+        on_count = sum(1 for bit in current.values() if bit == 1)
+        total = len(current)
+        ratio = on_count / float(total)
+        filled = max(0, min(10, int(round(ratio * 10.0))))
+        if not prev:
+            trend = "baseline"
+        else:
+            prev_on = sum(1 for bit in prev.values() if bit == 1)
+            prev_ratio = prev_on / float(len(prev))
+            delta = ratio - prev_ratio
+            if delta > 0.05:
+                trend = "rising"
+            elif delta < -0.05:
+                trend = "falling"
+            else:
+                trend = "steady"
+        # Blue-cyan ramp to indicate magnitude without implying good/bad semantics.
+        fill = (
+            56 + int(80.0 * ratio),
+            92 + int(96.0 * ratio),
+            136 + int(96.0 * ratio),
+        )
+        label = f"Wave pressure: {on_count}/{total} active ({trend})"
+        return (label, filled, fill, trend)
+
+    def reset(self) -> None:
+        self._trend_history = []
+
+    def update_history(self, *, timestep: int, trend: str) -> None:
+        if trend == "none":
+            return
+        entry = (int(timestep), str(trend))
+        if not self._trend_history or self._trend_history[-1] != entry:
+            self._trend_history.append(entry)
+        if len(self._trend_history) > 5:
+            self._trend_history = self._trend_history[-5:]
+
+    def trail_text(self) -> str:
+        if not self._trend_history:
+            return "(none yet)"
+        return " | ".join(f"t={t}:{tr}" for t, tr in self._trend_history[-4:])
+
+
 def _wave_pressure_strip_state(
     previous_y_t: object, current_y_t: object
 ) -> tuple[str, int, tuple[int, int, int], str]:
-    current = _normalize_binary_map(current_y_t)
-    if not current:
-        return ("Wave pressure: awaiting observation", 0, (64, 72, 90), "none")
-    prev = _normalize_binary_map(previous_y_t)
-    on_count = sum(1 for bit in current.values() if bit == 1)
-    total = len(current)
-    ratio = on_count / float(total)
-    filled = max(0, min(10, int(round(ratio * 10.0))))
-    if not prev:
-        trend = "baseline"
-    else:
-        prev_on = sum(1 for bit in prev.values() if bit == 1)
-        prev_ratio = prev_on / float(len(prev))
-        delta = ratio - prev_ratio
-        if delta > 0.05:
-            trend = "rising"
-        elif delta < -0.05:
-            trend = "falling"
-        else:
-            trend = "steady"
-    # Blue-cyan ramp to indicate magnitude without implying good/bad semantics.
-    fill = (
-        56 + int(80.0 * ratio),
-        92 + int(96.0 * ratio),
-        136 + int(96.0 * ratio),
-    )
-    label = f"Wave pressure: {on_count}/{total} active ({trend})"
-    return (label, filled, fill, trend)
+    return _WaveStripModel.compute_state(previous_y_t, current_y_t)
 
 
 def _onboarding_strip_lines(timestep: int) -> list[str]:
@@ -350,7 +424,7 @@ class _R1PygameSession:
         self._previous_observed_y_t: dict[str, int] | None = None
         self._last_committed_action_summary: str | None = None
         self._last_committed_t: int | None = None
-        self._wave_trend_history: list[tuple[int, str]] = []
+        self._wave_strip = _WaveStripModel()
         self._show_help_overlay = True
 
     def _draw_text(
@@ -386,19 +460,34 @@ class _R1PygameSession:
         *,
         timestep: int,
         t_star: int,
+        mode: str,
+        window_size: int,
         history_atoms: object,
+        timeline_span: int,
     ) -> None:
         history_counts = history_counts_by_t(history_atoms)
-
+        window_start, window_end = _objective_window_bounds(
+            mode=mode,
+            t_star=t_star,
+            window_size=window_size,
+        )
         max_t = max([0, timestep, t_star, *history_counts.keys()])
-        cols = min(max_t + 1, 32)
+        start_t, end_t = _timeline_window_bounds(
+            timestep=timestep,
+            t_star=t_star,
+            history_counts=history_counts,
+            span=timeline_span,
+        )
+        cols = max(1, end_t - start_t + 1)
         cell_w = 26
         x0 = 24
         y0 = 130
         self._draw_text("Timeline sectors (t):", x0, y0 - 26)
-        for t in range(cols):
-            x = x0 + t * (cell_w + 3)
+        for idx, t in enumerate(range(start_t, end_t + 1)):
+            x = x0 + idx * (cell_w + 3)
             fill = (34, 44, 62)
+            if window_start <= t <= window_end:
+                fill = (57, 63, 76)
             if t == t_star and t == timestep:
                 fill = (128, 110, 56)
             elif t == t_star:
@@ -418,6 +507,36 @@ class _R1PygameSession:
                 self._draw_text(f"{edits}", x + 9, y0 + 38, small=True)
         self._draw_text("marks: N=now, T=target, B=both", x0, y0 + 58, small=True)
         self._draw_text("edits per t shown below sectors", x0, y0 + 74, small=True)
+        self._draw_text(
+            f"objective window: t={window_start}..{window_end}",
+            x0,
+            y0 + 90,
+            small=True,
+            color=(176, 191, 216),
+        )
+        self._draw_text(
+            f"window t={start_t}..{end_t} (span={cols}, [ / ] zoom)",
+            x0,
+            y0 + 106,
+            small=True,
+            color=(176, 191, 216),
+        )
+        if t_star < start_t:
+            self._draw_text(
+                "target t* is left of view (press ] to widen or advance time)",
+                x0 + 360,
+                y0 + 106,
+                small=True,
+                color=(214, 194, 138),
+            )
+        elif t_star > end_t:
+            self._draw_text(
+                "target t* is right of view (press ] to widen or advance time)",
+                x0 + 360,
+                y0 + 106,
+                small=True,
+                color=(214, 194, 138),
+            )
 
     def _draw_help_overlay(self) -> None:
         lines = _help_overlay_lines()
@@ -502,31 +621,14 @@ class _R1PygameSession:
             )
         self._draw_text(label, x + 14, y + 36, small=True, color=(198, 212, 234))
 
-        if trend != "none":
-            entry = (int(timestep), str(trend))
-            if not self._wave_trend_history or self._wave_trend_history[-1] != entry:
-                self._wave_trend_history.append(entry)
-            if len(self._wave_trend_history) > 5:
-                self._wave_trend_history = self._wave_trend_history[-5:]
-        if self._wave_trend_history:
-            trail = " | ".join(
-                f"t={t}:{tr}" for t, tr in self._wave_trend_history[-4:]
-            )
-            self._draw_text(
-                "Recent wave trends: " + trail,
-                x + 14,
-                y + 58,
-                small=True,
-                color=(176, 191, 216),
-            )
-        else:
-            self._draw_text(
-                "Recent wave trends: (none yet)",
-                x + 14,
-                y + 58,
-                small=True,
-                color=(176, 191, 216),
-            )
+        self._wave_strip.update_history(timestep=timestep, trend=trend)
+        self._draw_text(
+            "Recent wave trends: " + self._wave_strip.trail_text(),
+            x + 14,
+            y + 58,
+            small=True,
+            color=(176, 191, 216),
+        )
 
     def _draw_controls(
         self,
@@ -620,6 +722,7 @@ class _R1PygameSession:
         current_buttons: list[_Button] = []
         page = 0
         page_size = 10
+        timeline_span = 24
         input_aps_all = list(instance.automaton.input_aps)
         group_keys = list(_grouped_input_aps(input_aps_all).keys())
         group_filter: str | None = None
@@ -628,7 +731,7 @@ class _R1PygameSession:
             self._previous_observed_y_t = None
             self._last_committed_action_summary = None
             self._last_committed_t = None
-            self._wave_trend_history = []
+            self._wave_strip.reset()
             self._show_help_overlay = True
         previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(
@@ -681,6 +784,10 @@ class _R1PygameSession:
                         page_size = _clamp_page_size(page_size + 1)
                     if event.key in (self.pg.K_MINUS, self.pg.K_UNDERSCORE, self.pg.K_KP_MINUS):
                         page_size = _clamp_page_size(page_size - 1)
+                    if event.key == self.pg.K_LEFTBRACKET:
+                        timeline_span = _clamp_timeline_span(timeline_span - 4)
+                    if event.key == self.pg.K_RIGHTBRACKET:
+                        timeline_span = _clamp_timeline_span(timeline_span + 4)
                     if event.key == self.pg.K_g and group_keys:
                         if group_filter is None:
                             group_filter = group_keys[0]
@@ -737,7 +844,10 @@ class _R1PygameSession:
             self._draw_timeline(
                 timestep=timestep,
                 t_star=int(instance.t_star),
+                mode=str(instance.mode),
+                window_size=int(instance.window_size),
                 history_atoms=history_atoms,
+                timeline_span=timeline_span,
             )
             current_buttons, page, _, _ = self._draw_controls(
                 input_aps=visible_pool,
@@ -818,7 +928,8 @@ class _R1PygameSession:
             self._draw_text(
                 "Click 0/1 to set AP value, clear to unset | 1..9,0 cycle APs | "
                 "Enter=commit | Esc=skip | Backspace=clear all | "
-                "Left/Right=AP page | +/-=AP density | G=group | C=collapse | H=help",
+                "Left/Right=AP page | +/-=AP density | [ ]=timeline zoom | "
+                "G=group | C=collapse | H=help",
                 100,
                 footer_y,
                 small=True,

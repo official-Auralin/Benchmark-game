@@ -138,6 +138,34 @@ class TestP0SessionCheck(unittest.TestCase):
             self.assertEqual(payload.get("error_type"), "p0_session_coverage_failed")
             self.assertEqual(payload.get("payload_issue_count"), 1)
 
+    def test_session_check_skips_backend_match_when_backend_used_empty(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-p0-session-") as tmp:
+            root = Path(tmp)
+            csv_path = root / "feedback.csv"
+            runs_dir = root / "runs"
+            runs_dir.mkdir(parents=True, exist_ok=True)
+            _write_feedback_csv(
+                csv_path,
+                ["tester_01,2026-03-03,,7000,3,3,3,2,0,"],
+            )
+            _write_play_payload(runs_dir / "tester_01_7000.json", 7000, backend="text")
+
+            proc = _run_cli(
+                [
+                    "p0-session-check",
+                    "--feedback",
+                    str(csv_path),
+                    "--runs-dir",
+                    str(runs_dir),
+                ]
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload.get("status"), "ok")
+            self.assertEqual(payload.get("passed"), True)
+            issues = payload.get("payload_issues_preview", [])
+            self.assertFalse(any(i.get("issue") == "visual_backend_mismatch" for i in issues))
+
     def test_session_check_accepts_mixed_seed_separators(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-p0-session-") as tmp:
             root = Path(tmp)

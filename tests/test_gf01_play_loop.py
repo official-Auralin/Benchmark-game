@@ -18,12 +18,16 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 import json
+import io
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
+from gf01.cli import _cmd_play, build_parser
 from gf01.models import GF01Instance, MealyAutomaton
 from gf01.play import EpisodeAborted, _objective_text, run_episode
 
@@ -300,6 +304,28 @@ class TestPlayableLoop(unittest.TestCase):
 
         with self.assertRaises(EpisodeAborted):
             _ = run_episode(instance, _abort_policy, renderer_track="json")
+
+    def test_cmd_play_surfaces_episode_aborted_error_type(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "play",
+                "--seed",
+                "1337",
+                "--agent",
+                "greedy",
+                "--renderer-track",
+                "json",
+            ]
+        )
+        with patch("gf01.cli.run_episode", side_effect=EpisodeAborted("aborted")):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = _cmd_play(args)
+        self.assertEqual(code, 2)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload.get("status"), "error")
+        self.assertEqual(payload.get("error_type"), "episode_aborted")
 
 
 if __name__ == "__main__":
