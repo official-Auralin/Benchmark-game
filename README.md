@@ -12,6 +12,7 @@ family (human-playable and agent-playable temporal-causality tasks).
 ## Requirements
 
 - Python 3.10+ (no external dependency install is required for basic use).
+- Optional for graphical human play: `pygame-ce` (`pip install pygame-ce`).
 
 ## Quick start
 
@@ -24,14 +25,32 @@ python3 -m gf01 demo --seed 1337
 Run a playable episode:
 
 ```bash
-# human-interactive
-python3 -m gf01 play --seed 1337 --renderer-track visual
+# human-interactive (terminal visual snapshot)
+python3 -m gf01 play --seed 1337 --renderer-track visual --visual-backend text
+
+# human-interactive (graphical map-first window)
+python3 -m gf01 play --seed 1337 --renderer-track visual --visual-backend pygame
 
 # baseline agent (non-interactive)
 python3 -m gf01 play --seed 1337 --agent greedy --renderer-track json
 ```
 
-### Interactive input format (`gf01 play --renderer-track visual`)
+### Interactive play modes (`gf01 play --renderer-track visual`)
+
+`--visual-backend text` (default):
+- Uses terminal snapshots and typed action input.
+
+`--visual-backend pygame`:
+- Opens a graphical map-first window.
+- Click per-AP buttons (`0` or `1`) to set interventions for the current step.
+- Click `clear` on an AP to unset it for this step.
+- Press `Enter` to commit the step.
+- Press `Esc` to skip the step.
+- Press `Backspace` to clear all current-step selections.
+- Press `Left`/`Right` (or `PageUp`/`PageDown`) to page through AP controls
+  on high-AP instances.
+
+### Terminal input format (`--visual-backend text`)
 
 At each timestep, the CLI prompt expects an action for the **current timestep
 only**.
@@ -42,16 +61,24 @@ Accepted forms:
 - `in0=1`: set one input proposition
 - `in0=1,in2=0`: set multiple input propositions in the same timestep
 
-Visual renderer notes:
+Visual renderer notes (both backends):
 
 - `--renderer-track visual` now shows a structured snapshot (time/mode/effect,
   timeline rail, budgets, current outputs, intervention history) to make human
   play easier to read in terminal sessions.
+- `--visual-backend pygame` renders the map-first interactive view with
+  intervention controls and an `Output delta` summary so players can see what
+  changed since the prior observed state.
+- In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP
+  control on the current page through `unset -> 1 -> 0 -> unset`.
+- In `pygame` mode, `+`/`-` adjusts AP page density (`page_size`) to trade off
+  more controls per page vs larger per-control readability.
+- In `pygame` mode, `H` toggles an in-session quick-help overlay with control
+  reminders and action->effect reading tips.
 - The timeline rail includes:
   - `mark` row (`N` = now, `T` = target, `B` = now and target are same step)
   - `edits` row (count of interventions applied at each timestep so far)
-- This is still a CLI renderer (not a graphical game window); canonical scoring
-  semantics are unchanged.
+- Canonical scoring semantics are unchanged.
 
 Rules:
 
@@ -64,6 +91,77 @@ If you want non-interactive execution (no manual input), use `--agent`:
 
 ```bash
 python3 -m gf01 play --seed 1337 --agent greedy --renderer-track json
+```
+
+### P0 internal-alpha feedback gate
+
+Use `p0-feedback-check` to convert internal playthrough feedback CSV files into
+a machine-checkable pass/fail decision.
+
+One-shot setup (recommended) to create both the feedback template and the
+deterministic P0 seed pack:
+
+```bash
+python3 -m gf01 p0-init \
+  --template-out p0_feedback.csv \
+  --seeds 7000,7001,7002,7003,7004,7005,7006,7007 \
+  --out-dir research_pack/pilot_freeze/gf01_p0_alpha_v1 \
+  --force
+```
+
+If you prefer explicit step-by-step setup, use the two commands below.
+
+Create a deterministic starter template:
+
+```bash
+python3 -m gf01 p0-feedback-template --out p0_feedback.csv
+```
+
+Create a deterministic P0 seed pack (default split/mode/profile):
+
+```bash
+python3 -m gf01 p0-seed-pack \
+  --seeds 7000,7001,7002,7003,7004,7005,7006,7007 \
+  --out-dir research_pack/pilot_freeze/gf01_p0_alpha_v1 \
+  --force
+```
+
+Required CSV columns:
+- `tester_id`
+- `objective_clarity`
+- `control_clarity`
+- `action_effect_clarity`
+- `must_fix_blockers`
+
+Example:
+
+```bash
+python3 -m gf01 p0-session-check \
+  --feedback p0_feedback.csv \
+  --runs-dir p0_runs \
+  --required-renderer-track visual \
+  --out p0_session_summary.json
+
+python3 -m gf01 p0-feedback-check \
+  --feedback p0_feedback.csv \
+  --min-score 3 \
+  --min-ratio 0.80 \
+  --out p0_feedback_summary.json
+```
+
+`p0-session-check` expects play artifacts named
+`p0_runs/<tester_id>_<seed>.json` (matching `seed_list_run` from feedback CSV).
+
+Combined gate (recommended after sessions complete):
+
+```bash
+python3 -m gf01 p0-gate \
+  --feedback p0_feedback.csv \
+  --runs-dir p0_runs \
+  --required-renderer-track visual \
+  --min-score 3 \
+  --min-ratio 0.80 \
+  --out p0_gate_summary.json
 ```
 
 Run checks and tests:
@@ -330,6 +428,7 @@ Renderer policy (`gf01.renderer_policy.v1`) is also enforced:
 - `renderer_track=json` requires `renderer_profile_id=canonical-json-v1`.
 - `renderer_track=visual` requires `renderer_profile_id=GF-01-R1`.
 - No other renderer profiles are accepted in current official runtime paths.
+- `--visual-backend pygame` is valid only with `--renderer-track visual`.
 
 Adaptation/fine-tuning metadata policy (`gf01.adaptation_policy.v1`) is also
 enforced for `play`, `evaluate`, `pilot-campaign`, and `migrate-runs`:
@@ -370,6 +469,7 @@ The `run_contract` also includes:
 - `scored_commit_episode` (`true`)
 - `renderer_policy_version` (`gf01.renderer_policy.v1`)
 - `renderer_profile_id` (`canonical-json-v1` for JSON track, `GF-01-R1` for visual track)
+- `visual_backend` (`text` or `pygame`)
 
 Defaults:
 

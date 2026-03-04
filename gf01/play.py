@@ -220,11 +220,31 @@ def _parse_human_action(raw: str) -> dict[str, int]:
     return edits
 
 
-def human_policy(renderer_track: str = "visual") -> PolicyFn:
+def human_policy(renderer_track: str = "visual", visual_backend: str = "text") -> PolicyFn:
+    use_pygame_backend = renderer_track == "visual" and visual_backend == "pygame"
+
     def _policy(
         last_obs: dict[str, object] | None, timestep: int, instance: GF01Instance
     ) -> dict[str, int]:
+        nonlocal use_pygame_backend
         while True:
+            if use_pygame_backend:
+                try:
+                    from .renderers.r1_pygame import choose_action_pygame
+
+                    return choose_action_pygame(
+                        last_obs=last_obs,
+                        timestep=timestep,
+                        instance=instance,
+                        objective_text=_objective_text(instance),
+                    )
+                except RuntimeError as exc:
+                    print(
+                        "Visual backend warning: "
+                        f"{exc}. Falling back to terminal visual mode."
+                    )
+                    use_pygame_backend = False
+
             print(f"\n--- Timestep {timestep} ---")
             if last_obs is None:
                 print("No observation yet (start of episode).")
