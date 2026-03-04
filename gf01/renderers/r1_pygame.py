@@ -273,10 +273,10 @@ def _effect_status_badge(effect_status: object) -> tuple[str, tuple[int, int, in
 
 def _wave_pressure_strip_state(
     previous_y_t: object, current_y_t: object
-) -> tuple[str, int, tuple[int, int, int]]:
+) -> tuple[str, int, tuple[int, int, int], str]:
     current = _normalize_binary_map(current_y_t)
     if not current:
-        return ("Wave pressure: awaiting observation", 0, (64, 72, 90))
+        return ("Wave pressure: awaiting observation", 0, (64, 72, 90), "none")
     prev = _normalize_binary_map(previous_y_t)
     on_count = sum(1 for bit in current.values() if bit == 1)
     total = len(current)
@@ -301,7 +301,7 @@ def _wave_pressure_strip_state(
         136 + int(96.0 * ratio),
     )
     label = f"Wave pressure: {on_count}/{total} active ({trend})"
-    return (label, filled, fill)
+    return (label, filled, fill, trend)
 
 
 def _onboarding_strip_lines(timestep: int) -> list[str]:
@@ -350,6 +350,7 @@ class _R1PygameSession:
         self._previous_observed_y_t: dict[str, int] | None = None
         self._last_committed_action_summary: str | None = None
         self._last_committed_t: int | None = None
+        self._wave_trend_history: list[tuple[int, str]] = []
         self._show_help_overlay = True
 
     def _draw_text(
@@ -467,14 +468,16 @@ class _R1PygameSession:
     def _draw_wave_pressure_strip(
         self,
         *,
+        timestep: int,
         label: str,
         filled: int,
         fill_color: tuple[int, int, int],
+        trend: str,
     ) -> None:
         x = 620
         y = 184
         w = 540
-        h = 64
+        h = 86
         self._draw_rect(
             x,
             y,
@@ -498,6 +501,32 @@ class _R1PygameSession:
                 border=(92, 108, 132),
             )
         self._draw_text(label, x + 14, y + 36, small=True, color=(198, 212, 234))
+
+        if trend != "none":
+            entry = (int(timestep), str(trend))
+            if not self._wave_trend_history or self._wave_trend_history[-1] != entry:
+                self._wave_trend_history.append(entry)
+            if len(self._wave_trend_history) > 5:
+                self._wave_trend_history = self._wave_trend_history[-5:]
+        if self._wave_trend_history:
+            trail = " | ".join(
+                f"t={t}:{tr}" for t, tr in self._wave_trend_history[-4:]
+            )
+            self._draw_text(
+                "Recent wave trends: " + trail,
+                x + 14,
+                y + 58,
+                small=True,
+                color=(176, 191, 216),
+            )
+        else:
+            self._draw_text(
+                "Recent wave trends: (none yet)",
+                x + 14,
+                y + 58,
+                small=True,
+                color=(176, 191, 216),
+            )
 
     def _draw_controls(
         self,
@@ -599,13 +628,14 @@ class _R1PygameSession:
             self._previous_observed_y_t = None
             self._last_committed_action_summary = None
             self._last_committed_t = None
+            self._wave_trend_history = []
             self._show_help_overlay = True
         previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(
             None if last_obs is None else last_obs.get("y_t", {})
         )
         delta_summary = _describe_output_delta(previous_y_t, current_y_t)
-        wave_label, wave_filled, wave_fill = _wave_pressure_strip_state(
+        wave_label, wave_filled, wave_fill, wave_trend = _wave_pressure_strip_state(
             previous_y_t, current_y_t
         )
         if current_y_t:
@@ -696,7 +726,11 @@ class _R1PygameSession:
             self._draw_text(objective_text, 24, 82)
             self._draw_onboarding_strip(timestep=timestep)
             self._draw_wave_pressure_strip(
-                label=wave_label, filled=wave_filled, fill_color=wave_fill
+                timestep=timestep,
+                label=wave_label,
+                filled=wave_filled,
+                fill_color=wave_fill,
+                trend=wave_trend,
             )
 
             history_atoms = [] if last_obs is None else last_obs.get("history_atoms", [])

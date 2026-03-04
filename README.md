@@ -79,6 +79,8 @@ Visual renderer notes (both backends):
 - In `pygame` mode, a `Sector Wave Strip (observed)` panel shows output-activity
   pressure and short trend text (`baseline`/`rising`/`steady`/`falling`) using
   only observed outputs.
+- The same wave panel includes a short recent-trend trail (`t=k:trend`) to
+  make temporal pattern shifts readable across the last few timesteps.
 - The pygame observation panel now includes plain summaries for
   currently-active observed outputs and your pending interventions to clarify
   action->response interpretation without formal notation.

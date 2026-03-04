@@ -169,24 +169,27 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_onboarding_strip_lines(3), [])
 
     def test_wave_pressure_strip_state_awaiting_observation(self) -> None:
-        label, filled, _ = _wave_pressure_strip_state(None, {})
+        label, filled, _, trend = _wave_pressure_strip_state(None, {})
         self.assertIn("awaiting observation", label)
         self.assertEqual(filled, 0)
+        self.assertEqual(trend, "none")
 
     def test_wave_pressure_strip_state_baseline(self) -> None:
-        label, filled, _ = _wave_pressure_strip_state(
+        label, filled, _, trend = _wave_pressure_strip_state(
             None,
             {"out0": 1, "out1": 0, "out2": 1, "out3": 0},
         )
         self.assertIn("baseline", label)
         self.assertEqual(filled, 5)
+        self.assertEqual(trend, "baseline")
 
     def test_wave_pressure_strip_state_rising(self) -> None:
-        label, _, _ = _wave_pressure_strip_state(
+        label, _, _, trend = _wave_pressure_strip_state(
             {"out0": 0, "out1": 0, "out2": 0, "out3": 0},
             {"out0": 1, "out1": 1, "out2": 0, "out3": 0},
         )
         self.assertIn("rising", label)
+        self.assertEqual(trend, "rising")
 
     def test_grouped_input_aps(self) -> None:
         grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])
