@@ -74,6 +74,8 @@ Visual renderer notes (both backends):
   action->response interpretation without formal notation.
 - In `pygame` mode, timeline sectors now include explicit `N`/`T`/`B` marks
   (`now`, `target`, `both`) in addition to color coding.
+- In `pygame` mode, closing the window aborts the interactive run (it is not
+  treated as a `skip`/no-op action).
 - In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP
   control on the current page through `unset -> 1 -> 0 -> unset`.
 - In `pygame` mode, `+`/`-` adjusts AP page density (`page_size`) to trade off

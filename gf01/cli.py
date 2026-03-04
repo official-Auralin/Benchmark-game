@@ -104,7 +104,14 @@ from .meta import (
     stable_hash_json,
 )
 from .models import GeneratorConfig
-from .play import baseline_policy, human_policy, parse_action_script, run_episode, scripted_policy
+from .play import (
+    EpisodeAborted,
+    baseline_policy,
+    human_policy,
+    parse_action_script,
+    run_episode,
+    scripted_policy,
+)
 from .profiling import PerformanceGates, profile_pipeline
 from .q033 import (
     Q033_PROTOCOL_VERSION,
@@ -1771,57 +1778,46 @@ def _parse_seed_list(seed_text: str) -> list[int]:
     return deduped
 
 
-def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
+def run_freeze_pilot(
+    *,
+    freeze_id: str,
+    split: str,
+    seed_start: int,
+    count: int,
+    seeds_text: str,
+    mode: str,
+    out_dir_text: str,
+    force: bool,
+) -> tuple[int, dict[str, object]]:
     cfg = GeneratorConfig()
-    mode_override = str(args.mode).strip() if args.mode else ""
+    mode_override = str(mode).strip() if mode else ""
     if mode_override and mode_override not in ALLOWED_MODES:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "unsupported_mode",
-                    "message": f"mode must be one of {list(ALLOWED_MODES)}",
-                    "mode": mode_override,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+        return 2, {
+            "status": "error",
+            "error_type": "unsupported_mode",
+            "message": f"mode must be one of {list(ALLOWED_MODES)}",
+            "mode": mode_override,
+        }
 
-    if args.seeds.strip():
-        seeds = _parse_seed_list(args.seeds)
+    if seeds_text.strip():
+        seeds = _parse_seed_list(seeds_text)
     else:
-        seeds = [args.seed_start + i for i in range(args.count)]
+        seeds = [int(seed_start) + i for i in range(int(count))]
     if not seeds:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "empty_seed_set",
-                    "message": "pilot freeze requires at least one seed",
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+        return 2, {
+            "status": "error",
+            "error_type": "empty_seed_set",
+            "message": "pilot freeze requires at least one seed",
+        }
 
-    out_dir = Path(args.out_dir)
-    if out_dir.exists() and any(out_dir.iterdir()) and not args.force:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "output_dir_not_empty",
-                    "message": "output directory exists and is not empty; use --force to overwrite",
-                    "out_dir": str(out_dir),
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+    out_dir = Path(out_dir_text)
+    if out_dir.exists() and any(out_dir.iterdir()) and not force:
+        return 2, {
+            "status": "error",
+            "error_type": "output_dir_not_empty",
+            "message": "output directory exists and is not empty; use --force to overwrite",
+            "out_dir": str(out_dir),
+        }
 
     out_dir.mkdir(parents=True, exist_ok=True)
     bundle_path = out_dir / "instance_bundle_v1.json"
@@ -1830,7 +1826,7 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
 
     suite = generate_suite(
         seeds=seeds,
-        split_id=args.split,
+        split_id=split,
         cfg=cfg,
         mode=mode_override or None,
     )
@@ -1844,7 +1840,7 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         "harness_version": HARNESS_VERSION,
         "git_commit": current_git_commit(),
         "config_hash": config_hash(cfg),
-        "split_id": args.split,
+        "split_id": split,
         "seed_start": int(min(seeds)),
         "count": len(seeds),
         "seeds": seeds,
@@ -1866,23 +1862,16 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
     )
     manifest_errors = validate_manifest(manifest, strict=True)
     if manifest_errors:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "manifest_validation_failed",
-                    "errors": manifest_errors,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+        return 2, {
+            "status": "error",
+            "error_type": "manifest_validation_failed",
+            "errors": manifest_errors,
+        }
     write_json(str(manifest_path), manifest)
 
     freeze_meta = {
         "schema_version": PILOT_FREEZE_SCHEMA_VERSION,
-        "freeze_id": args.freeze_id,
+        "freeze_id": freeze_id,
         "provisional": True,
         "purpose": "internal_pilot",
         "family_id": FAMILY_ID,
@@ -1892,7 +1881,7 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         "harness_version": HARNESS_VERSION,
         "git_commit": current_git_commit(),
         "config_hash": config_hash(cfg),
-        "split_id": args.split,
+        "split_id": split,
         "seed_count": len(seeds),
         "seeds": seeds,
         "mode_override": mode_override or "mixed",
@@ -1914,36 +1903,74 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
 
     summary = {
         "status": "ok",
-        "freeze_id": args.freeze_id,
+        "freeze_id": freeze_id,
         "out_dir": str(out_dir),
         "seed_count": len(seeds),
         "bundle_path": str(bundle_path),
         "manifest_path": str(manifest_path),
         "freeze_meta_path": str(freeze_path),
         "instance_count": len(suite),
-        "split_id": args.split,
+        "split_id": split,
         "mode_override": mode_override or "mixed",
         "identifiability_policy_version": IDENTIFIABILITY_POLICY_VERSION,
         "identifiability_metric_id": IDENTIFIABILITY_METRIC_ID,
         "identifiability_min_response_ratio": float(cfg.ident_min_response_ratio),
         "identifiability_min_unique_signatures": int(cfg.ident_min_unique_signatures),
     }
-    print(json.dumps(summary, indent=2, sort_keys=True))
-    return 0
+    return 0, summary
+
+
+def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
+    code, payload = run_freeze_pilot(
+        freeze_id=str(args.freeze_id),
+        split=str(args.split),
+        seed_start=int(args.seed_start),
+        count=int(args.count),
+        seeds_text=str(args.seeds),
+        mode=str(args.mode),
+        out_dir_text=str(args.out_dir),
+        force=bool(args.force),
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return int(code)
+
+
+def run_p0_seed_pack(
+    *,
+    freeze_id: str,
+    split: str,
+    seed_start: int,
+    count: int,
+    seeds_text: str,
+    mode: str,
+    out_dir_text: str,
+    force: bool,
+) -> tuple[int, dict[str, object]]:
+    return run_freeze_pilot(
+        freeze_id=freeze_id,
+        split=split,
+        seed_start=seed_start,
+        count=count,
+        seeds_text=seeds_text,
+        mode=mode,
+        out_dir_text=out_dir_text,
+        force=force,
+    )
 
 
 def _cmd_p0_seed_pack(args: argparse.Namespace) -> int:
-    proxy_args = argparse.Namespace(
-        freeze_id=args.freeze_id,
-        split=args.split,
+    code, payload = run_p0_seed_pack(
+        freeze_id=str(args.freeze_id),
+        split=str(args.split),
         seed_start=int(args.seed_start),
         count=int(args.count),
-        seeds=str(args.seeds),
+        seeds_text=str(args.seeds),
         mode=str(args.mode),
-        out_dir=str(args.out_dir),
+        out_dir_text=str(args.out_dir),
         force=bool(args.force),
     )
-    return _cmd_freeze_pilot(proxy_args)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return int(code)
 
 
 def _cmd_play(args: argparse.Namespace) -> int:
@@ -2125,12 +2152,15 @@ def _cmd_play(args: argparse.Namespace) -> int:
 
     try:
         result = run_episode(instance, policy, renderer_track=renderer_track)
-    except ValueError as exc:
+    except (ValueError, EpisodeAborted) as exc:
+        error_type = (
+            "episode_aborted" if isinstance(exc, EpisodeAborted) else "episode_execution_error"
+        )
         print(
             json.dumps(
                 {
                     "status": "error",
-                    "error_type": "episode_execution_error",
+                    "error_type": error_type,
                     "message": str(exc),
                 },
                 indent=2,
@@ -2167,68 +2197,61 @@ def _cmd_play(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_p0_feedback_check(args: argparse.Namespace) -> int:
-    feedback_path = Path(args.feedback)
+def _load_feedback_rows(
+    feedback_path: Path,
+    *,
+    required_columns: set[str],
+) -> tuple[list[dict[str, str]] | None, dict[str, object] | None]:
     if not feedback_path.exists():
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "missing_feedback_file",
-                    "message": f"feedback CSV not found: {feedback_path}",
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+        return None, {
+            "status": "error",
+            "error_type": "missing_feedback_file",
+            "message": f"feedback CSV not found: {feedback_path}",
+        }
 
-    required_columns = {
-        "tester_id",
-        "objective_clarity",
-        "control_clarity",
-        "action_effect_clarity",
-        "must_fix_blockers",
-    }
-    rows: list[dict[str, str]] = []
     with feedback_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         columns = set(reader.fieldnames or [])
         missing = sorted(required_columns.difference(columns))
         if missing:
-            print(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "error_type": "feedback_schema_error",
-                        "message": (
-                            "feedback CSV missing required columns: "
-                            + ", ".join(missing)
-                        ),
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-            )
-            return 2
+            return None, {
+                "status": "error",
+                "error_type": "feedback_schema_error",
+                "message": (
+                    "feedback CSV missing required columns: " + ", ".join(missing)
+                ),
+            }
         rows = [dict(r) for r in reader]
 
     if not rows:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "empty_feedback",
-                    "message": "feedback CSV contains no rows",
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+        return None, {
+            "status": "error",
+            "error_type": "empty_feedback",
+            "message": "feedback CSV contains no rows",
+        }
+    return rows, None
 
-    min_score = int(args.min_score)
-    min_ratio = float(args.min_ratio)
+
+def run_p0_feedback_check(
+    *,
+    feedback_path: Path,
+    min_score: int,
+    min_ratio: float,
+) -> tuple[int, dict[str, object]]:
+    rows, error = _load_feedback_rows(
+        feedback_path,
+        required_columns={
+            "tester_id",
+            "objective_clarity",
+            "control_clarity",
+            "action_effect_clarity",
+            "must_fix_blockers",
+        },
+    )
+    if error is not None:
+        return 2, error
+    assert rows is not None
+
     bad_rows: list[str] = []
     objective_ok = 0
     control_ok = 0
@@ -2255,32 +2278,24 @@ def _cmd_p0_feedback_check(args: argparse.Namespace) -> int:
         must_fix_total += max(0, must_fix)
 
     if bad_rows:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "feedback_value_error",
-                    "message": "non-integer clarity/blocker fields in rows",
-                    "bad_rows": bad_rows,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+        return 2, {
+            "status": "error",
+            "error_type": "feedback_value_error",
+            "message": "non-integer clarity/blocker fields in rows",
+            "bad_rows": bad_rows,
+        }
 
     n = len(rows)
     objective_ratio = objective_ok / n
     control_ratio = control_ok / n
     action_effect_ratio = action_effect_ok / n
-
     passed = (
         must_fix_total == 0
         and objective_ratio >= min_ratio
         and control_ratio >= min_ratio
         and action_effect_ratio >= min_ratio
     )
-    summary = {
+    payload = {
         "status": "ok" if passed else "error",
         "schema_version": "gf01.p0_feedback_check.v1",
         "feedback_path": str(feedback_path),
@@ -2299,30 +2314,35 @@ def _cmd_p0_feedback_check(args: argparse.Namespace) -> int:
         },
         "passed": passed,
     }
+    return (0 if passed else 2), payload
+
+
+def _cmd_p0_feedback_check(args: argparse.Namespace) -> int:
+    code, payload = run_p0_feedback_check(
+        feedback_path=Path(args.feedback),
+        min_score=int(args.min_score),
+        min_ratio=float(args.min_ratio),
+    )
     if args.out:
-        write_json(args.out, summary)
-    print(json.dumps(summary, indent=2, sort_keys=True))
-    return 0 if passed else 2
+        write_json(args.out, payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return int(code)
 
 
-def _cmd_p0_feedback_template(args: argparse.Namespace) -> int:
-    out_path = Path(args.out)
-    if out_path.exists() and not args.force:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "template_exists",
-                    "message": (
-                        f"template output already exists: {out_path}; "
-                        "use --force to overwrite"
-                    ),
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+def run_p0_feedback_template(
+    *,
+    out_path: Path,
+    force: bool,
+) -> tuple[int, dict[str, object]]:
+    if out_path.exists() and not force:
+        return 2, {
+            "status": "error",
+            "error_type": "template_exists",
+            "message": (
+                f"template output already exists: {out_path}; "
+                "use --force to overwrite"
+            ),
+        }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -2331,14 +2351,21 @@ def _cmd_p0_feedback_template(args: argparse.Namespace) -> int:
         "tester_02,YYYY-MM-DD,text,7000;7001;7002,3,3,3,2,0,",
     ]
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    payload = {
+    return 0, {
         "status": "ok",
         "template_schema_version": "gf01.p0_feedback_template.v1",
         "out": str(out_path),
         "rows_written": 2,
     }
+
+
+def _cmd_p0_feedback_template(args: argparse.Namespace) -> int:
+    code, payload = run_p0_feedback_template(
+        out_path=Path(args.out),
+        force=bool(args.force),
+    )
     print(json.dumps(payload, indent=2, sort_keys=True))
-    return 0
+    return int(code)
 
 
 def _parse_seed_list_flexible(seed_text: str) -> list[int]:
@@ -2358,75 +2385,26 @@ def _parse_seed_list_flexible(seed_text: str) -> list[int]:
     return deduped
 
 
-def _cmd_p0_session_check(args: argparse.Namespace) -> int:
-    feedback_path = Path(args.feedback)
-    runs_dir = Path(args.runs_dir)
-    required_renderer_track = str(args.required_renderer_track).strip()
-
-    if not feedback_path.exists():
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "missing_feedback_file",
-                    "message": f"feedback CSV not found: {feedback_path}",
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+def run_p0_session_check(
+    *,
+    feedback_path: Path,
+    runs_dir: Path,
+    required_renderer_track: str,
+) -> tuple[int, dict[str, object]]:
     if not runs_dir.exists():
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "missing_runs_dir",
-                    "message": f"runs directory not found: {runs_dir}",
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+        return 2, {
+            "status": "error",
+            "error_type": "missing_runs_dir",
+            "message": f"runs directory not found: {runs_dir}",
+        }
 
-    required_columns = {"tester_id", "backend_used", "seed_list_run"}
-    rows: list[dict[str, str]] = []
-    with feedback_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        columns = set(reader.fieldnames or [])
-        missing = sorted(required_columns.difference(columns))
-        if missing:
-            print(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "error_type": "feedback_schema_error",
-                        "message": (
-                            "feedback CSV missing required columns: "
-                            + ", ".join(missing)
-                        ),
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-            )
-            return 2
-        rows = [dict(r) for r in reader]
-
-    if not rows:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "empty_feedback",
-                    "message": "feedback CSV contains no rows",
-                },
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 2
+    rows, error = _load_feedback_rows(
+        feedback_path,
+        required_columns={"tester_id", "backend_used", "seed_list_run"},
+    )
+    if error is not None:
+        return 2, error
+    assert rows is not None
 
     bad_seed_rows: list[str] = []
     expected_sessions = 0
@@ -2567,19 +2545,15 @@ def _cmd_p0_session_check(args: argparse.Namespace) -> int:
                     )
 
     if bad_seed_rows:
-        out = {
+        return 2, {
             "status": "error",
             "error_type": "feedback_seed_list_error",
             "message": "feedback rows contain invalid or empty seed_list_run values",
             "bad_rows": bad_seed_rows,
         }
-        if args.out:
-            write_json(args.out, out)
-        print(json.dumps(out, indent=2, sort_keys=True))
-        return 2
 
     passed = not missing_artifacts and not payload_issues
-    out = {
+    payload = {
         "status": "ok" if passed else "error",
         "error_type": "" if passed else "p0_session_coverage_failed",
         "schema_version": "gf01.p0_session_check.v1",
@@ -2595,48 +2569,50 @@ def _cmd_p0_session_check(args: argparse.Namespace) -> int:
         "payload_issues_preview": payload_issues[:50],
         "passed": passed,
     }
-    if args.out:
-        write_json(args.out, out)
-    print(json.dumps(out, indent=2, sort_keys=True))
-    return 0 if passed else 2
+    return (0 if passed else 2), payload
 
 
-def _cmd_p0_gate(args: argparse.Namespace) -> int:
-    session_args = argparse.Namespace(
-        feedback=str(args.feedback),
-        runs_dir=str(args.runs_dir),
-        required_renderer_track=str(args.required_renderer_track),
-        out="",
+def _cmd_p0_session_check(args: argparse.Namespace) -> int:
+    code, payload = run_p0_session_check(
+        feedback_path=Path(args.feedback),
+        runs_dir=Path(args.runs_dir),
+        required_renderer_track=str(args.required_renderer_track).strip(),
     )
-    session_stdout = io.StringIO()
-    with contextlib.redirect_stdout(session_stdout):
-        session_code = _cmd_p0_session_check(session_args)
-    session_payload = _parse_json_stdout_payload(session_stdout.getvalue())
+    if args.out:
+        write_json(args.out, payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return int(code)
+
+
+def run_p0_gate(
+    *,
+    feedback_path: Path,
+    runs_dir: Path,
+    required_renderer_track: str,
+    min_score: int,
+    min_ratio: float,
+) -> tuple[int, dict[str, object]]:
+    session_code, session_payload = run_p0_session_check(
+        feedback_path=feedback_path,
+        runs_dir=runs_dir,
+        required_renderer_track=required_renderer_track,
+    )
     if session_code != 0:
-        out = {
+        return 2, {
             "status": "error",
             "error_type": "p0_gate_session_check_failed",
             "schema_version": "gf01.p0_gate.v1",
             "passed": False,
             "session_check": session_payload,
         }
-        if args.out:
-            write_json(args.out, out)
-        print(json.dumps(out, indent=2, sort_keys=True))
-        return 2
 
-    feedback_args = argparse.Namespace(
-        feedback=str(args.feedback),
-        min_score=int(args.min_score),
-        min_ratio=float(args.min_ratio),
-        out="",
+    feedback_code, feedback_payload = run_p0_feedback_check(
+        feedback_path=feedback_path,
+        min_score=min_score,
+        min_ratio=min_ratio,
     )
-    feedback_stdout = io.StringIO()
-    with contextlib.redirect_stdout(feedback_stdout):
-        feedback_code = _cmd_p0_feedback_check(feedback_args)
-    feedback_payload = _parse_json_stdout_payload(feedback_stdout.getvalue())
     if feedback_code != 0:
-        out = {
+        return 2, {
             "status": "error",
             "error_type": "p0_gate_feedback_check_failed",
             "schema_version": "gf01.p0_gate.v1",
@@ -2644,75 +2620,67 @@ def _cmd_p0_gate(args: argparse.Namespace) -> int:
             "session_check": session_payload,
             "feedback_check": feedback_payload,
         }
-        if args.out:
-            write_json(args.out, out)
-        print(json.dumps(out, indent=2, sort_keys=True))
-        return 2
 
-    out = {
+    return 0, {
         "status": "ok",
         "schema_version": "gf01.p0_gate.v1",
         "passed": True,
         "session_check": session_payload,
         "feedback_check": feedback_payload,
     }
-    if args.out:
-        write_json(args.out, out)
-    print(json.dumps(out, indent=2, sort_keys=True))
-    return 0
 
 
-def _parse_json_stdout_payload(stdout_text: str) -> dict[str, object]:
-    text = stdout_text.strip()
-    if not text:
-        return {}
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return {"raw_stdout": text}
-    if isinstance(parsed, dict):
-        return {str(k): v for k, v in parsed.items()}
-    return {"non_object_json": parsed}
-
-
-def _cmd_p0_init(args: argparse.Namespace) -> int:
-    template_args = argparse.Namespace(
-        out=str(args.template_out),
-        force=bool(args.force),
+def _cmd_p0_gate(args: argparse.Namespace) -> int:
+    code, payload = run_p0_gate(
+        feedback_path=Path(args.feedback),
+        runs_dir=Path(args.runs_dir),
+        required_renderer_track=str(args.required_renderer_track),
+        min_score=int(args.min_score),
+        min_ratio=float(args.min_ratio),
     )
-    template_stdout = io.StringIO()
-    with contextlib.redirect_stdout(template_stdout):
-        template_code = _cmd_p0_feedback_template(template_args)
-    template_payload = _parse_json_stdout_payload(template_stdout.getvalue())
+    if args.out:
+        write_json(args.out, payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return int(code)
+
+
+def run_p0_init(
+    *,
+    template_out: Path,
+    freeze_id: str,
+    split: str,
+    seed_start: int,
+    count: int,
+    seeds_text: str,
+    mode: str,
+    out_dir_text: str,
+    force: bool,
+) -> tuple[int, dict[str, object]]:
+    template_code, template_payload = run_p0_feedback_template(
+        out_path=template_out,
+        force=force,
+    )
     if template_code != 0:
-        out = {
+        return 2, {
             "status": "error",
             "error_type": "p0_init_template_failed",
             "schema_version": "gf01.p0_init.v1",
             "passed": False,
             "template": template_payload,
         }
-        if args.out:
-            write_json(args.out, out)
-        print(json.dumps(out, indent=2, sort_keys=True))
-        return 2
 
-    seed_pack_args = argparse.Namespace(
-        freeze_id=str(args.freeze_id),
-        split=str(args.split),
-        seed_start=int(args.seed_start),
-        count=int(args.count),
-        seeds=str(args.seeds),
-        mode=str(args.mode),
-        out_dir=str(args.out_dir),
-        force=bool(args.force),
+    seed_pack_code, seed_pack_payload = run_p0_seed_pack(
+        freeze_id=freeze_id,
+        split=split,
+        seed_start=seed_start,
+        count=count,
+        seeds_text=seeds_text,
+        mode=mode,
+        out_dir_text=out_dir_text,
+        force=force,
     )
-    seed_pack_stdout = io.StringIO()
-    with contextlib.redirect_stdout(seed_pack_stdout):
-        seed_pack_code = _cmd_p0_seed_pack(seed_pack_args)
-    seed_pack_payload = _parse_json_stdout_payload(seed_pack_stdout.getvalue())
     if seed_pack_code != 0:
-        out = {
+        return 2, {
             "status": "error",
             "error_type": "p0_init_seed_pack_failed",
             "schema_version": "gf01.p0_init.v1",
@@ -2720,22 +2688,32 @@ def _cmd_p0_init(args: argparse.Namespace) -> int:
             "template": template_payload,
             "seed_pack": seed_pack_payload,
         }
-        if args.out:
-            write_json(args.out, out)
-        print(json.dumps(out, indent=2, sort_keys=True))
-        return 2
 
-    out = {
+    return 0, {
         "status": "ok",
         "schema_version": "gf01.p0_init.v1",
         "passed": True,
         "template": template_payload,
         "seed_pack": seed_pack_payload,
     }
+
+
+def _cmd_p0_init(args: argparse.Namespace) -> int:
+    code, payload = run_p0_init(
+        template_out=Path(args.template_out),
+        freeze_id=str(args.freeze_id),
+        split=str(args.split),
+        seed_start=int(args.seed_start),
+        count=int(args.count),
+        seeds_text=str(args.seeds),
+        mode=str(args.mode),
+        out_dir_text=str(args.out_dir),
+        force=bool(args.force),
+    )
     if args.out:
-        write_json(args.out, out)
-    print(json.dumps(out, indent=2, sort_keys=True))
-    return 0
+        write_json(args.out, payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return int(code)
 
 
 def _panel_ids(panel_arg: str) -> list[str]:

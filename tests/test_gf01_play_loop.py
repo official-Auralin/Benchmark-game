@@ -25,7 +25,7 @@ import unittest
 from pathlib import Path
 
 from gf01.models import GF01Instance, MealyAutomaton
-from gf01.play import _objective_text
+from gf01.play import EpisodeAborted, _objective_text, run_episode
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -289,6 +289,17 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload.get("error_type"), "adaptation_policy_violation")
+
+    def test_run_episode_treats_none_action_as_abort(self) -> None:
+        instance = _toy_instance("normal")
+
+        def _abort_policy(
+            _last_obs: dict[str, object] | None, _timestep: int, _instance: GF01Instance
+        ) -> dict[str, int] | None:
+            return None
+
+        with self.assertRaises(EpisodeAborted):
+            _ = run_episode(instance, _abort_policy, renderer_track="json")
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+from ..semantics import history_counts_by_t, timeline_marker_for_t
+
 if TYPE_CHECKING:
     from ..models import GF01Instance
 
@@ -170,13 +172,10 @@ def _apply_group_filter(input_aps: list[str], group_key: str | None) -> list[str
 
 
 def _timeline_mark(t: int, timestep: int, t_star: int) -> str:
-    if t == timestep and t == t_star:
-        return "B"
-    if t == timestep:
-        return "N"
-    if t == t_star:
-        return "T"
-    return ""
+    marker = timeline_marker_for_t(t, t_now=timestep, t_star=t_star)
+    if marker == ".":
+        return ""
+    return marker
 
 
 def _summarize_observed_outputs(y_t: object, *, max_names: int = 6) -> str:
@@ -272,16 +271,7 @@ class _R1PygameSession:
         t_star: int,
         history_atoms: object,
     ) -> None:
-        history_counts: dict[int, int] = {}
-        if isinstance(history_atoms, list):
-            for item in history_atoms:
-                if not isinstance(item, (list, tuple)) or len(item) != 3:
-                    continue
-                try:
-                    t_item = int(item[0])
-                except (TypeError, ValueError):
-                    continue
-                history_counts[t_item] = history_counts.get(t_item, 0) + 1
+        history_counts = history_counts_by_t(history_atoms)
 
         max_t = max([0, timestep, t_star, *history_counts.keys()])
         cols = min(max_t + 1, 32)
@@ -396,7 +386,7 @@ class _R1PygameSession:
         timestep: int,
         instance: "GF01Instance",
         objective_text: str,
-    ) -> dict[str, int]:
+    ) -> dict[str, int] | None:
         pending: dict[str, int] = {}
         current_buttons: list[_Button] = []
         page = 0
@@ -423,7 +413,7 @@ class _R1PygameSession:
             self.clock.tick(30)
             for event in self.pg.event.get():
                 if event.type == self.pg.QUIT:  # pragma: no cover - UI event
-                    return {}
+                    return None
                 if event.type == self.pg.KEYDOWN:
                     if event.key in (self.pg.K_RETURN, self.pg.K_KP_ENTER):
                         return dict(pending)
@@ -561,7 +551,7 @@ def choose_action_pygame(
     timestep: int,
     instance: "GF01Instance",
     objective_text: str,
-) -> dict[str, int]:
+) -> dict[str, int] | None:
     return _session().choose_action(
         last_obs=last_obs,
         timestep=timestep,

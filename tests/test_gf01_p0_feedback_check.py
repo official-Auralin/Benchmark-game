@@ -88,7 +88,66 @@ class TestP0FeedbackCheck(unittest.TestCase):
             payload = json.loads(proc.stdout)
             self.assertEqual(payload.get("error_type"), "feedback_schema_error")
 
+    def test_p0_feedback_check_rejects_non_integer_fields(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-p0-feedback-") as tmp:
+            csv_path = Path(tmp) / "feedback.csv"
+            self._write_csv(
+                csv_path,
+                [
+                    "tester_id,objective_clarity,control_clarity,action_effect_clarity,must_fix_blockers",
+                    "t01,4,4,4,0",
+                    "t02,three,4,4,0",
+                ],
+            )
+            proc = _run_cli(["p0-feedback-check", "--feedback", str(csv_path)])
+            self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload.get("error_type"), "feedback_value_error")
+            self.assertEqual(payload.get("bad_rows"), ["t02"])
+
+    def test_p0_feedback_check_rejects_empty_csv(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-p0-feedback-") as tmp:
+            csv_path = Path(tmp) / "feedback.csv"
+            self._write_csv(
+                csv_path,
+                [
+                    "tester_id,objective_clarity,control_clarity,action_effect_clarity,must_fix_blockers"
+                ],
+            )
+            proc = _run_cli(["p0-feedback-check", "--feedback", str(csv_path)])
+            self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload.get("error_type"), "empty_feedback")
+
+    def test_p0_feedback_check_writes_out_json_payload(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-p0-feedback-") as tmp:
+            csv_path = Path(tmp) / "feedback.csv"
+            out_path = Path(tmp) / "feedback_check.json"
+            self._write_csv(
+                csv_path,
+                [
+                    "tester_id,objective_clarity,control_clarity,action_effect_clarity,must_fix_blockers",
+                    "t01,4,4,4,0",
+                    "t02,3,3,3,0",
+                ],
+            )
+            proc = _run_cli(
+                [
+                    "p0-feedback-check",
+                    "--feedback",
+                    str(csv_path),
+                    "--out",
+                    str(out_path),
+                ]
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+            stdout_payload = json.loads(proc.stdout)
+            self.assertTrue(out_path.exists())
+            written_payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(written_payload, stdout_payload)
+            self.assertEqual(written_payload.get("passed"), True)
+            self.assertIn("metrics", written_payload)
+
 
 if __name__ == "__main__":
     unittest.main()
-
