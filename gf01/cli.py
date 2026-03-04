@@ -1785,12 +1785,12 @@ def run_freeze_pilot(
     seed_start: int,
     count: int,
     seeds_text: str,
-    mode: str,
+    mode: str | None,
     out_dir_text: str,
     force: bool,
 ) -> tuple[int, dict[str, object]]:
     cfg = GeneratorConfig()
-    mode_override = str(mode).strip() if mode else ""
+    mode_override = str(mode).strip() if mode is not None else ""
     if mode_override and mode_override not in ALLOWED_MODES:
         return 2, {
             "status": "error",
@@ -1927,7 +1927,7 @@ def _cmd_freeze_pilot(args: argparse.Namespace) -> int:
         seed_start=int(args.seed_start),
         count=int(args.count),
         seeds_text=str(args.seeds),
-        mode=str(args.mode),
+        mode=args.mode,
         out_dir_text=str(args.out_dir),
         force=bool(args.force),
     )
@@ -1942,7 +1942,7 @@ def run_p0_seed_pack(
     seed_start: int,
     count: int,
     seeds_text: str,
-    mode: str,
+    mode: str | None,
     out_dir_text: str,
     force: bool,
 ) -> tuple[int, dict[str, object]]:
@@ -1965,7 +1965,7 @@ def _cmd_p0_seed_pack(args: argparse.Namespace) -> int:
         seed_start=int(args.seed_start),
         count=int(args.count),
         seeds_text=str(args.seeds),
-        mode=str(args.mode),
+        mode=args.mode,
         out_dir_text=str(args.out_dir),
         force=bool(args.force),
     )
@@ -2314,6 +2314,8 @@ def run_p0_feedback_check(
         },
         "passed": passed,
     }
+    if not passed:
+        payload["error_type"] = "feedback_thresholds_not_met"
     return (0 if passed else 2), payload
 
 
@@ -2652,7 +2654,7 @@ def run_p0_init(
     seed_start: int,
     count: int,
     seeds_text: str,
-    mode: str,
+    mode: str | None,
     out_dir_text: str,
     force: bool,
 ) -> tuple[int, dict[str, object]]:
@@ -2706,7 +2708,7 @@ def _cmd_p0_init(args: argparse.Namespace) -> int:
         seed_start=int(args.seed_start),
         count=int(args.count),
         seeds_text=str(args.seeds),
-        mode=str(args.mode),
+        mode=args.mode,
         out_dir_text=str(args.out_dir),
         force=bool(args.force),
     )

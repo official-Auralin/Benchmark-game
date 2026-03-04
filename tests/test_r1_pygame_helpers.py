@@ -12,9 +12,11 @@ from __future__ import annotations
 import unittest
 
 from gf01.renderers.r1_pygame import (
+    _WaveStripModel,
     _apply_group_filter,
     _ap_group_key,
     _clamp_page_size,
+    _clamp_timeline_span,
     _control_visible_pool,
     _cycle_pending_bit,
     _describe_output_delta,
@@ -30,6 +32,7 @@ from gf01.renderers.r1_pygame import (
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
     _timeline_mark,
+    _timeline_window_bounds,
     _wave_pressure_strip_state,
 )
 
@@ -96,12 +99,18 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_clamp_page_size(10), 10)
         self.assertEqual(_clamp_page_size(20), 16)
 
+    def test_clamp_timeline_span(self) -> None:
+        self.assertEqual(_clamp_timeline_span(2), 8)
+        self.assertEqual(_clamp_timeline_span(24), 24)
+        self.assertEqual(_clamp_timeline_span(99), 48)
+
     def test_help_overlay_lines_include_core_controls(self) -> None:
         lines = _help_overlay_lines()
         self.assertGreaterEqual(len(lines), 6)
         self.assertTrue(any("Enter commit" in line for line in lines))
         self.assertTrue(any("Output delta" in line for line in lines))
         self.assertTrue(any("collapse" in line.lower() for line in lines))
+        self.assertTrue(any("timeline zoom" in line for line in lines))
         self.assertTrue(any("Press H" in line for line in lines))
 
     def test_ap_group_key(self) -> None:
@@ -191,6 +200,22 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("rising", label)
         self.assertEqual(trend, "rising")
 
+    def test_wave_strip_model_trail_dedup_and_window(self) -> None:
+        model = _WaveStripModel()
+        self.assertEqual(model.trail_text(), "(none yet)")
+        model.update_history(timestep=0, trend="none")
+        self.assertEqual(model.trail_text(), "(none yet)")
+        model.update_history(timestep=1, trend="baseline")
+        model.update_history(timestep=1, trend="baseline")
+        model.update_history(timestep=2, trend="rising")
+        model.update_history(timestep=3, trend="steady")
+        model.update_history(timestep=4, trend="falling")
+        model.update_history(timestep=5, trend="rising")
+        trail = model.trail_text()
+        self.assertIn("t=2:rising", trail)
+        self.assertIn("t=5:rising", trail)
+        self.assertNotIn("t=1:baseline | t=1:baseline", trail)
+
     def test_grouped_input_aps(self) -> None:
         grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])
         self.assertEqual(grouped["in"], ["in0", "in1"])
@@ -235,6 +260,39 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_timeline_mark(5, timestep=2, t_star=5), "T")
         self.assertEqual(_timeline_mark(3, timestep=3, t_star=3), "B")
         self.assertEqual(_timeline_mark(1, timestep=3, t_star=5), "")
+
+    def test_timeline_window_bounds_short_horizon(self) -> None:
+        start, end = _timeline_window_bounds(
+            timestep=3,
+            t_star=7,
+            history_counts={1: 2, 5: 1},
+            span=24,
+        )
+        self.assertEqual((start, end), (0, 7))
+
+    def test_timeline_window_bounds_includes_now_and_target_when_possible(self) -> None:
+        start, end = _timeline_window_bounds(
+            timestep=10,
+            t_star=18,
+            history_counts={30: 1},
+            span=16,
+        )
+        self.assertLessEqual(start, 10)
+        self.assertGreaterEqual(end, 10)
+        self.assertLessEqual(start, 18)
+        self.assertGreaterEqual(end, 18)
+        self.assertEqual(end - start + 1, 16)
+
+    def test_timeline_window_bounds_prioritizes_now_when_span_too_small(self) -> None:
+        start, end = _timeline_window_bounds(
+            timestep=5,
+            t_star=45,
+            history_counts={45: 2},
+            span=12,
+        )
+        self.assertLessEqual(start, 5)
+        self.assertGreaterEqual(end, 5)
+        self.assertEqual(end - start + 1, 12)
 
 
 if __name__ == "__main__":
