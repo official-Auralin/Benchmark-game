@@ -26,6 +26,7 @@ from gf01.renderers.r1_pygame import (
     _help_overlay_lines,
     _normalize_binary_map,
     _onboarding_strip_lines,
+    _objective_window_bounds,
     _paginate_input_aps,
     _summarize_observed_outputs,
     _summarize_committed_action,
@@ -293,6 +294,24 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertLessEqual(start, 5)
         self.assertGreaterEqual(end, 5)
         self.assertEqual(end - start + 1, 12)
+
+    def test_objective_window_bounds_hard_mode(self) -> None:
+        self.assertEqual(
+            _objective_window_bounds(mode="hard", t_star=12, window_size=4),
+            (12, 12),
+        )
+
+    def test_objective_window_bounds_normal_mode(self) -> None:
+        self.assertEqual(
+            _objective_window_bounds(mode="normal", t_star=12, window_size=4),
+            (8, 12),
+        )
+
+    def test_objective_window_bounds_clamps_at_zero(self) -> None:
+        self.assertEqual(
+            _objective_window_bounds(mode="normal", t_star=2, window_size=5),
+            (0, 2),
+        )
 
 
 if __name__ == "__main__":

@@ -147,6 +147,16 @@ def _timeline_window_bounds(
     return (start, end)
 
 
+def _objective_window_bounds(
+    *, mode: str, t_star: int, window_size: int
+) -> tuple[int, int]:
+    if str(mode).strip().lower() == "hard":
+        t = int(t_star)
+        return (t, t)
+    start = max(0, int(t_star) - max(0, int(window_size)))
+    return (start, int(t_star))
+
+
 def _help_overlay_lines() -> list[str]:
     return [
         "GF-01-R1 quick help",
@@ -450,10 +460,17 @@ class _R1PygameSession:
         *,
         timestep: int,
         t_star: int,
+        mode: str,
+        window_size: int,
         history_atoms: object,
         timeline_span: int,
     ) -> None:
         history_counts = history_counts_by_t(history_atoms)
+        window_start, window_end = _objective_window_bounds(
+            mode=mode,
+            t_star=t_star,
+            window_size=window_size,
+        )
         max_t = max([0, timestep, t_star, *history_counts.keys()])
         start_t, end_t = _timeline_window_bounds(
             timestep=timestep,
@@ -469,6 +486,8 @@ class _R1PygameSession:
         for idx, t in enumerate(range(start_t, end_t + 1)):
             x = x0 + idx * (cell_w + 3)
             fill = (34, 44, 62)
+            if window_start <= t <= window_end:
+                fill = (57, 63, 76)
             if t == t_star and t == timestep:
                 fill = (128, 110, 56)
             elif t == t_star:
@@ -489,9 +508,16 @@ class _R1PygameSession:
         self._draw_text("marks: N=now, T=target, B=both", x0, y0 + 58, small=True)
         self._draw_text("edits per t shown below sectors", x0, y0 + 74, small=True)
         self._draw_text(
-            f"window t={start_t}..{end_t} (span={cols}, [ / ] zoom)",
+            f"objective window: t={window_start}..{window_end}",
             x0,
             y0 + 90,
+            small=True,
+            color=(176, 191, 216),
+        )
+        self._draw_text(
+            f"window t={start_t}..{end_t} (span={cols}, [ / ] zoom)",
+            x0,
+            y0 + 106,
             small=True,
             color=(176, 191, 216),
         )
@@ -499,7 +525,7 @@ class _R1PygameSession:
             self._draw_text(
                 "target t* is left of view (press ] to widen or advance time)",
                 x0 + 360,
-                y0 + 90,
+                y0 + 106,
                 small=True,
                 color=(214, 194, 138),
             )
@@ -507,7 +533,7 @@ class _R1PygameSession:
             self._draw_text(
                 "target t* is right of view (press ] to widen or advance time)",
                 x0 + 360,
-                y0 + 90,
+                y0 + 106,
                 small=True,
                 color=(214, 194, 138),
             )
@@ -818,6 +844,8 @@ class _R1PygameSession:
             self._draw_timeline(
                 timestep=timestep,
                 t_star=int(instance.t_star),
+                mode=str(instance.mode),
+                window_size=int(instance.window_size),
                 history_atoms=history_atoms,
                 timeline_span=timeline_span,
             )
