@@ -72,6 +72,8 @@ Visual renderer notes (both backends):
 - In `pygame` mode, the observation panel shows `Previous command` alongside
   `Output delta` so players can map the last committed input changes to the
   newly observed response.
+- In `pygame` mode, objective status is shown as a color-coded badge
+  (`Objective active` / `Objective not active`) for faster at-a-glance reading.
 - The pygame observation panel now includes plain summaries for
   currently-active observed outputs and your pending interventions to clarify
   action->response interpretation without formal notation.

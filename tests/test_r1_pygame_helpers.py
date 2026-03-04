@@ -18,6 +18,7 @@ from gf01.renderers.r1_pygame import (
     _control_visible_pool,
     _cycle_pending_bit,
     _describe_output_delta,
+    _effect_status_badge,
     _group_rows_for_controls,
     _grouped_input_aps,
     _help_overlay_lines,
@@ -144,6 +145,18 @@ class TestR1PygameHelpers(unittest.TestCase):
             _summarize_committed_action({}),
             "no interventions (skip)",
         )
+
+    def test_effect_status_badge_triggered(self) -> None:
+        text, _ = _effect_status_badge("triggered")
+        self.assertEqual(text, "Objective active")
+
+    def test_effect_status_badge_not_triggered(self) -> None:
+        text, _ = _effect_status_badge("not-triggered")
+        self.assertEqual(text, "Objective not active")
+
+    def test_effect_status_badge_fallback(self) -> None:
+        text, _ = _effect_status_badge("custom")
+        self.assertIn("Objective status:", text)
 
     def test_grouped_input_aps(self) -> None:
         grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])

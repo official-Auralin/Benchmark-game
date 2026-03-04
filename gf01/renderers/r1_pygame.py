@@ -260,6 +260,17 @@ def _summarize_committed_action(
     return body
 
 
+def _effect_status_badge(effect_status: object) -> tuple[str, tuple[int, int, int]]:
+    token = str(effect_status).strip().lower()
+    if token == "triggered":
+        return ("Objective active", (46, 112, 66))
+    if token == "not-triggered":
+        return ("Objective not active", (112, 84, 42))
+    if token == "unknown":
+        return ("Objective status unknown", (64, 72, 90))
+    return (f"Objective status: {effect_status}", (64, 72, 90))
+
+
 class _R1PygameSession:
     def __init__(self) -> None:
         try:
@@ -606,14 +617,30 @@ class _R1PygameSession:
                 effect = str(last_obs.get("effect_status_t", "unknown"))
                 bt = int(last_obs.get("budget_t_remaining", instance.budget_timestep))
                 ba = int(last_obs.get("budget_a_remaining", instance.budget_atoms))
+                effect_text, effect_fill = _effect_status_badge(effect)
                 self._draw_text("Observation Summary:", status_x, status_y)
                 self._draw_text(
                     _summarize_observed_outputs(y_t), status_x, status_y + 28
                 )
                 self._draw_text(
-                    f"Effect status: {effect} | Budget remaining: timesteps={bt}, atoms={ba}",
+                    f"Budget remaining: timesteps={bt}, atoms={ba}",
                     status_x,
                     status_y + 56,
+                )
+                self._draw_rect(
+                    status_x + 430,
+                    status_y + 52,
+                    240,
+                    28,
+                    fill=effect_fill,
+                    border=(114, 132, 158),
+                )
+                self._draw_text(
+                    effect_text,
+                    status_x + 438,
+                    status_y + 59,
+                    small=True,
+                    color=(232, 238, 249),
                 )
                 delta_y = status_y + 84
                 if (
