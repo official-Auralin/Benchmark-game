@@ -30,6 +30,10 @@ if TYPE_CHECKING:
 
 
 _SESSION: "_R1PygameSession | None" = None
+UI_TEXT_MIN_TRUNCATE_LEN = 4
+COMMAND_RESPONSE_LINE_MAX_LEN = 84
+COMMAND_RESPONSE_MAX_ENTRIES = 4
+COMMAND_RESPONSE_MAX_VISIBLE = 3
 
 
 @dataclass(frozen=True)
@@ -116,11 +120,13 @@ def _clamp_timeline_span(value: int, *, minimum: int = 8, maximum: int = 48) -> 
     return min(max(int(value), int(minimum)), int(maximum))
 
 
-def _truncate_ui_text(text: str, *, max_len: int = 82) -> str:
-    token = str(text)
-    if len(token) <= max(4, int(max_len)):
-        return token
-    return token[: max(4, int(max_len)) - 3] + "..."
+def _truncate_ui_text(
+    text: str, *, max_len: int = COMMAND_RESPONSE_LINE_MAX_LEN
+) -> str:
+    max_len = max(UI_TEXT_MIN_TRUNCATE_LEN, int(max_len))
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
 
 
 def _timeline_window_bounds(
@@ -380,33 +386,43 @@ class _WaveStripModel:
 
 
 class _CommandResponseTrailModel:
-    def __init__(self, *, max_entries: int = 4) -> None:
+    """Track recent command->response summaries for rendering.
+
+    `max_entries` controls storage capacity and de-dup window.
+    `max_visible_lines` controls how many of the most recent stored entries
+    are returned by `lines()` for UI display.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_entries: int = COMMAND_RESPONSE_MAX_ENTRIES,
+        max_visible_lines: int = COMMAND_RESPONSE_MAX_VISIBLE,
+        line_max_len: int = COMMAND_RESPONSE_LINE_MAX_LEN,
+    ) -> None:
         self._max_entries = max(1, int(max_entries))
-        self._entries: list[tuple[int, str, str]] = []
+        self._max_visible_lines = max(1, int(max_visible_lines))
+        self._line_max_len = max(UI_TEXT_MIN_TRUNCATE_LEN, int(line_max_len))
+        self._entries: list[str] = []
 
     def reset(self) -> None:
         self._entries = []
 
     def record(self, *, timestep: int, command: str, response_delta: str) -> None:
-        entry = (int(timestep), str(command), str(response_delta))
+        entry = _truncate_ui_text(
+            f"t={timestep} | {command} -> {response_delta}",
+            max_len=self._line_max_len,
+        )
         if self._entries and self._entries[-1] == entry:
             return
         self._entries.append(entry)
         if len(self._entries) > self._max_entries:
             self._entries = self._entries[-self._max_entries :]
 
-    def lines(self, *, max_entries: int = 3) -> list[str]:
+    def lines(self) -> list[str]:
         if not self._entries:
             return ["(none yet)"]
-        rows: list[str] = []
-        for t, cmd, delta in self._entries[-max(1, int(max_entries)) :]:
-            rows.append(
-                _truncate_ui_text(
-                    f"t={t} | {cmd} -> {delta}",
-                    max_len=84,
-                )
-            )
-        return rows
+        return self._entries[-self._max_visible_lines :]
 
 
 def _wave_pressure_strip_state(
@@ -681,7 +697,7 @@ class _R1PygameSession:
             border_width=2,
         )
         self._draw_text("Command -> Sector response (observed):", x + 14, y + 10, small=True)
-        for idx, line in enumerate(self._command_response_trail.lines(max_entries=3)):
+        for idx, line in enumerate(self._command_response_trail.lines()):
             self._draw_text(
                 line,
                 x + 14,
