@@ -25,7 +25,7 @@ import unittest
 from pathlib import Path
 
 from gf01.models import GF01Instance, MealyAutomaton
-from gf01.play import _objective_text
+from gf01.play import EpisodeAborted, _objective_text, run_episode
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +97,7 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(run_contract.get("renderer_track"), "json")
         self.assertEqual(run_contract.get("renderer_policy_version"), "gf01.renderer_policy.v1")
         self.assertEqual(run_contract.get("renderer_profile_id"), "canonical-json-v1")
+        self.assertEqual(run_contract.get("visual_backend"), "text")
         self.assertEqual(run_contract.get("eval_track"), "EVAL-CB")
         self.assertEqual(run_contract.get("tool_allowlist_id"), "none")
         self.assertEqual(run_contract.get("play_protocol"), "commit_only")
@@ -202,6 +203,45 @@ class TestPlayableLoop(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertEqual(payload.get("error_type"), "track_policy_violation")
 
+    def test_play_rejects_pygame_backend_for_json_renderer(self) -> None:
+        proc = _run_cli(
+            [
+                "play",
+                "--seed",
+                "1337",
+                "--agent",
+                "greedy",
+                "--renderer-track",
+                "json",
+                "--visual-backend",
+                "pygame",
+            ]
+        )
+        self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("error_type"), "renderer_backend_policy_violation")
+
+    def test_play_allows_visual_track_with_pygame_backend_for_noninteractive_agent(self) -> None:
+        proc = _run_cli(
+            [
+                "play",
+                "--seed",
+                "1337",
+                "--agent",
+                "greedy",
+                "--renderer-track",
+                "visual",
+                "--visual-backend",
+                "pygame",
+            ]
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        run_contract = payload.get("run_contract", {})
+        self.assertEqual(run_contract.get("renderer_track"), "visual")
+        self.assertEqual(run_contract.get("renderer_profile_id"), "GF-01-R1")
+        self.assertEqual(run_contract.get("visual_backend"), "pygame")
+
     def test_play_allows_oc_with_oracle_allowlist(self) -> None:
         proc = _run_cli(
             [
@@ -249,6 +289,17 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload.get("error_type"), "adaptation_policy_violation")
+
+    def test_run_episode_treats_none_action_as_abort(self) -> None:
+        instance = _toy_instance("normal")
+
+        def _abort_policy(
+            _last_obs: dict[str, object] | None, _timestep: int, _instance: GF01Instance
+        ) -> dict[str, int] | None:
+            return None
+
+        with self.assertRaises(EpisodeAborted):
+            _ = run_episode(instance, _abort_policy, renderer_track="json")
 
 
 if __name__ == "__main__":

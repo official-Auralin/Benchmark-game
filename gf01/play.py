@@ -43,7 +43,13 @@ from .semantics import (
 from .verifier import evaluate_certificate
 
 
-PolicyFn = Callable[[dict[str, object] | None, int, GF01Instance], dict[str, int]]
+PolicyFn = Callable[
+    [dict[str, object] | None, int, GF01Instance], dict[str, int] | None
+]
+
+
+class EpisodeAborted(RuntimeError):
+    """Raised when an interactive episode is terminated by the user."""
 
 
 def _remaining_budgets(
@@ -220,11 +226,34 @@ def _parse_human_action(raw: str) -> dict[str, int]:
     return edits
 
 
-def human_policy(renderer_track: str = "visual") -> PolicyFn:
+def human_policy(renderer_track: str = "visual", visual_backend: str = "text") -> PolicyFn:
+    use_pygame_backend = renderer_track == "visual" and visual_backend == "pygame"
+
     def _policy(
         last_obs: dict[str, object] | None, timestep: int, instance: GF01Instance
-    ) -> dict[str, int]:
+    ) -> dict[str, int] | None:
+        nonlocal use_pygame_backend
         while True:
+            if use_pygame_backend:
+                try:
+                    from .renderers.r1_pygame import choose_action_pygame
+
+                    action = choose_action_pygame(
+                        last_obs=last_obs,
+                        timestep=timestep,
+                        instance=instance,
+                        objective_text=_objective_text(instance),
+                    )
+                    if action is None:
+                        return None
+                    return action
+                except RuntimeError as exc:
+                    print(
+                        "Visual backend warning: "
+                        f"{exc}. Falling back to terminal visual mode."
+                    )
+                    use_pygame_backend = False
+
             print(f"\n--- Timestep {timestep} ---")
             if last_obs is None:
                 print("No observation yet (start of episode).")
@@ -275,7 +304,10 @@ def run_episode(
     last_observation: dict[str, object] | None = None
 
     for timestep in range(len(instance.base_trace)):
-        raw_action = policy(last_observation, timestep, instance) or {}
+        raw_action = policy(last_observation, timestep, instance)
+        if raw_action is None:
+            raise EpisodeAborted("interactive episode terminated by user")
+        raw_action = raw_action or {}
         step_atoms = normalize_step_action(instance, timestep, raw_action)
         _validate_step_budget(instance, history, step_atoms)
         step_input = _step_input(instance, timestep, step_atoms)

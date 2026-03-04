@@ -141,9 +141,10 @@ def _format_y_t_for_visual(y_t: object) -> str:
     return " ".join(tokens) if tokens else "(none)"
 
 
-def _iter_valid_history_atoms(
+def iter_history_atoms(
     history_atoms: object,
 ) -> list[tuple[int, str, int]]:
+    """Parse intervention history atoms into normalized (t, ap, bit) tuples."""
     parsed: list[tuple[int, str, int]] = []
     if isinstance(history_atoms, list):
         for item in history_atoms:
@@ -157,6 +158,30 @@ def _iter_valid_history_atoms(
                 continue
             parsed.append((t_item, ap_item, value_item))
     return parsed
+
+
+def history_counts_by_t(history_atoms: object) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    for t_item, _ap_item, _value_item in iter_history_atoms(history_atoms):
+        counts[t_item] = counts.get(t_item, 0) + 1
+    return counts
+
+
+def timeline_marker_for_t(t: int, t_now: int, t_star: int) -> str:
+    if t == t_now and t == t_star:
+        return "B"
+    if t == t_now:
+        return "N"
+    if t == t_star:
+        return "T"
+    return "."
+
+
+def _iter_valid_history_atoms(
+    history_atoms: object,
+) -> list[tuple[int, str, int]]:
+    # Backward-compatible private alias for existing call sites/tests.
+    return iter_history_atoms(history_atoms)
 
 
 def _format_history_atoms_for_visual(history_atoms: object) -> list[str]:
@@ -176,24 +201,13 @@ def _format_history_atoms_for_visual(history_atoms: object) -> list[str]:
 def _format_timeline_for_visual(
     t_now: int, t_star: int, history_atoms: object
 ) -> list[str]:
-    history_counts: dict[int, int] = {}
-    for t_item, _ap_item, _value_item in _iter_valid_history_atoms(history_atoms):
-        history_counts[t_item] = history_counts.get(t_item, 0) + 1
+    history_counts = history_counts_by_t(history_atoms)
 
     horizon = max([0, t_now, t_star, *history_counts.keys()])
     times = list(range(horizon + 1))
     t_row = " ".join(f"{t:>2}" for t in times)
 
-    markers: list[str] = []
-    for t in times:
-        if t == t_now and t == t_star:
-            markers.append("B")
-        elif t == t_now:
-            markers.append("N")
-        elif t == t_star:
-            markers.append("T")
-        else:
-            markers.append(".")
+    markers = [timeline_marker_for_t(t, t_now=t_now, t_star=t_star) for t in times]
     marker_row = " ".join(f"{mark:>2}" for mark in markers)
 
     edits = [str(history_counts[t]) if t in history_counts else "." for t in times]
