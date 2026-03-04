@@ -24,6 +24,7 @@ from gf01.renderers.r1_pygame import (
     _normalize_binary_map,
     _paginate_input_aps,
     _summarize_observed_outputs,
+    _summarize_committed_action,
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
     _timeline_mark,
@@ -132,6 +133,16 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(
             _summarize_pending_interventions({}),
             "Pending interventions: none selected",
+        )
+
+    def test_summarize_committed_action(self) -> None:
+        summary = _summarize_committed_action({"in2": 0, "in0": 1})
+        self.assertEqual(summary, "in0=1, in2=0")
+
+    def test_summarize_committed_action_skip(self) -> None:
+        self.assertEqual(
+            _summarize_committed_action({}),
+            "no interventions (skip)",
         )
 
     def test_grouped_input_aps(self) -> None:

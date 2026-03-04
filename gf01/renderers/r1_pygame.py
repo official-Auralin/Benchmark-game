@@ -121,7 +121,7 @@ def _help_overlay_lines() -> list[str]:
         "Keys: Left/Right page APs | +/- AP density.",
         "Keys: G AP group filter | C collapse/expand map rows.",
         "Keys: Enter commit | Esc skip | Backspace clear all.",
-        "Tip: use Output delta to see what changed after each step.",
+        "Tip: compare Previous command and Output delta each step.",
         "Press H to hide/show this panel.",
     ]
 
@@ -243,6 +243,23 @@ def _summarize_pending_interventions(
     return "Pending interventions: " + body
 
 
+def _summarize_committed_action(
+    action: dict[str, int], *, max_items: int = 6
+) -> str:
+    items = [
+        (str(ap), int(bit))
+        for ap, bit in sorted(action.items())
+        if int(bit) in (0, 1)
+    ]
+    if not items:
+        return "no interventions (skip)"
+    shown = items[: max(1, int(max_items))]
+    body = ", ".join(f"{ap}={bit}" for ap, bit in shown)
+    if len(items) > len(shown):
+        body += f", +{len(items) - len(shown)} more"
+    return body
+
+
 class _R1PygameSession:
     def __init__(self) -> None:
         try:
@@ -267,6 +284,8 @@ class _R1PygameSession:
         self.font_small = self.pg.font.SysFont("Courier New", 14)
         self.font_title = self.pg.font.SysFont("Courier New", 24, bold=True)
         self._previous_observed_y_t: dict[str, int] | None = None
+        self._last_committed_action_summary: str | None = None
+        self._last_committed_t: int | None = None
         self._show_help_overlay = True
 
     def _draw_text(
@@ -459,6 +478,8 @@ class _R1PygameSession:
         collapse_rows = False
         if timestep == 0:
             self._previous_observed_y_t = None
+            self._last_committed_action_summary = None
+            self._last_committed_t = None
             self._show_help_overlay = True
         current_y_t = _normalize_binary_map(
             None if last_obs is None else last_obs.get("y_t", {})
@@ -483,8 +504,16 @@ class _R1PygameSession:
                     return None
                 if event.type == self.pg.KEYDOWN:
                     if event.key in (self.pg.K_RETURN, self.pg.K_KP_ENTER):
+                        self._last_committed_action_summary = (
+                            _summarize_committed_action(pending)
+                        )
+                        self._last_committed_t = int(timestep)
                         return dict(pending)
                     if event.key == self.pg.K_ESCAPE:
+                        self._last_committed_action_summary = (
+                            _summarize_committed_action({})
+                        )
+                        self._last_committed_t = int(timestep)
                         return {}
                     if event.key == self.pg.K_BACKSPACE:
                         pending.clear()
@@ -586,11 +615,23 @@ class _R1PygameSession:
                     status_x,
                     status_y + 56,
                 )
-                self._draw_text(delta_summary, status_x, status_y + 84)
+                delta_y = status_y + 84
+                if (
+                    self._last_committed_action_summary is not None
+                    and self._last_committed_t == timestep - 1
+                ):
+                    self._draw_text(
+                        "Previous command: "
+                        f"{self._last_committed_action_summary}",
+                        status_x,
+                        status_y + 84,
+                    )
+                    delta_y = status_y + 112
+                self._draw_text(delta_summary, status_x, delta_y)
                 self._draw_text(
                     _summarize_pending_interventions(pending),
                     status_x,
-                    status_y + 112,
+                    delta_y + 28,
                     small=True,
                     color=(192, 209, 232),
                 )

@@ -69,6 +69,9 @@ Visual renderer notes (both backends):
 - `--visual-backend pygame` renders the map-first interactive view with
   intervention controls and an `Output delta` summary so players can see what
   changed since the prior observed state.
+- In `pygame` mode, the observation panel shows `Previous command` alongside
+  `Output delta` so players can map the last committed input changes to the
+  newly observed response.
 - The pygame observation panel now includes plain summaries for
   currently-active observed outputs and your pending interventions to clarify
   action->response interpretation without formal notation.
