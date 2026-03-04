@@ -69,6 +69,18 @@ Visual renderer notes (both backends):
 - `--visual-backend pygame` renders the map-first interactive view with
   intervention controls and an `Output delta` summary so players can see what
   changed since the prior observed state.
+- In `pygame` mode, the observation panel shows `Previous command` alongside
+  `Output delta` so players can map the last committed input changes to the
+  newly observed response.
+- In `pygame` mode, objective status is shown as a color-coded badge
+  (`Objective active` / `Objective not active`) for faster at-a-glance reading.
+- In `pygame` mode, a short onboarding strip appears for timesteps `t=0..2`
+  to guide first-time players through action, feedback reading, and adjustment.
+- In `pygame` mode, a `Sector Wave Strip (observed)` panel shows output-activity
+  pressure and short trend text (`baseline`/`rising`/`steady`/`falling`) using
+  only observed outputs.
+- The same wave panel includes a short recent-trend trail (`t=k:trend`) to
+  make temporal pattern shifts readable across the last few timesteps.
 - The pygame observation panel now includes plain summaries for
   currently-active observed outputs and your pending interventions to clarify
   action->response interpretation without formal notation.
@@ -82,6 +94,8 @@ Visual renderer notes (both backends):
   more controls per page vs larger per-control readability.
 - In `pygame` mode, `G` cycles AP-group focus (`ALL -> group1 -> group2 ...`)
   so high-AP levels can be explored one group at a time.
+- In `pygame` mode, `C` toggles collapsible map rows; when collapse is on and
+  group=`ALL`, AP rows are collapsed until a specific group is selected.
 - In `pygame` mode, `H` toggles an in-session quick-help overlay with control
   reminders and action->effect reading tips.
 - The pygame control header also shows a compact AP-group summary for the

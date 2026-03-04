@@ -118,9 +118,10 @@ def _help_overlay_lines() -> list[str]:
         "Goal: commit interventions to reach the visible objective.",
         "Mouse: click 0/1 to set AP, clear to unset AP.",
         "Keys: 1..9,0 cycle AP slots on current page.",
-        "Keys: Left/Right page APs | +/- AP density | G AP group filter.",
+        "Keys: Left/Right page APs | +/- AP density.",
+        "Keys: G AP group filter | C collapse/expand map rows.",
         "Keys: Enter commit | Esc skip | Backspace clear all.",
-        "Tip: use Output delta to see what changed after each step.",
+        "Tip: read Previous command, Output delta, and Wave strip together.",
         "Press H to hide/show this panel.",
     ]
 
@@ -171,6 +172,38 @@ def _apply_group_filter(input_aps: list[str], group_key: str | None) -> list[str
     return selected
 
 
+def _control_visible_pool(
+    input_aps: list[str],
+    *,
+    group_filter: str | None,
+    collapse_rows: bool,
+) -> list[str]:
+    if collapse_rows and group_filter is None:
+        return []
+    return _apply_group_filter(input_aps, group_filter)
+
+
+def _group_rows_for_controls(
+    input_aps: list[str],
+    pending: dict[str, int],
+    *,
+    max_groups: int = 8,
+) -> list[str]:
+    grouped = _grouped_input_aps(input_aps)
+    if not grouped:
+        return ["(none)"]
+    lines: list[str] = []
+    keys = sorted(grouped)
+    for key in keys[: max(1, int(max_groups))]:
+        aps = grouped[key]
+        set_count = sum(1 for ap in aps if ap in pending)
+        lines.append(f"{key}: {set_count}/{len(aps)} set")
+    hidden = len(keys) - len(lines)
+    if hidden > 0:
+        lines.append(f"+{hidden} more groups")
+    return lines
+
+
 def _timeline_mark(t: int, timestep: int, t_star: int) -> str:
     marker = timeline_marker_for_t(t, t_now=timestep, t_star=t_star)
     if marker == ".":
@@ -210,6 +243,87 @@ def _summarize_pending_interventions(
     return "Pending interventions: " + body
 
 
+def _summarize_committed_action(
+    action: dict[str, int], *, max_items: int = 6
+) -> str:
+    items = [
+        (str(ap), int(bit))
+        for ap, bit in sorted(action.items())
+        if int(bit) in (0, 1)
+    ]
+    if not items:
+        return "no interventions (skip)"
+    shown = items[: max(1, int(max_items))]
+    body = ", ".join(f"{ap}={bit}" for ap, bit in shown)
+    if len(items) > len(shown):
+        body += f", +{len(items) - len(shown)} more"
+    return body
+
+
+def _effect_status_badge(effect_status: object) -> tuple[str, tuple[int, int, int]]:
+    token = str(effect_status).strip().lower()
+    if token == "triggered":
+        return ("Objective active", (46, 112, 66))
+    if token == "not-triggered":
+        return ("Objective not active", (112, 84, 42))
+    if token == "unknown":
+        return ("Objective status unknown", (64, 72, 90))
+    return (f"Objective status: {effect_status}", (64, 72, 90))
+
+
+def _wave_pressure_strip_state(
+    previous_y_t: object, current_y_t: object
+) -> tuple[str, int, tuple[int, int, int], str]:
+    current = _normalize_binary_map(current_y_t)
+    if not current:
+        return ("Wave pressure: awaiting observation", 0, (64, 72, 90), "none")
+    prev = _normalize_binary_map(previous_y_t)
+    on_count = sum(1 for bit in current.values() if bit == 1)
+    total = len(current)
+    ratio = on_count / float(total)
+    filled = max(0, min(10, int(round(ratio * 10.0))))
+    if not prev:
+        trend = "baseline"
+    else:
+        prev_on = sum(1 for bit in prev.values() if bit == 1)
+        prev_ratio = prev_on / float(len(prev))
+        delta = ratio - prev_ratio
+        if delta > 0.05:
+            trend = "rising"
+        elif delta < -0.05:
+            trend = "falling"
+        else:
+            trend = "steady"
+    # Blue-cyan ramp to indicate magnitude without implying good/bad semantics.
+    fill = (
+        56 + int(80.0 * ratio),
+        92 + int(96.0 * ratio),
+        136 + int(96.0 * ratio),
+    )
+    label = f"Wave pressure: {on_count}/{total} active ({trend})"
+    return (label, filled, fill, trend)
+
+
+def _onboarding_strip_lines(timestep: int) -> list[str]:
+    t = int(timestep)
+    if t == 0:
+        return [
+            "Onboarding 1/3: Set one control, then commit.",
+            "Use click or 1..9,0. Commit with Enter.",
+        ]
+    if t == 1:
+        return [
+            "Onboarding 2/3: Read cause -> effect.",
+            "Compare Previous command with Output delta.",
+        ]
+    if t == 2:
+        return [
+            "Onboarding 3/3: Adjust based on feedback.",
+            "Watch Objective badge, timeline marks, and budget.",
+        ]
+    return []
+
+
 class _R1PygameSession:
     def __init__(self) -> None:
         try:
@@ -234,6 +348,9 @@ class _R1PygameSession:
         self.font_small = self.pg.font.SysFont("Courier New", 14)
         self.font_title = self.pg.font.SysFont("Courier New", 24, bold=True)
         self._previous_observed_y_t: dict[str, int] | None = None
+        self._last_committed_action_summary: str | None = None
+        self._last_committed_t: int | None = None
+        self._wave_trend_history: list[tuple[int, str]] = []
         self._show_help_overlay = True
 
     def _draw_text(
@@ -328,15 +445,100 @@ class _R1PygameSession:
                 title=False,
             )
 
+    def _draw_onboarding_strip(self, *, timestep: int) -> None:
+        lines = _onboarding_strip_lines(timestep)
+        if not lines:
+            return
+        x = 620
+        y = 96
+        w = 540
+        h = 80
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(27, 38, 56),
+            border=(115, 136, 168),
+            border_width=2,
+        )
+        self._draw_text(lines[0], x + 14, y + 12, small=True, color=(229, 236, 250))
+        self._draw_text(lines[1], x + 14, y + 40, small=True, color=(206, 216, 234))
+
+    def _draw_wave_pressure_strip(
+        self,
+        *,
+        timestep: int,
+        label: str,
+        filled: int,
+        fill_color: tuple[int, int, int],
+        trend: str,
+    ) -> None:
+        x = 620
+        y = 184
+        w = 540
+        h = 86
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(24, 34, 50),
+            border=(102, 124, 156),
+            border_width=2,
+        )
+        self._draw_text("Sector Wave Strip (observed):", x + 14, y + 10, small=True)
+        cell_x = x + 270
+        cell_y = y + 10
+        for i in range(10):
+            active = i < max(0, min(10, int(filled)))
+            self._draw_rect(
+                cell_x + i * 22,
+                cell_y,
+                18,
+                18,
+                fill=fill_color if active else (37, 47, 66),
+                border=(92, 108, 132),
+            )
+        self._draw_text(label, x + 14, y + 36, small=True, color=(198, 212, 234))
+
+        if trend != "none":
+            entry = (int(timestep), str(trend))
+            if not self._wave_trend_history or self._wave_trend_history[-1] != entry:
+                self._wave_trend_history.append(entry)
+            if len(self._wave_trend_history) > 5:
+                self._wave_trend_history = self._wave_trend_history[-5:]
+        if self._wave_trend_history:
+            trail = " | ".join(
+                f"t={t}:{tr}" for t, tr in self._wave_trend_history[-4:]
+            )
+            self._draw_text(
+                "Recent wave trends: " + trail,
+                x + 14,
+                y + 58,
+                small=True,
+                color=(176, 191, 216),
+            )
+        else:
+            self._draw_text(
+                "Recent wave trends: (none yet)",
+                x + 14,
+                y + 58,
+                small=True,
+                color=(176, 191, 216),
+            )
+
     def _draw_controls(
         self,
         *,
         input_aps: list[str],
+        all_input_aps: list[str],
         pending: dict[str, int],
         y_start: int,
         page: int,
         page_size: int,
         group_filter: str | None,
+        collapse_rows: bool,
     ) -> tuple[list[_Button], int, int, int]:
         buttons: list[_Button] = []
         self._draw_text("Set interventions for current timestep:", 24, y_start - 26)
@@ -346,9 +548,11 @@ class _R1PygameSession:
             page_size=page_size,
         )
         group_label = "ALL" if group_filter is None else group_filter
+        collapse_label = "ON" if collapse_rows else "OFF"
         self._draw_text(
             f"AP page {page + 1}/{total_pages} | page size={page_size}  "
-            f"group={group_label} (Left/Right page, +/- density, G group)",
+            f"group={group_label} collapse={collapse_label} "
+            "(Left/Right, +/-, G group, C collapse)",
             24,
             y_start - 4,
             small=True,
@@ -360,6 +564,31 @@ class _R1PygameSession:
             small=True,
             color=(176, 191, 216),
         )
+        if collapse_rows:
+            self._draw_text(
+                "Collapsed map rows:",
+                420,
+                y_start - 4,
+                small=True,
+                color=(176, 191, 216),
+            )
+            for idx, line in enumerate(_group_rows_for_controls(all_input_aps, pending)):
+                self._draw_text(
+                    line,
+                    420,
+                    y_start + 16 + idx * 18,
+                    small=True,
+                    color=(176, 191, 216),
+                )
+        if not visible_aps:
+            self._draw_text(
+                "No AP rows visible (press G to expand one group).",
+                24,
+                y_start + 52,
+                small=True,
+                color=(176, 191, 216),
+            )
+            return buttons, page, total_pages, 0
         for idx, ap in enumerate(visible_aps):
             y = y_start + 24 + idx * 40
             self._draw_text(ap, 24, y + 8)
@@ -394,17 +623,29 @@ class _R1PygameSession:
         input_aps_all = list(instance.automaton.input_aps)
         group_keys = list(_grouped_input_aps(input_aps_all).keys())
         group_filter: str | None = None
+        collapse_rows = False
         if timestep == 0:
             self._previous_observed_y_t = None
+            self._last_committed_action_summary = None
+            self._last_committed_t = None
+            self._wave_trend_history = []
             self._show_help_overlay = True
+        previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(
             None if last_obs is None else last_obs.get("y_t", {})
         )
-        delta_summary = _describe_output_delta(self._previous_observed_y_t, current_y_t)
+        delta_summary = _describe_output_delta(previous_y_t, current_y_t)
+        wave_label, wave_filled, wave_fill, wave_trend = _wave_pressure_strip_state(
+            previous_y_t, current_y_t
+        )
         if current_y_t:
             self._previous_observed_y_t = dict(current_y_t)
         while True:
-            visible_pool = _apply_group_filter(input_aps_all, group_filter)
+            visible_pool = _control_visible_pool(
+                input_aps_all,
+                group_filter=group_filter,
+                collapse_rows=collapse_rows,
+            )
             visible_aps, page, _ = _paginate_input_aps(
                 visible_pool,
                 page=page,
@@ -416,8 +657,16 @@ class _R1PygameSession:
                     return None
                 if event.type == self.pg.KEYDOWN:
                     if event.key in (self.pg.K_RETURN, self.pg.K_KP_ENTER):
+                        self._last_committed_action_summary = (
+                            _summarize_committed_action(pending)
+                        )
+                        self._last_committed_t = int(timestep)
                         return dict(pending)
                     if event.key == self.pg.K_ESCAPE:
+                        self._last_committed_action_summary = (
+                            _summarize_committed_action({})
+                        )
+                        self._last_committed_t = int(timestep)
                         return {}
                     if event.key == self.pg.K_BACKSPACE:
                         pending.clear()
@@ -441,6 +690,9 @@ class _R1PygameSession:
                             except ValueError:
                                 idx = 0
                             group_filter = group_keys[idx] if idx < len(group_keys) else None
+                        page = 0
+                    if event.key == self.pg.K_c:
+                        collapse_rows = not collapse_rows
                         page = 0
                     key_to_index = {
                         self.pg.K_1: 0,
@@ -472,6 +724,14 @@ class _R1PygameSession:
             self._draw_text("GF-01-R1 Map-First Visual", 24, 18, title=True)
             self._draw_text(f"t={timestep}  t*={instance.t_star}  mode={instance.mode}", 24, 54)
             self._draw_text(objective_text, 24, 82)
+            self._draw_onboarding_strip(timestep=timestep)
+            self._draw_wave_pressure_strip(
+                timestep=timestep,
+                label=wave_label,
+                filled=wave_filled,
+                fill_color=wave_fill,
+                trend=wave_trend,
+            )
 
             history_atoms = [] if last_obs is None else last_obs.get("history_atoms", [])
             self._draw_timeline(
@@ -481,11 +741,13 @@ class _R1PygameSession:
             )
             current_buttons, page, _, _ = self._draw_controls(
                 input_aps=visible_pool,
+                all_input_aps=input_aps_all,
                 pending=pending,
                 y_start=250,
                 page=page,
                 page_size=page_size,
                 group_filter=group_filter,
+                collapse_rows=collapse_rows,
             )
             status_x = 460
             status_y = 250
@@ -505,20 +767,48 @@ class _R1PygameSession:
                 effect = str(last_obs.get("effect_status_t", "unknown"))
                 bt = int(last_obs.get("budget_t_remaining", instance.budget_timestep))
                 ba = int(last_obs.get("budget_a_remaining", instance.budget_atoms))
+                effect_text, effect_fill = _effect_status_badge(effect)
                 self._draw_text("Observation Summary:", status_x, status_y)
                 self._draw_text(
                     _summarize_observed_outputs(y_t), status_x, status_y + 28
                 )
                 self._draw_text(
-                    f"Effect status: {effect} | Budget remaining: timesteps={bt}, atoms={ba}",
+                    f"Budget remaining: timesteps={bt}, atoms={ba}",
                     status_x,
                     status_y + 56,
                 )
-                self._draw_text(delta_summary, status_x, status_y + 84)
+                self._draw_rect(
+                    status_x + 430,
+                    status_y + 52,
+                    240,
+                    28,
+                    fill=effect_fill,
+                    border=(114, 132, 158),
+                )
+                self._draw_text(
+                    effect_text,
+                    status_x + 438,
+                    status_y + 59,
+                    small=True,
+                    color=(232, 238, 249),
+                )
+                delta_y = status_y + 84
+                if (
+                    self._last_committed_action_summary is not None
+                    and self._last_committed_t == timestep - 1
+                ):
+                    self._draw_text(
+                        "Previous command: "
+                        f"{self._last_committed_action_summary}",
+                        status_x,
+                        status_y + 84,
+                    )
+                    delta_y = status_y + 112
+                self._draw_text(delta_summary, status_x, delta_y)
                 self._draw_text(
                     _summarize_pending_interventions(pending),
                     status_x,
-                    status_y + 112,
+                    delta_y + 28,
                     small=True,
                     color=(192, 209, 232),
                 )
@@ -528,7 +818,7 @@ class _R1PygameSession:
             self._draw_text(
                 "Click 0/1 to set AP value, clear to unset | 1..9,0 cycle APs | "
                 "Enter=commit | Esc=skip | Backspace=clear all | "
-                "Left/Right=AP page | +/-=AP density | H=help",
+                "Left/Right=AP page | +/-=AP density | G=group | C=collapse | H=help",
                 100,
                 footer_y,
                 small=True,

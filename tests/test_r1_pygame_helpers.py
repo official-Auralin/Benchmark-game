@@ -15,16 +15,22 @@ from gf01.renderers.r1_pygame import (
     _apply_group_filter,
     _ap_group_key,
     _clamp_page_size,
+    _control_visible_pool,
     _cycle_pending_bit,
     _describe_output_delta,
+    _effect_status_badge,
+    _group_rows_for_controls,
     _grouped_input_aps,
     _help_overlay_lines,
     _normalize_binary_map,
+    _onboarding_strip_lines,
     _paginate_input_aps,
     _summarize_observed_outputs,
+    _summarize_committed_action,
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
     _timeline_mark,
+    _wave_pressure_strip_state,
 )
 
 
@@ -95,6 +101,7 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertGreaterEqual(len(lines), 6)
         self.assertTrue(any("Enter commit" in line for line in lines))
         self.assertTrue(any("Output delta" in line for line in lines))
+        self.assertTrue(any("collapse" in line.lower() for line in lines))
         self.assertTrue(any("Press H" in line for line in lines))
 
     def test_ap_group_key(self) -> None:
@@ -131,6 +138,59 @@ class TestR1PygameHelpers(unittest.TestCase):
             "Pending interventions: none selected",
         )
 
+    def test_summarize_committed_action(self) -> None:
+        summary = _summarize_committed_action({"in2": 0, "in0": 1})
+        self.assertEqual(summary, "in0=1, in2=0")
+
+    def test_summarize_committed_action_skip(self) -> None:
+        self.assertEqual(
+            _summarize_committed_action({}),
+            "no interventions (skip)",
+        )
+
+    def test_effect_status_badge_triggered(self) -> None:
+        text, _ = _effect_status_badge("triggered")
+        self.assertEqual(text, "Objective active")
+
+    def test_effect_status_badge_not_triggered(self) -> None:
+        text, _ = _effect_status_badge("not-triggered")
+        self.assertEqual(text, "Objective not active")
+
+    def test_effect_status_badge_fallback(self) -> None:
+        text, _ = _effect_status_badge("custom")
+        self.assertIn("Objective status:", text)
+
+    def test_onboarding_strip_lines_for_first_three_steps(self) -> None:
+        self.assertTrue(_onboarding_strip_lines(0))
+        self.assertTrue(_onboarding_strip_lines(1))
+        self.assertTrue(_onboarding_strip_lines(2))
+
+    def test_onboarding_strip_lines_after_step_two_empty(self) -> None:
+        self.assertEqual(_onboarding_strip_lines(3), [])
+
+    def test_wave_pressure_strip_state_awaiting_observation(self) -> None:
+        label, filled, _, trend = _wave_pressure_strip_state(None, {})
+        self.assertIn("awaiting observation", label)
+        self.assertEqual(filled, 0)
+        self.assertEqual(trend, "none")
+
+    def test_wave_pressure_strip_state_baseline(self) -> None:
+        label, filled, _, trend = _wave_pressure_strip_state(
+            None,
+            {"out0": 1, "out1": 0, "out2": 1, "out3": 0},
+        )
+        self.assertIn("baseline", label)
+        self.assertEqual(filled, 5)
+        self.assertEqual(trend, "baseline")
+
+    def test_wave_pressure_strip_state_rising(self) -> None:
+        label, _, _, trend = _wave_pressure_strip_state(
+            {"out0": 0, "out1": 0, "out2": 0, "out3": 0},
+            {"out0": 1, "out1": 1, "out2": 0, "out3": 0},
+        )
+        self.assertIn("rising", label)
+        self.assertEqual(trend, "rising")
+
     def test_grouped_input_aps(self) -> None:
         grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])
         self.assertEqual(grouped["in"], ["in0", "in1"])
@@ -142,6 +202,33 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_apply_group_filter(aps, None), aps)
         self.assertEqual(_apply_group_filter(aps, "in"), ["in0", "in1"])
         self.assertEqual(_apply_group_filter(aps, "unknown"), [])
+
+    def test_control_visible_pool(self) -> None:
+        aps = ["in0", "in1", "sensor0", "mode0"]
+        self.assertEqual(
+            _control_visible_pool(aps, group_filter=None, collapse_rows=False),
+            aps,
+        )
+        self.assertEqual(
+            _control_visible_pool(aps, group_filter="in", collapse_rows=False),
+            ["in0", "in1"],
+        )
+        self.assertEqual(
+            _control_visible_pool(aps, group_filter=None, collapse_rows=True),
+            [],
+        )
+        self.assertEqual(
+            _control_visible_pool(aps, group_filter="sensor", collapse_rows=True),
+            ["sensor0"],
+        )
+
+    def test_group_rows_for_controls(self) -> None:
+        aps = ["in0", "in1", "sensor0", "mode0"]
+        pending = {"in0": 1, "sensor0": 0}
+        lines = _group_rows_for_controls(aps, pending, max_groups=8)
+        self.assertIn("in: 1/2 set", lines)
+        self.assertIn("mode: 0/1 set", lines)
+        self.assertIn("sensor: 1/1 set", lines)
 
     def test_timeline_mark(self) -> None:
         self.assertEqual(_timeline_mark(2, timestep=2, t_star=5), "N")
