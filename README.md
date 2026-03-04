@@ -81,6 +81,8 @@ Visual renderer notes (both backends):
   only observed outputs.
 - The same wave panel includes a short recent-trend trail (`t=k:trend`) to
   make temporal pattern shifts readable across the last few timesteps.
+- In `pygame` mode, a `Command -> Sector response (observed)` trail shows
+  recent per-step command summaries paired with observed output deltas.
 - The pygame observation panel now includes plain summaries for
   currently-active observed outputs and your pending interventions to clarify
   action->response interpretation without formal notation.

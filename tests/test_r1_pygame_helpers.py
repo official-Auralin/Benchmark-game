@@ -12,6 +12,7 @@ from __future__ import annotations
 import unittest
 
 from gf01.renderers.r1_pygame import (
+    _CommandResponseTrailModel,
     _WaveStripModel,
     _apply_group_filter,
     _ap_group_key,
@@ -34,6 +35,7 @@ from gf01.renderers.r1_pygame import (
     _summarize_visible_ap_groups,
     _timeline_mark,
     _timeline_window_bounds,
+    _truncate_ui_text,
     _wave_pressure_strip_state,
 )
 
@@ -104,6 +106,10 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_clamp_timeline_span(2), 8)
         self.assertEqual(_clamp_timeline_span(24), 24)
         self.assertEqual(_clamp_timeline_span(99), 48)
+
+    def test_truncate_ui_text(self) -> None:
+        self.assertEqual(_truncate_ui_text("abc", max_len=5), "abc")
+        self.assertEqual(_truncate_ui_text("abcdef", max_len=5), "ab...")
 
     def test_help_overlay_lines_include_core_controls(self) -> None:
         lines = _help_overlay_lines()
@@ -216,6 +222,26 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("t=2:rising", trail)
         self.assertIn("t=5:rising", trail)
         self.assertNotIn("t=1:baseline | t=1:baseline", trail)
+
+    def test_command_response_trail_empty(self) -> None:
+        model = _CommandResponseTrailModel()
+        self.assertEqual(model.lines(), ["(none yet)"])
+
+    def test_command_response_trail_dedup_and_window(self) -> None:
+        model = _CommandResponseTrailModel(max_entries=3)
+        model.record(timestep=1, command="in0=1", response_delta="d0")
+        model.record(timestep=1, command="in0=1", response_delta="d0")
+        model.record(timestep=2, command="in0=0", response_delta="d1")
+        model.record(timestep=3, command="skip", response_delta="d2")
+        model.record(timestep=4, command="in2=1", response_delta="d3")
+        lines = model.lines(max_entries=3)
+        self.assertEqual(len(lines), 3)
+        # Latest entries should be retained.
+        self.assertTrue(any("t=2" in line for line in lines))
+        self.assertTrue(any("t=4" in line for line in lines))
+        # Duplicate record should not create duplicate line.
+        joined = " || ".join(lines)
+        self.assertNotIn("t=1 | in0=1 -> d0 || t=1 | in0=1 -> d0", joined)
 
     def test_grouped_input_aps(self) -> None:
         grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])
