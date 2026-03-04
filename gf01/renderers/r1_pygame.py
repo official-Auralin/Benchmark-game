@@ -121,7 +121,7 @@ def _help_overlay_lines() -> list[str]:
         "Keys: Left/Right page APs | +/- AP density.",
         "Keys: G AP group filter | C collapse/expand map rows.",
         "Keys: Enter commit | Esc skip | Backspace clear all.",
-        "Tip: compare Previous command and Output delta each step.",
+        "Tip: read Previous command, Output delta, and Wave strip together.",
         "Press H to hide/show this panel.",
     ]
 
@@ -269,6 +269,39 @@ def _effect_status_badge(effect_status: object) -> tuple[str, tuple[int, int, in
     if token == "unknown":
         return ("Objective status unknown", (64, 72, 90))
     return (f"Objective status: {effect_status}", (64, 72, 90))
+
+
+def _wave_pressure_strip_state(
+    previous_y_t: object, current_y_t: object
+) -> tuple[str, int, tuple[int, int, int]]:
+    current = _normalize_binary_map(current_y_t)
+    if not current:
+        return ("Wave pressure: awaiting observation", 0, (64, 72, 90))
+    prev = _normalize_binary_map(previous_y_t)
+    on_count = sum(1 for bit in current.values() if bit == 1)
+    total = len(current)
+    ratio = on_count / float(total)
+    filled = max(0, min(10, int(round(ratio * 10.0))))
+    if not prev:
+        trend = "baseline"
+    else:
+        prev_on = sum(1 for bit in prev.values() if bit == 1)
+        prev_ratio = prev_on / float(len(prev))
+        delta = ratio - prev_ratio
+        if delta > 0.05:
+            trend = "rising"
+        elif delta < -0.05:
+            trend = "falling"
+        else:
+            trend = "steady"
+    # Blue-cyan ramp to indicate magnitude without implying good/bad semantics.
+    fill = (
+        56 + int(80.0 * ratio),
+        92 + int(96.0 * ratio),
+        136 + int(96.0 * ratio),
+    )
+    label = f"Wave pressure: {on_count}/{total} active ({trend})"
+    return (label, filled, fill)
 
 
 def _onboarding_strip_lines(timestep: int) -> list[str]:
@@ -431,6 +464,41 @@ class _R1PygameSession:
         self._draw_text(lines[0], x + 14, y + 12, small=True, color=(229, 236, 250))
         self._draw_text(lines[1], x + 14, y + 40, small=True, color=(206, 216, 234))
 
+    def _draw_wave_pressure_strip(
+        self,
+        *,
+        label: str,
+        filled: int,
+        fill_color: tuple[int, int, int],
+    ) -> None:
+        x = 620
+        y = 184
+        w = 540
+        h = 64
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(24, 34, 50),
+            border=(102, 124, 156),
+            border_width=2,
+        )
+        self._draw_text("Sector Wave Strip (observed):", x + 14, y + 10, small=True)
+        cell_x = x + 270
+        cell_y = y + 10
+        for i in range(10):
+            active = i < max(0, min(10, int(filled)))
+            self._draw_rect(
+                cell_x + i * 22,
+                cell_y,
+                18,
+                18,
+                fill=fill_color if active else (37, 47, 66),
+                border=(92, 108, 132),
+            )
+        self._draw_text(label, x + 14, y + 36, small=True, color=(198, 212, 234))
+
     def _draw_controls(
         self,
         *,
@@ -532,10 +600,14 @@ class _R1PygameSession:
             self._last_committed_action_summary = None
             self._last_committed_t = None
             self._show_help_overlay = True
+        previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(
             None if last_obs is None else last_obs.get("y_t", {})
         )
-        delta_summary = _describe_output_delta(self._previous_observed_y_t, current_y_t)
+        delta_summary = _describe_output_delta(previous_y_t, current_y_t)
+        wave_label, wave_filled, wave_fill = _wave_pressure_strip_state(
+            previous_y_t, current_y_t
+        )
         if current_y_t:
             self._previous_observed_y_t = dict(current_y_t)
         while True:
@@ -623,6 +695,9 @@ class _R1PygameSession:
             self._draw_text(f"t={timestep}  t*={instance.t_star}  mode={instance.mode}", 24, 54)
             self._draw_text(objective_text, 24, 82)
             self._draw_onboarding_strip(timestep=timestep)
+            self._draw_wave_pressure_strip(
+                label=wave_label, filled=wave_filled, fill_color=wave_fill
+            )
 
             history_atoms = [] if last_obs is None else last_obs.get("history_atoms", [])
             self._draw_timeline(

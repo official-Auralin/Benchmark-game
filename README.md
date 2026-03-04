@@ -76,6 +76,9 @@ Visual renderer notes (both backends):
   (`Objective active` / `Objective not active`) for faster at-a-glance reading.
 - In `pygame` mode, a short onboarding strip appears for timesteps `t=0..2`
   to guide first-time players through action, feedback reading, and adjustment.
+- In `pygame` mode, a `Sector Wave Strip (observed)` panel shows output-activity
+  pressure and short trend text (`baseline`/`rising`/`steady`/`falling`) using
+  only observed outputs.
 - The pygame observation panel now includes plain summaries for
   currently-active observed outputs and your pending interventions to clarify
   action->response interpretation without formal notation.
