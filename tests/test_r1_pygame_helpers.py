@@ -108,8 +108,23 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_clamp_timeline_span(99), 48)
 
     def test_truncate_ui_text(self) -> None:
+        # Non-truncation when text is shorter than max_len.
         self.assertEqual(_truncate_ui_text("abc", max_len=5), "abc")
+        # Truncation when text exceeds max_len.
         self.assertEqual(_truncate_ui_text("abcdef", max_len=5), "ab...")
+        # Empty input should stay empty.
+        self.assertEqual(_truncate_ui_text("", max_len=0), "")
+        self.assertEqual(_truncate_ui_text("", max_len=3), "")
+        self.assertEqual(_truncate_ui_text("", max_len=5), "")
+        # max_len below internal minimum should behave as max_len == 4.
+        self.assertEqual(_truncate_ui_text("abcdef", max_len=0), "a...")
+        self.assertEqual(_truncate_ui_text("abcdef", max_len=1), "a...")
+        self.assertEqual(_truncate_ui_text("abcdef", max_len=2), "a...")
+        self.assertEqual(_truncate_ui_text("abcdef", max_len=3), "a...")
+        # Boundary behavior at threshold.
+        self.assertEqual(_truncate_ui_text("abcd", max_len=4), "abcd")
+        self.assertEqual(_truncate_ui_text("abcd", max_len=5), "abcd")
+        self.assertEqual(_truncate_ui_text("abcde", max_len=5), "abcde")
 
     def test_help_overlay_lines_include_core_controls(self) -> None:
         lines = _help_overlay_lines()
@@ -228,20 +243,46 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(model.lines(), ["(none yet)"])
 
     def test_command_response_trail_dedup_and_window(self) -> None:
-        model = _CommandResponseTrailModel(max_entries=3)
+        model = _CommandResponseTrailModel(max_entries=3, max_visible_lines=3)
         model.record(timestep=1, command="in0=1", response_delta="d0")
         model.record(timestep=1, command="in0=1", response_delta="d0")
         model.record(timestep=2, command="in0=0", response_delta="d1")
         model.record(timestep=3, command="skip", response_delta="d2")
         model.record(timestep=4, command="in2=1", response_delta="d3")
-        lines = model.lines(max_entries=3)
-        self.assertEqual(len(lines), 3)
-        # Latest entries should be retained.
-        self.assertTrue(any("t=2" in line for line in lines))
-        self.assertTrue(any("t=4" in line for line in lines))
-        # Duplicate record should not create duplicate line.
-        joined = " || ".join(lines)
-        self.assertNotIn("t=1 | in0=1 -> d0 || t=1 | in0=1 -> d0", joined)
+        self.assertEqual(
+            model.lines(),
+            [
+                "t=2 | in0=0 -> d1",
+                "t=3 | skip -> d2",
+                "t=4 | in2=1 -> d3",
+            ],
+        )
+
+    def test_command_response_trail_respects_visible_window(self) -> None:
+        model = _CommandResponseTrailModel(max_entries=5, max_visible_lines=2)
+        model.record(timestep=1, command="in0=1", response_delta="d0")
+        model.record(timestep=2, command="in0=0", response_delta="d1")
+        model.record(timestep=3, command="skip", response_delta="d2")
+        self.assertEqual(
+            model.lines(),
+            ["t=2 | in0=0 -> d1", "t=3 | skip -> d2"],
+        )
+
+    def test_command_response_trail_truncates_long_lines(self) -> None:
+        model = _CommandResponseTrailModel(
+            max_entries=4,
+            max_visible_lines=3,
+            line_max_len=18,
+        )
+        model.record(
+            timestep=9,
+            command="x" * 20,
+            response_delta="y" * 20,
+        )
+        lines = model.lines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0], "t=9 | xxxxxxxxx...")
+        self.assertTrue(lines[0].endswith("..."))
 
     def test_grouped_input_aps(self) -> None:
         grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])
