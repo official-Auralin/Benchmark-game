@@ -271,37 +271,65 @@ def _effect_status_badge(effect_status: object) -> tuple[str, tuple[int, int, in
     return (f"Objective status: {effect_status}", (64, 72, 90))
 
 
+class _WaveStripModel:
+    def __init__(self) -> None:
+        self._trend_history: list[tuple[int, str]] = []
+
+    @staticmethod
+    def compute_state(
+        previous_y_t: object, current_y_t: object
+    ) -> tuple[str, int, tuple[int, int, int], str]:
+        current = _normalize_binary_map(current_y_t)
+        if not current:
+            return ("Wave pressure: awaiting observation", 0, (64, 72, 90), "none")
+        prev = _normalize_binary_map(previous_y_t)
+        on_count = sum(1 for bit in current.values() if bit == 1)
+        total = len(current)
+        ratio = on_count / float(total)
+        filled = max(0, min(10, int(round(ratio * 10.0))))
+        if not prev:
+            trend = "baseline"
+        else:
+            prev_on = sum(1 for bit in prev.values() if bit == 1)
+            prev_ratio = prev_on / float(len(prev))
+            delta = ratio - prev_ratio
+            if delta > 0.05:
+                trend = "rising"
+            elif delta < -0.05:
+                trend = "falling"
+            else:
+                trend = "steady"
+        # Blue-cyan ramp to indicate magnitude without implying good/bad semantics.
+        fill = (
+            56 + int(80.0 * ratio),
+            92 + int(96.0 * ratio),
+            136 + int(96.0 * ratio),
+        )
+        label = f"Wave pressure: {on_count}/{total} active ({trend})"
+        return (label, filled, fill, trend)
+
+    def reset(self) -> None:
+        self._trend_history = []
+
+    def update_history(self, *, timestep: int, trend: str) -> None:
+        if trend == "none":
+            return
+        entry = (int(timestep), str(trend))
+        if not self._trend_history or self._trend_history[-1] != entry:
+            self._trend_history.append(entry)
+        if len(self._trend_history) > 5:
+            self._trend_history = self._trend_history[-5:]
+
+    def trail_text(self) -> str:
+        if not self._trend_history:
+            return "(none yet)"
+        return " | ".join(f"t={t}:{tr}" for t, tr in self._trend_history[-4:])
+
+
 def _wave_pressure_strip_state(
     previous_y_t: object, current_y_t: object
 ) -> tuple[str, int, tuple[int, int, int], str]:
-    current = _normalize_binary_map(current_y_t)
-    if not current:
-        return ("Wave pressure: awaiting observation", 0, (64, 72, 90), "none")
-    prev = _normalize_binary_map(previous_y_t)
-    on_count = sum(1 for bit in current.values() if bit == 1)
-    total = len(current)
-    ratio = on_count / float(total)
-    filled = max(0, min(10, int(round(ratio * 10.0))))
-    if not prev:
-        trend = "baseline"
-    else:
-        prev_on = sum(1 for bit in prev.values() if bit == 1)
-        prev_ratio = prev_on / float(len(prev))
-        delta = ratio - prev_ratio
-        if delta > 0.05:
-            trend = "rising"
-        elif delta < -0.05:
-            trend = "falling"
-        else:
-            trend = "steady"
-    # Blue-cyan ramp to indicate magnitude without implying good/bad semantics.
-    fill = (
-        56 + int(80.0 * ratio),
-        92 + int(96.0 * ratio),
-        136 + int(96.0 * ratio),
-    )
-    label = f"Wave pressure: {on_count}/{total} active ({trend})"
-    return (label, filled, fill, trend)
+    return _WaveStripModel.compute_state(previous_y_t, current_y_t)
 
 
 def _onboarding_strip_lines(timestep: int) -> list[str]:
@@ -350,7 +378,7 @@ class _R1PygameSession:
         self._previous_observed_y_t: dict[str, int] | None = None
         self._last_committed_action_summary: str | None = None
         self._last_committed_t: int | None = None
-        self._wave_trend_history: list[tuple[int, str]] = []
+        self._wave_strip = _WaveStripModel()
         self._show_help_overlay = True
 
     def _draw_text(
@@ -502,31 +530,14 @@ class _R1PygameSession:
             )
         self._draw_text(label, x + 14, y + 36, small=True, color=(198, 212, 234))
 
-        if trend != "none":
-            entry = (int(timestep), str(trend))
-            if not self._wave_trend_history or self._wave_trend_history[-1] != entry:
-                self._wave_trend_history.append(entry)
-            if len(self._wave_trend_history) > 5:
-                self._wave_trend_history = self._wave_trend_history[-5:]
-        if self._wave_trend_history:
-            trail = " | ".join(
-                f"t={t}:{tr}" for t, tr in self._wave_trend_history[-4:]
-            )
-            self._draw_text(
-                "Recent wave trends: " + trail,
-                x + 14,
-                y + 58,
-                small=True,
-                color=(176, 191, 216),
-            )
-        else:
-            self._draw_text(
-                "Recent wave trends: (none yet)",
-                x + 14,
-                y + 58,
-                small=True,
-                color=(176, 191, 216),
-            )
+        self._wave_strip.update_history(timestep=timestep, trend=trend)
+        self._draw_text(
+            "Recent wave trends: " + self._wave_strip.trail_text(),
+            x + 14,
+            y + 58,
+            small=True,
+            color=(176, 191, 216),
+        )
 
     def _draw_controls(
         self,
@@ -628,7 +639,7 @@ class _R1PygameSession:
             self._previous_observed_y_t = None
             self._last_committed_action_summary = None
             self._last_committed_t = None
-            self._wave_trend_history = []
+            self._wave_strip.reset()
             self._show_help_overlay = True
         previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(

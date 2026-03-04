@@ -12,6 +12,7 @@ from __future__ import annotations
 import unittest
 
 from gf01.renderers.r1_pygame import (
+    _WaveStripModel,
     _apply_group_filter,
     _ap_group_key,
     _clamp_page_size,
@@ -190,6 +191,22 @@ class TestR1PygameHelpers(unittest.TestCase):
         )
         self.assertIn("rising", label)
         self.assertEqual(trend, "rising")
+
+    def test_wave_strip_model_trail_dedup_and_window(self) -> None:
+        model = _WaveStripModel()
+        self.assertEqual(model.trail_text(), "(none yet)")
+        model.update_history(timestep=0, trend="none")
+        self.assertEqual(model.trail_text(), "(none yet)")
+        model.update_history(timestep=1, trend="baseline")
+        model.update_history(timestep=1, trend="baseline")
+        model.update_history(timestep=2, trend="rising")
+        model.update_history(timestep=3, trend="steady")
+        model.update_history(timestep=4, trend="falling")
+        model.update_history(timestep=5, trend="rising")
+        trail = model.trail_text()
+        self.assertIn("t=2:rising", trail)
+        self.assertIn("t=5:rising", trail)
+        self.assertNotIn("t=1:baseline | t=1:baseline", trail)
 
     def test_grouped_input_aps(self) -> None:
         grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])
