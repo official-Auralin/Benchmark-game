@@ -108,6 +108,8 @@ Visual renderer notes (both backends):
   current page (e.g., `groups: in(6), sensor(4)`).
 - The timeline rail includes:
   - `mark` row (`N` = now, `T` = target, `B` = now and target are same step)
+  - `pressure` band inside each sector cell (dim = lower observed output
+    activity, bright = higher observed output activity)
   - `edits` row (count of interventions applied at each timestep so far)
 - Canonical scoring semantics are unchanged.
 

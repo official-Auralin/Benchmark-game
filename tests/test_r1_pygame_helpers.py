@@ -13,6 +13,7 @@ import unittest
 
 from gf01.renderers.r1_pygame import (
     _CommandResponseTrailModel,
+    _SectorPressureHistoryModel,
     _WaveStripModel,
     _apply_group_filter,
     _ap_group_key,
@@ -29,6 +30,8 @@ from gf01.renderers.r1_pygame import (
     _onboarding_strip_lines,
     _objective_window_bounds,
     _paginate_input_aps,
+    _pressure_level_from_observation,
+    _sector_pressure_fill,
     _summarize_observed_outputs,
     _summarize_committed_action,
     _summarize_pending_interventions,
@@ -221,6 +224,42 @@ class TestR1PygameHelpers(unittest.TestCase):
         )
         self.assertIn("rising", label)
         self.assertEqual(trend, "rising")
+
+    def test_pressure_level_from_observation(self) -> None:
+        self.assertIsNone(_pressure_level_from_observation(None))
+        self.assertIsNone(_pressure_level_from_observation({}))
+        self.assertEqual(
+            _pressure_level_from_observation({"out0": 0, "out1": 0, "out2": 0}),
+            0,
+        )
+        self.assertEqual(
+            _pressure_level_from_observation({"out0": 1, "out1": 0, "out2": 1, "out3": 0}),
+            5,
+        )
+        self.assertEqual(
+            _pressure_level_from_observation({"out0": 1, "out1": 1, "out2": 1}),
+            10,
+        )
+
+    def test_sector_pressure_fill_clamps(self) -> None:
+        low = _sector_pressure_fill(-99)
+        mid = _sector_pressure_fill(5)
+        high = _sector_pressure_fill(99)
+        self.assertEqual(len(low), 3)
+        self.assertEqual(len(mid), 3)
+        self.assertEqual(len(high), 3)
+        self.assertTrue(sum(low) < sum(mid) < sum(high))
+
+    def test_sector_pressure_history_model_records_and_limits(self) -> None:
+        model = _SectorPressureHistoryModel(max_entries=2)
+        model.record(timestep=0, y_t={"out0": 0, "out1": 0})
+        model.record(timestep=2, y_t={"out0": 1, "out1": 1})
+        model.record(timestep=1, y_t={"out0": 1, "out1": 0})
+        self.assertEqual(model.levels(), {1: 5, 2: 10})
+        model.record(timestep=3, y_t={})
+        self.assertEqual(model.levels(), {1: 5, 2: 10})
+        model.reset()
+        self.assertEqual(model.levels(), {})
 
     def test_wave_strip_model_trail_dedup_and_window(self) -> None:
         model = _WaveStripModel()

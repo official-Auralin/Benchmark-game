@@ -34,6 +34,8 @@ UI_TEXT_MIN_TRUNCATE_LEN = 4
 COMMAND_RESPONSE_LINE_MAX_LEN = 84
 COMMAND_RESPONSE_MAX_ENTRIES = 4
 COMMAND_RESPONSE_MAX_VISIBLE = 3
+SECTOR_PRESSURE_BANDS = 10
+SECTOR_PRESSURE_HISTORY_MAX = 256
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,25 @@ def _truncate_ui_text(
     if len(text) <= max_len:
         return text
     return text[: max_len - 3] + "..."
+
+
+def _pressure_level_from_observation(y_t: object) -> int | None:
+    observed = _normalize_binary_map(y_t)
+    if not observed:
+        return None
+    on_count = sum(1 for bit in observed.values() if bit == 1)
+    ratio = on_count / float(len(observed))
+    return max(0, min(SECTOR_PRESSURE_BANDS, int(round(ratio * SECTOR_PRESSURE_BANDS))))
+
+
+def _sector_pressure_fill(level: int) -> tuple[int, int, int]:
+    clamped = max(0, min(SECTOR_PRESSURE_BANDS, int(level)))
+    ratio = clamped / float(SECTOR_PRESSURE_BANDS)
+    return (
+        46 + int(90.0 * ratio),
+        74 + int(110.0 * ratio),
+        112 + int(100.0 * ratio),
+    )
 
 
 def _timeline_window_bounds(
@@ -385,6 +406,31 @@ class _WaveStripModel:
         return " | ".join(f"t={t}:{tr}" for t, tr in self._trend_history[-4:])
 
 
+class _SectorPressureHistoryModel:
+    """Store observed sector-pressure levels by timestep for timeline rendering."""
+
+    def __init__(self, *, max_entries: int = SECTOR_PRESSURE_HISTORY_MAX) -> None:
+        self._max_entries = max(1, int(max_entries))
+        self._levels: dict[int, int] = {}
+
+    def reset(self) -> None:
+        self._levels = {}
+
+    def record(self, *, timestep: int, y_t: object) -> None:
+        level = _pressure_level_from_observation(y_t)
+        if level is None:
+            return
+        self._levels[int(timestep)] = int(level)
+        if len(self._levels) > self._max_entries:
+            keys = sorted(self._levels)
+            drop_count = len(self._levels) - self._max_entries
+            for stale in keys[:drop_count]:
+                self._levels.pop(stale, None)
+
+    def levels(self) -> dict[int, int]:
+        return {int(k): int(self._levels[k]) for k in sorted(self._levels)}
+
+
 class _CommandResponseTrailModel:
     """Track recent command->response summaries for rendering.
 
@@ -478,6 +524,7 @@ class _R1PygameSession:
         self._last_committed_action_summary: str | None = None
         self._last_committed_t: int | None = None
         self._wave_strip = _WaveStripModel()
+        self._sector_pressure_history = _SectorPressureHistoryModel()
         self._command_response_trail = _CommandResponseTrailModel()
         self._show_help_overlay = True
 
@@ -518,8 +565,18 @@ class _R1PygameSession:
         window_size: int,
         history_atoms: object,
         timeline_span: int,
+        pressure_levels: dict[int, int] | None = None,
     ) -> None:
         history_counts = history_counts_by_t(history_atoms)
+        observed_pressure: dict[int, int] = {}
+        if isinstance(pressure_levels, dict):
+            for raw_t, raw_level in pressure_levels.items():
+                try:
+                    key_t = int(raw_t)
+                    value = max(0, min(SECTOR_PRESSURE_BANDS, int(raw_level)))
+                except (TypeError, ValueError):
+                    continue
+                observed_pressure[key_t] = value
         window_start, window_end = _objective_window_bounds(
             mode=mode,
             t_star=t_star,
@@ -552,6 +609,16 @@ class _R1PygameSession:
                 # Slightly brighter when interventions happened at t.
                 fill = tuple(min(255, c + 30) for c in fill)
             self._draw_rect(x, y0, cell_w, 30, fill=fill)
+            if t in observed_pressure:
+                self._draw_rect(
+                    x + 2,
+                    y0 + 2,
+                    cell_w - 4,
+                    6,
+                    fill=_sector_pressure_fill(observed_pressure[t]),
+                    border=(88, 103, 128),
+                    border_width=1,
+                )
             mark = _timeline_mark(t, timestep, t_star)
             if mark:
                 self._draw_text(mark, x + 9, y0 - 16, small=True, color=(196, 212, 236))
@@ -560,7 +627,12 @@ class _R1PygameSession:
             if edits is not None:
                 self._draw_text(f"{edits}", x + 9, y0 + 38, small=True)
         self._draw_text("marks: N=now, T=target, B=both", x0, y0 + 58, small=True)
-        self._draw_text("edits per t shown below sectors", x0, y0 + 74, small=True)
+        self._draw_text(
+            "pressure band in sector + edits per t below sectors",
+            x0,
+            y0 + 74,
+            small=True,
+        )
         self._draw_text(
             f"objective window: t={window_start}..{window_end}",
             x0,
@@ -808,12 +880,23 @@ class _R1PygameSession:
             self._last_committed_action_summary = None
             self._last_committed_t = None
             self._wave_strip.reset()
+            self._sector_pressure_history.reset()
             self._command_response_trail.reset()
             self._show_help_overlay = True
         previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(
             None if last_obs is None else last_obs.get("y_t", {})
         )
+        if last_obs is not None:
+            observed_t = max(0, int(timestep) - 1)
+            if self._last_committed_t is not None and self._last_committed_t <= int(
+                timestep
+            ):
+                observed_t = max(0, int(self._last_committed_t))
+            self._sector_pressure_history.record(
+                timestep=observed_t,
+                y_t=current_y_t,
+            )
         delta_summary = _describe_output_delta(previous_y_t, current_y_t)
         wave_label, wave_filled, wave_fill, wave_trend = _wave_pressure_strip_state(
             previous_y_t, current_y_t
@@ -936,6 +1019,7 @@ class _R1PygameSession:
                 window_size=int(instance.window_size),
                 history_atoms=history_atoms,
                 timeline_span=timeline_span,
+                pressure_levels=self._sector_pressure_history.levels(),
             )
             current_buttons, page, _, _ = self._draw_controls(
                 input_aps=visible_pool,
