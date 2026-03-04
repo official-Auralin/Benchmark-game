@@ -12,12 +12,14 @@ from __future__ import annotations
 import unittest
 
 from gf01.renderers.r1_pygame import (
+    _ap_group_key,
     _clamp_page_size,
     _cycle_pending_bit,
     _describe_output_delta,
     _help_overlay_lines,
     _normalize_binary_map,
     _paginate_input_aps,
+    _summarize_visible_ap_groups,
 )
 
 
@@ -89,6 +91,17 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertTrue(any("Enter commit" in line for line in lines))
         self.assertTrue(any("Output delta" in line for line in lines))
         self.assertTrue(any("Press H" in line for line in lines))
+
+    def test_ap_group_key(self) -> None:
+        self.assertEqual(_ap_group_key("in0"), "in")
+        self.assertEqual(_ap_group_key("sensor_temp_1"), "sensor_temp")
+        self.assertEqual(_ap_group_key("x"), "x")
+
+    def test_summarize_visible_ap_groups(self) -> None:
+        summary = _summarize_visible_ap_groups(["in0", "in1", "mode0", "sensor0"])
+        self.assertIn("in(2)", summary)
+        self.assertIn("mode(1)", summary)
+        self.assertIn("sensor(1)", summary)
 
 
 if __name__ == "__main__":

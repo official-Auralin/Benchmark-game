@@ -20,6 +20,7 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 from dataclasses import dataclass
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -120,6 +121,35 @@ def _help_overlay_lines() -> list[str]:
         "Tip: use Output delta to see what changed after each step.",
         "Press H to hide/show this panel.",
     ]
+
+
+def _ap_group_key(ap: str) -> str:
+    token = str(ap).strip()
+    if not token:
+        return "unknown"
+    prefix_chars: list[str] = []
+    for ch in token:
+        if ch.isdigit():
+            break
+        prefix_chars.append(ch)
+    prefix = "".join(prefix_chars).strip("_-")
+    if prefix:
+        return prefix
+    if "_" in token:
+        head = token.split("_", 1)[0].strip()
+        if head:
+            return head
+    return token
+
+
+def _summarize_visible_ap_groups(visible_aps: list[str]) -> str:
+    if not visible_aps:
+        return "groups: (none)"
+    grouped: dict[str, int] = defaultdict(int)
+    for ap in visible_aps:
+        grouped[_ap_group_key(ap)] += 1
+    parts = [f"{k}({grouped[k]})" for k in sorted(grouped)]
+    return "groups: " + ", ".join(parts)
 
 
 class _R1PygameSession:
@@ -268,8 +298,15 @@ class _R1PygameSession:
             y_start - 4,
             small=True,
         )
+        self._draw_text(
+            _summarize_visible_ap_groups(visible_aps),
+            24,
+            y_start + 16,
+            small=True,
+            color=(176, 191, 216),
+        )
         for idx, ap in enumerate(visible_aps):
-            y = y_start + idx * 40
+            y = y_start + 24 + idx * 40
             self._draw_text(ap, 24, y + 8)
 
             for choice_idx, bit in enumerate((0, 1)):

@@ -75,6 +75,8 @@ Visual renderer notes (both backends):
   more controls per page vs larger per-control readability.
 - In `pygame` mode, `H` toggles an in-session quick-help overlay with control
   reminders and action->effect reading tips.
+- The pygame control header also shows a compact AP-group summary for the
+  current page (e.g., `groups: in(6), sensor(4)`).
 - The timeline rail includes:
   - `mark` row (`N` = now, `T` = target, `B` = now and target are same step)
   - `edits` row (count of interventions applied at each timestep so far)
