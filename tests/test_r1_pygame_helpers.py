@@ -23,6 +23,7 @@ from gf01.renderers.r1_pygame import (
     _grouped_input_aps,
     _help_overlay_lines,
     _normalize_binary_map,
+    _onboarding_strip_lines,
     _paginate_input_aps,
     _summarize_observed_outputs,
     _summarize_committed_action,
@@ -157,6 +158,14 @@ class TestR1PygameHelpers(unittest.TestCase):
     def test_effect_status_badge_fallback(self) -> None:
         text, _ = _effect_status_badge("custom")
         self.assertIn("Objective status:", text)
+
+    def test_onboarding_strip_lines_for_first_three_steps(self) -> None:
+        self.assertTrue(_onboarding_strip_lines(0))
+        self.assertTrue(_onboarding_strip_lines(1))
+        self.assertTrue(_onboarding_strip_lines(2))
+
+    def test_onboarding_strip_lines_after_step_two_empty(self) -> None:
+        self.assertEqual(_onboarding_strip_lines(3), [])
 
     def test_grouped_input_aps(self) -> None:
         grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])

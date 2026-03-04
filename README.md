@@ -74,6 +74,8 @@ Visual renderer notes (both backends):
   newly observed response.
 - In `pygame` mode, objective status is shown as a color-coded badge
   (`Objective active` / `Objective not active`) for faster at-a-glance reading.
+- In `pygame` mode, a short onboarding strip appears for timesteps `t=0..2`
+  to guide first-time players through action, feedback reading, and adjustment.
 - The pygame observation panel now includes plain summaries for
   currently-active observed outputs and your pending interventions to clarify
   action->response interpretation without formal notation.

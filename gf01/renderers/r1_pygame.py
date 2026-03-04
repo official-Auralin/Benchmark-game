@@ -271,6 +271,26 @@ def _effect_status_badge(effect_status: object) -> tuple[str, tuple[int, int, in
     return (f"Objective status: {effect_status}", (64, 72, 90))
 
 
+def _onboarding_strip_lines(timestep: int) -> list[str]:
+    t = int(timestep)
+    if t == 0:
+        return [
+            "Onboarding 1/3: Set one control, then commit.",
+            "Use click or 1..9,0. Commit with Enter.",
+        ]
+    if t == 1:
+        return [
+            "Onboarding 2/3: Read cause -> effect.",
+            "Compare Previous command with Output delta.",
+        ]
+    if t == 2:
+        return [
+            "Onboarding 3/3: Adjust based on feedback.",
+            "Watch Objective badge, timeline marks, and budget.",
+        ]
+    return []
+
+
 class _R1PygameSession:
     def __init__(self) -> None:
         try:
@@ -390,6 +410,26 @@ class _R1PygameSession:
                 small=(idx != 0),
                 title=False,
             )
+
+    def _draw_onboarding_strip(self, *, timestep: int) -> None:
+        lines = _onboarding_strip_lines(timestep)
+        if not lines:
+            return
+        x = 620
+        y = 96
+        w = 540
+        h = 80
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(27, 38, 56),
+            border=(115, 136, 168),
+            border_width=2,
+        )
+        self._draw_text(lines[0], x + 14, y + 12, small=True, color=(229, 236, 250))
+        self._draw_text(lines[1], x + 14, y + 40, small=True, color=(206, 216, 234))
 
     def _draw_controls(
         self,
@@ -582,6 +622,7 @@ class _R1PygameSession:
             self._draw_text("GF-01-R1 Map-First Visual", 24, 18, title=True)
             self._draw_text(f"t={timestep}  t*={instance.t_star}  mode={instance.mode}", 24, 54)
             self._draw_text(objective_text, 24, 82)
+            self._draw_onboarding_strip(timestep=timestep)
 
             history_atoms = [] if last_obs is None else last_obs.get("history_atoms", [])
             self._draw_timeline(
