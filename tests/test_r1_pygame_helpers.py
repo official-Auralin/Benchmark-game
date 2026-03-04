@@ -12,10 +12,12 @@ from __future__ import annotations
 import unittest
 
 from gf01.renderers.r1_pygame import (
+    _apply_group_filter,
     _ap_group_key,
     _clamp_page_size,
     _cycle_pending_bit,
     _describe_output_delta,
+    _grouped_input_aps,
     _help_overlay_lines,
     _normalize_binary_map,
     _paginate_input_aps,
@@ -127,6 +129,18 @@ class TestR1PygameHelpers(unittest.TestCase):
             _summarize_pending_interventions({}),
             "Pending interventions: none selected",
         )
+
+    def test_grouped_input_aps(self) -> None:
+        grouped = _grouped_input_aps(["in0", "in1", "sensor0", "mode0"])
+        self.assertEqual(grouped["in"], ["in0", "in1"])
+        self.assertEqual(grouped["mode"], ["mode0"])
+        self.assertEqual(grouped["sensor"], ["sensor0"])
+
+    def test_apply_group_filter(self) -> None:
+        aps = ["in0", "in1", "sensor0", "mode0"]
+        self.assertEqual(_apply_group_filter(aps, None), aps)
+        self.assertEqual(_apply_group_filter(aps, "in"), ["in0", "in1"])
+        self.assertEqual(_apply_group_filter(aps, "unknown"), [])
 
 
 if __name__ == "__main__":

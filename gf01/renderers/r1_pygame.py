@@ -116,7 +116,7 @@ def _help_overlay_lines() -> list[str]:
         "Goal: commit interventions to reach the visible objective.",
         "Mouse: click 0/1 to set AP, clear to unset AP.",
         "Keys: 1..9,0 cycle AP slots on current page.",
-        "Keys: Left/Right page APs | +/- AP density.",
+        "Keys: Left/Right page APs | +/- AP density | G AP group filter.",
         "Keys: Enter commit | Esc skip | Backspace clear all.",
         "Tip: use Output delta to see what changed after each step.",
         "Press H to hide/show this panel.",
@@ -150,6 +150,23 @@ def _summarize_visible_ap_groups(visible_aps: list[str]) -> str:
         grouped[_ap_group_key(ap)] += 1
     parts = [f"{k}({grouped[k]})" for k in sorted(grouped)]
     return "groups: " + ", ".join(parts)
+
+
+def _grouped_input_aps(input_aps: list[str]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for ap in input_aps:
+        grouped[_ap_group_key(ap)].append(ap)
+    return {key: grouped[key] for key in sorted(grouped)}
+
+
+def _apply_group_filter(input_aps: list[str], group_key: str | None) -> list[str]:
+    if group_key is None:
+        return list(input_aps)
+    selected: list[str] = []
+    for ap in input_aps:
+        if _ap_group_key(ap) == group_key:
+            selected.append(ap)
+    return selected
 
 
 def _summarize_observed_outputs(y_t: object, *, max_names: int = 6) -> str:
@@ -310,22 +327,24 @@ class _R1PygameSession:
     def _draw_controls(
         self,
         *,
-        instance: "GF01Instance",
+        input_aps: list[str],
         pending: dict[str, int],
         y_start: int,
         page: int,
         page_size: int,
+        group_filter: str | None,
     ) -> tuple[list[_Button], int, int, int]:
         buttons: list[_Button] = []
         self._draw_text("Set interventions for current timestep:", 24, y_start - 26)
         visible_aps, page, total_pages = _paginate_input_aps(
-            list(instance.automaton.input_aps),
+            input_aps,
             page=page,
             page_size=page_size,
         )
+        group_label = "ALL" if group_filter is None else group_filter
         self._draw_text(
             f"AP page {page + 1}/{total_pages} | page size={page_size}  "
-            "(Left/Right page, +/- density)",
+            f"group={group_label} (Left/Right page, +/- density, G group)",
             24,
             y_start - 4,
             small=True,
@@ -368,6 +387,9 @@ class _R1PygameSession:
         current_buttons: list[_Button] = []
         page = 0
         page_size = 10
+        input_aps_all = list(instance.automaton.input_aps)
+        group_keys = list(_grouped_input_aps(input_aps_all).keys())
+        group_filter: str | None = None
         if timestep == 0:
             self._previous_observed_y_t = None
             self._show_help_overlay = True
@@ -378,8 +400,9 @@ class _R1PygameSession:
         if current_y_t:
             self._previous_observed_y_t = dict(current_y_t)
         while True:
+            visible_pool = _apply_group_filter(input_aps_all, group_filter)
             visible_aps, page, _ = _paginate_input_aps(
-                list(instance.automaton.input_aps),
+                visible_pool,
                 page=page,
                 page_size=page_size,
             )
@@ -405,6 +428,16 @@ class _R1PygameSession:
                         page_size = _clamp_page_size(page_size + 1)
                     if event.key in (self.pg.K_MINUS, self.pg.K_UNDERSCORE, self.pg.K_KP_MINUS):
                         page_size = _clamp_page_size(page_size - 1)
+                    if event.key == self.pg.K_g and group_keys:
+                        if group_filter is None:
+                            group_filter = group_keys[0]
+                        else:
+                            try:
+                                idx = group_keys.index(group_filter) + 1
+                            except ValueError:
+                                idx = 0
+                            group_filter = group_keys[idx] if idx < len(group_keys) else None
+                        page = 0
                     key_to_index = {
                         self.pg.K_1: 0,
                         self.pg.K_2: 1,
@@ -443,11 +476,12 @@ class _R1PygameSession:
                 history_atoms=history_atoms,
             )
             current_buttons, page, _, _ = self._draw_controls(
-                instance=instance,
+                input_aps=visible_pool,
                 pending=pending,
                 y_start=250,
                 page=page,
                 page_size=page_size,
+                group_filter=group_filter,
             )
             status_x = 460
             status_y = 250

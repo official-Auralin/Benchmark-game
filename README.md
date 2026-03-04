@@ -76,6 +76,8 @@ Visual renderer notes (both backends):
   control on the current page through `unset -> 1 -> 0 -> unset`.
 - In `pygame` mode, `+`/`-` adjusts AP page density (`page_size`) to trade off
   more controls per page vs larger per-control readability.
+- In `pygame` mode, `G` cycles AP-group focus (`ALL -> group1 -> group2 ...`)
+  so high-AP levels can be explored one group at a time.
 - In `pygame` mode, `H` toggles an in-session quick-help overlay with control
   reminders and action->effect reading tips.
 - The pygame control header also shows a compact AP-group summary for the
