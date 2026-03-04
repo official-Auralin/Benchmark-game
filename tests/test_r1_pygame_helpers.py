@@ -24,6 +24,7 @@ from gf01.renderers.r1_pygame import (
     _summarize_observed_outputs,
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
+    _timeline_mark,
 )
 
 
@@ -141,6 +142,12 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_apply_group_filter(aps, None), aps)
         self.assertEqual(_apply_group_filter(aps, "in"), ["in0", "in1"])
         self.assertEqual(_apply_group_filter(aps, "unknown"), [])
+
+    def test_timeline_mark(self) -> None:
+        self.assertEqual(_timeline_mark(2, timestep=2, t_star=5), "N")
+        self.assertEqual(_timeline_mark(5, timestep=2, t_star=5), "T")
+        self.assertEqual(_timeline_mark(3, timestep=3, t_star=3), "B")
+        self.assertEqual(_timeline_mark(1, timestep=3, t_star=5), "")
 
 
 if __name__ == "__main__":

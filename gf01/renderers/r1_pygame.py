@@ -169,6 +169,16 @@ def _apply_group_filter(input_aps: list[str], group_key: str | None) -> list[str
     return selected
 
 
+def _timeline_mark(t: int, timestep: int, t_star: int) -> str:
+    if t == timestep and t == t_star:
+        return "B"
+    if t == timestep:
+        return "N"
+    if t == t_star:
+        return "T"
+    return ""
+
+
 def _summarize_observed_outputs(y_t: object, *, max_names: int = 6) -> str:
     observed = _normalize_binary_map(y_t)
     if not observed:
@@ -292,11 +302,15 @@ class _R1PygameSession:
                 # Slightly brighter when interventions happened at t.
                 fill = tuple(min(255, c + 30) for c in fill)
             self._draw_rect(x, y0, cell_w, 30, fill=fill)
+            mark = _timeline_mark(t, timestep, t_star)
+            if mark:
+                self._draw_text(mark, x + 9, y0 - 16, small=True, color=(196, 212, 236))
             self._draw_text(str(t), x + 7, y0 + 8, small=True)
             edits = history_counts.get(t)
             if edits is not None:
                 self._draw_text(f"{edits}", x + 9, y0 + 38, small=True)
-        self._draw_text("edits per t shown below sectors", x0, y0 + 58, small=True)
+        self._draw_text("marks: N=now, T=target, B=both", x0, y0 + 58, small=True)
+        self._draw_text("edits per t shown below sectors", x0, y0 + 74, small=True)
 
     def _draw_help_overlay(self) -> None:
         lines = _help_overlay_lines()
