@@ -15,8 +15,10 @@ from gf01.renderers.r1_pygame import (
     _apply_group_filter,
     _ap_group_key,
     _clamp_page_size,
+    _control_visible_pool,
     _cycle_pending_bit,
     _describe_output_delta,
+    _group_rows_for_controls,
     _grouped_input_aps,
     _help_overlay_lines,
     _normalize_binary_map,
@@ -95,6 +97,7 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertGreaterEqual(len(lines), 6)
         self.assertTrue(any("Enter commit" in line for line in lines))
         self.assertTrue(any("Output delta" in line for line in lines))
+        self.assertTrue(any("collapse" in line.lower() for line in lines))
         self.assertTrue(any("Press H" in line for line in lines))
 
     def test_ap_group_key(self) -> None:
@@ -142,6 +145,33 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_apply_group_filter(aps, None), aps)
         self.assertEqual(_apply_group_filter(aps, "in"), ["in0", "in1"])
         self.assertEqual(_apply_group_filter(aps, "unknown"), [])
+
+    def test_control_visible_pool(self) -> None:
+        aps = ["in0", "in1", "sensor0", "mode0"]
+        self.assertEqual(
+            _control_visible_pool(aps, group_filter=None, collapse_rows=False),
+            aps,
+        )
+        self.assertEqual(
+            _control_visible_pool(aps, group_filter="in", collapse_rows=False),
+            ["in0", "in1"],
+        )
+        self.assertEqual(
+            _control_visible_pool(aps, group_filter=None, collapse_rows=True),
+            [],
+        )
+        self.assertEqual(
+            _control_visible_pool(aps, group_filter="sensor", collapse_rows=True),
+            ["sensor0"],
+        )
+
+    def test_group_rows_for_controls(self) -> None:
+        aps = ["in0", "in1", "sensor0", "mode0"]
+        pending = {"in0": 1, "sensor0": 0}
+        lines = _group_rows_for_controls(aps, pending, max_groups=8)
+        self.assertIn("in: 1/2 set", lines)
+        self.assertIn("mode: 0/1 set", lines)
+        self.assertIn("sensor: 1/1 set", lines)
 
     def test_timeline_mark(self) -> None:
         self.assertEqual(_timeline_mark(2, timestep=2, t_star=5), "N")

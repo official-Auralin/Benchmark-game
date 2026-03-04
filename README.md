@@ -82,6 +82,8 @@ Visual renderer notes (both backends):
   more controls per page vs larger per-control readability.
 - In `pygame` mode, `G` cycles AP-group focus (`ALL -> group1 -> group2 ...`)
   so high-AP levels can be explored one group at a time.
+- In `pygame` mode, `C` toggles collapsible map rows; when collapse is on and
+  group=`ALL`, AP rows are collapsed until a specific group is selected.
 - In `pygame` mode, `H` toggles an in-session quick-help overlay with control
   reminders and action->effect reading tips.
 - The pygame control header also shows a compact AP-group summary for the

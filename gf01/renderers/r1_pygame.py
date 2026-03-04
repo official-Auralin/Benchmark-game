@@ -118,7 +118,8 @@ def _help_overlay_lines() -> list[str]:
         "Goal: commit interventions to reach the visible objective.",
         "Mouse: click 0/1 to set AP, clear to unset AP.",
         "Keys: 1..9,0 cycle AP slots on current page.",
-        "Keys: Left/Right page APs | +/- AP density | G AP group filter.",
+        "Keys: Left/Right page APs | +/- AP density.",
+        "Keys: G AP group filter | C collapse/expand map rows.",
         "Keys: Enter commit | Esc skip | Backspace clear all.",
         "Tip: use Output delta to see what changed after each step.",
         "Press H to hide/show this panel.",
@@ -169,6 +170,38 @@ def _apply_group_filter(input_aps: list[str], group_key: str | None) -> list[str
         if _ap_group_key(ap) == group_key:
             selected.append(ap)
     return selected
+
+
+def _control_visible_pool(
+    input_aps: list[str],
+    *,
+    group_filter: str | None,
+    collapse_rows: bool,
+) -> list[str]:
+    if collapse_rows and group_filter is None:
+        return []
+    return _apply_group_filter(input_aps, group_filter)
+
+
+def _group_rows_for_controls(
+    input_aps: list[str],
+    pending: dict[str, int],
+    *,
+    max_groups: int = 8,
+) -> list[str]:
+    grouped = _grouped_input_aps(input_aps)
+    if not grouped:
+        return ["(none)"]
+    lines: list[str] = []
+    keys = sorted(grouped)
+    for key in keys[: max(1, int(max_groups))]:
+        aps = grouped[key]
+        set_count = sum(1 for ap in aps if ap in pending)
+        lines.append(f"{key}: {set_count}/{len(aps)} set")
+    hidden = len(keys) - len(lines)
+    if hidden > 0:
+        lines.append(f"+{hidden} more groups")
+    return lines
 
 
 def _timeline_mark(t: int, timestep: int, t_star: int) -> str:
@@ -332,11 +365,13 @@ class _R1PygameSession:
         self,
         *,
         input_aps: list[str],
+        all_input_aps: list[str],
         pending: dict[str, int],
         y_start: int,
         page: int,
         page_size: int,
         group_filter: str | None,
+        collapse_rows: bool,
     ) -> tuple[list[_Button], int, int, int]:
         buttons: list[_Button] = []
         self._draw_text("Set interventions for current timestep:", 24, y_start - 26)
@@ -346,9 +381,11 @@ class _R1PygameSession:
             page_size=page_size,
         )
         group_label = "ALL" if group_filter is None else group_filter
+        collapse_label = "ON" if collapse_rows else "OFF"
         self._draw_text(
             f"AP page {page + 1}/{total_pages} | page size={page_size}  "
-            f"group={group_label} (Left/Right page, +/- density, G group)",
+            f"group={group_label} collapse={collapse_label} "
+            "(Left/Right, +/-, G group, C collapse)",
             24,
             y_start - 4,
             small=True,
@@ -360,6 +397,31 @@ class _R1PygameSession:
             small=True,
             color=(176, 191, 216),
         )
+        if collapse_rows:
+            self._draw_text(
+                "Collapsed map rows:",
+                420,
+                y_start - 4,
+                small=True,
+                color=(176, 191, 216),
+            )
+            for idx, line in enumerate(_group_rows_for_controls(all_input_aps, pending)):
+                self._draw_text(
+                    line,
+                    420,
+                    y_start + 16 + idx * 18,
+                    small=True,
+                    color=(176, 191, 216),
+                )
+        if not visible_aps:
+            self._draw_text(
+                "No AP rows visible (press G to expand one group).",
+                24,
+                y_start + 52,
+                small=True,
+                color=(176, 191, 216),
+            )
+            return buttons, page, total_pages, 0
         for idx, ap in enumerate(visible_aps):
             y = y_start + 24 + idx * 40
             self._draw_text(ap, 24, y + 8)
@@ -394,6 +456,7 @@ class _R1PygameSession:
         input_aps_all = list(instance.automaton.input_aps)
         group_keys = list(_grouped_input_aps(input_aps_all).keys())
         group_filter: str | None = None
+        collapse_rows = False
         if timestep == 0:
             self._previous_observed_y_t = None
             self._show_help_overlay = True
@@ -404,7 +467,11 @@ class _R1PygameSession:
         if current_y_t:
             self._previous_observed_y_t = dict(current_y_t)
         while True:
-            visible_pool = _apply_group_filter(input_aps_all, group_filter)
+            visible_pool = _control_visible_pool(
+                input_aps_all,
+                group_filter=group_filter,
+                collapse_rows=collapse_rows,
+            )
             visible_aps, page, _ = _paginate_input_aps(
                 visible_pool,
                 page=page,
@@ -441,6 +508,9 @@ class _R1PygameSession:
                             except ValueError:
                                 idx = 0
                             group_filter = group_keys[idx] if idx < len(group_keys) else None
+                        page = 0
+                    if event.key == self.pg.K_c:
+                        collapse_rows = not collapse_rows
                         page = 0
                     key_to_index = {
                         self.pg.K_1: 0,
@@ -481,11 +551,13 @@ class _R1PygameSession:
             )
             current_buttons, page, _, _ = self._draw_controls(
                 input_aps=visible_pool,
+                all_input_aps=input_aps_all,
                 pending=pending,
                 y_start=250,
                 page=page,
                 page_size=page_size,
                 group_filter=group_filter,
+                collapse_rows=collapse_rows,
             )
             status_x = 460
             status_y = 250
@@ -528,7 +600,7 @@ class _R1PygameSession:
             self._draw_text(
                 "Click 0/1 to set AP value, clear to unset | 1..9,0 cycle APs | "
                 "Enter=commit | Esc=skip | Backspace=clear all | "
-                "Left/Right=AP page | +/-=AP density | H=help",
+                "Left/Right=AP page | +/-=AP density | G=group | C=collapse | H=help",
                 100,
                 footer_y,
                 small=True,
