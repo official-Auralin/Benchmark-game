@@ -116,6 +116,13 @@ def _clamp_timeline_span(value: int, *, minimum: int = 8, maximum: int = 48) -> 
     return min(max(int(value), int(minimum)), int(maximum))
 
 
+def _truncate_ui_text(text: str, *, max_len: int = 82) -> str:
+    token = str(text)
+    if len(token) <= max(4, int(max_len)):
+        return token
+    return token[: max(4, int(max_len)) - 3] + "..."
+
+
 def _timeline_window_bounds(
     *,
     timestep: int,
@@ -372,6 +379,36 @@ class _WaveStripModel:
         return " | ".join(f"t={t}:{tr}" for t, tr in self._trend_history[-4:])
 
 
+class _CommandResponseTrailModel:
+    def __init__(self, *, max_entries: int = 4) -> None:
+        self._max_entries = max(1, int(max_entries))
+        self._entries: list[tuple[int, str, str]] = []
+
+    def reset(self) -> None:
+        self._entries = []
+
+    def record(self, *, timestep: int, command: str, response_delta: str) -> None:
+        entry = (int(timestep), str(command), str(response_delta))
+        if self._entries and self._entries[-1] == entry:
+            return
+        self._entries.append(entry)
+        if len(self._entries) > self._max_entries:
+            self._entries = self._entries[-self._max_entries :]
+
+    def lines(self, *, max_entries: int = 3) -> list[str]:
+        if not self._entries:
+            return ["(none yet)"]
+        rows: list[str] = []
+        for t, cmd, delta in self._entries[-max(1, int(max_entries)) :]:
+            rows.append(
+                _truncate_ui_text(
+                    f"t={t} | {cmd} -> {delta}",
+                    max_len=84,
+                )
+            )
+        return rows
+
+
 def _wave_pressure_strip_state(
     previous_y_t: object, current_y_t: object
 ) -> tuple[str, int, tuple[int, int, int], str]:
@@ -425,6 +462,7 @@ class _R1PygameSession:
         self._last_committed_action_summary: str | None = None
         self._last_committed_t: int | None = None
         self._wave_strip = _WaveStripModel()
+        self._command_response_trail = _CommandResponseTrailModel()
         self._show_help_overlay = True
 
     def _draw_text(
@@ -630,6 +668,28 @@ class _R1PygameSession:
             color=(176, 191, 216),
         )
 
+    def _draw_command_response_lane(self, *, x: int, y: int) -> None:
+        w = 540
+        h = 96
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(24, 34, 50),
+            border=(102, 124, 156),
+            border_width=2,
+        )
+        self._draw_text("Command -> Sector response (observed):", x + 14, y + 10, small=True)
+        for idx, line in enumerate(self._command_response_trail.lines(max_entries=3)):
+            self._draw_text(
+                line,
+                x + 14,
+                y + 34 + idx * 18,
+                small=True,
+                color=(198, 212, 234),
+            )
+
     def _draw_controls(
         self,
         *,
@@ -732,6 +792,7 @@ class _R1PygameSession:
             self._last_committed_action_summary = None
             self._last_committed_t = None
             self._wave_strip.reset()
+            self._command_response_trail.reset()
             self._show_help_overlay = True
         previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(
@@ -743,6 +804,16 @@ class _R1PygameSession:
         )
         if current_y_t:
             self._previous_observed_y_t = dict(current_y_t)
+        if (
+            last_obs is not None
+            and self._last_committed_action_summary is not None
+            and self._last_committed_t == timestep - 1
+        ):
+            self._command_response_trail.record(
+                timestep=int(self._last_committed_t),
+                command=self._last_committed_action_summary,
+                response_delta=delta_summary,
+            )
         while True:
             visible_pool = _control_visible_pool(
                 input_aps_all,
@@ -839,6 +910,7 @@ class _R1PygameSession:
                 fill_color=wave_fill,
                 trend=wave_trend,
             )
+            self._draw_command_response_lane(x=620, y=278)
 
             history_atoms = [] if last_obs is None else last_obs.get("history_atoms", [])
             self._draw_timeline(
