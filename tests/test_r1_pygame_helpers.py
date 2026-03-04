@@ -301,6 +301,18 @@ class TestR1PygameHelpers(unittest.TestCase):
             (12, 12),
         )
 
+    def test_objective_window_bounds_hard_mode_normalization_variants(self) -> None:
+        canonical = _objective_window_bounds(mode="hard", t_star=12, window_size=4)
+        variants = ["HARD", " Hard ", " HARD  ", "HaRd", "\thard\n"]
+        for variant in variants:
+            with self.subTest(mode_variant=variant):
+                self.assertEqual(
+                    _objective_window_bounds(
+                        mode=variant, t_star=12, window_size=4
+                    ),
+                    canonical,
+                )
+
     def test_objective_window_bounds_normal_mode(self) -> None:
         self.assertEqual(
             _objective_window_bounds(mode="normal", t_star=12, window_size=4),

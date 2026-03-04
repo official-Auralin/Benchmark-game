@@ -72,6 +72,26 @@ class TestP0FeedbackCheck(unittest.TestCase):
             self.assertEqual(payload.get("status"), "error")
             self.assertEqual(payload.get("passed"), False)
             self.assertEqual(payload.get("metrics", {}).get("must_fix_total"), 1)
+            self.assertEqual(payload.get("error_type"), "feedback_thresholds_not_met")
+
+    def test_p0_feedback_check_sets_error_type_when_ratios_fail(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gf01-p0-feedback-") as tmp:
+            csv_path = Path(tmp) / "feedback.csv"
+            self._write_csv(
+                csv_path,
+                [
+                    "tester_id,objective_clarity,control_clarity,action_effect_clarity,must_fix_blockers",
+                    "t01,2,2,2,0",
+                    "t02,2,2,2,0",
+                    "t03,2,2,2,0",
+                ],
+            )
+            proc = _run_cli(["p0-feedback-check", "--feedback", str(csv_path)])
+            self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload.get("status"), "error")
+            self.assertEqual(payload.get("passed"), False)
+            self.assertEqual(payload.get("error_type"), "feedback_thresholds_not_met")
 
     def test_p0_feedback_check_rejects_missing_required_columns(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-p0-feedback-") as tmp:
