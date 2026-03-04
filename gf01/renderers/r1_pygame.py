@@ -152,6 +152,38 @@ def _summarize_visible_ap_groups(visible_aps: list[str]) -> str:
     return "groups: " + ", ".join(parts)
 
 
+def _summarize_observed_outputs(y_t: object, *, max_names: int = 6) -> str:
+    observed = _normalize_binary_map(y_t)
+    if not observed:
+        return "Observed outputs: unavailable"
+    active = sorted(ap for ap, bit in observed.items() if bit == 1)
+    total = len(observed)
+    if not active:
+        return f"Observed outputs: all OFF (0/{total} ON)"
+    shown = active[:max(1, int(max_names))]
+    joined = ", ".join(shown)
+    if len(active) > len(shown):
+        joined += f", +{len(active) - len(shown)} more"
+    return f"Observed outputs ON: {joined} ({len(active)}/{total})"
+
+
+def _summarize_pending_interventions(
+    pending: dict[str, int], *, max_items: int = 6
+) -> str:
+    items = [
+        (str(ap), int(bit))
+        for ap, bit in sorted(pending.items())
+        if int(bit) in (0, 1)
+    ]
+    if not items:
+        return "Pending interventions: none selected"
+    shown = items[: max(1, int(max_items))]
+    body = ", ".join(f"{ap}={bit}" for ap, bit in shown)
+    if len(items) > len(shown):
+        body += f", +{len(items) - len(shown)} more"
+    return "Pending interventions: " + body
+
+
 class _R1PygameSession:
     def __init__(self) -> None:
         try:
@@ -423,19 +455,35 @@ class _R1PygameSession:
                 self._draw_text(
                     "No prior observation yet (episode start).", status_x, status_y
                 )
+                self._draw_text(
+                    _summarize_pending_interventions(pending),
+                    status_x,
+                    status_y + 28,
+                    small=True,
+                    color=(192, 209, 232),
+                )
             else:
                 y_t = last_obs.get("y_t", {})
                 effect = str(last_obs.get("effect_status_t", "unknown"))
                 bt = int(last_obs.get("budget_t_remaining", instance.budget_timestep))
                 ba = int(last_obs.get("budget_a_remaining", instance.budget_atoms))
                 self._draw_text("Observation Summary:", status_x, status_y)
-                self._draw_text(f"Observed y_t: {y_t}", status_x, status_y + 28)
+                self._draw_text(
+                    _summarize_observed_outputs(y_t), status_x, status_y + 28
+                )
                 self._draw_text(
                     f"Effect status: {effect} | Budget remaining: timesteps={bt}, atoms={ba}",
                     status_x,
                     status_y + 56,
                 )
                 self._draw_text(delta_summary, status_x, status_y + 84)
+                self._draw_text(
+                    _summarize_pending_interventions(pending),
+                    status_x,
+                    status_y + 112,
+                    small=True,
+                    color=(192, 209, 232),
+                )
 
             footer_y = 712
             self._draw_text("Controls:", 24, footer_y, small=True)

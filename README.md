@@ -69,6 +69,9 @@ Visual renderer notes (both backends):
 - `--visual-backend pygame` renders the map-first interactive view with
   intervention controls and an `Output delta` summary so players can see what
   changed since the prior observed state.
+- The pygame observation panel now includes plain summaries for
+  currently-active observed outputs and your pending interventions to clarify
+  action->response interpretation without formal notation.
 - In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP
   control on the current page through `unset -> 1 -> 0 -> unset`.
 - In `pygame` mode, `+`/`-` adjusts AP page density (`page_size`) to trade off

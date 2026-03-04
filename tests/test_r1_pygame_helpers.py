@@ -19,6 +19,8 @@ from gf01.renderers.r1_pygame import (
     _help_overlay_lines,
     _normalize_binary_map,
     _paginate_input_aps,
+    _summarize_observed_outputs,
+    _summarize_pending_interventions,
     _summarize_visible_ap_groups,
 )
 
@@ -102,6 +104,29 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("in(2)", summary)
         self.assertIn("mode(1)", summary)
         self.assertIn("sensor(1)", summary)
+
+    def test_summarize_observed_outputs_active_and_total(self) -> None:
+        summary = _summarize_observed_outputs({"out0": 1, "out1": 0, "out2": 1})
+        self.assertIn("Observed outputs ON:", summary)
+        self.assertIn("(2/3)", summary)
+        self.assertIn("out0", summary)
+        self.assertIn("out2", summary)
+
+    def test_summarize_observed_outputs_all_off(self) -> None:
+        summary = _summarize_observed_outputs({"out0": 0, "out1": 0})
+        self.assertEqual(summary, "Observed outputs: all OFF (0/2 ON)")
+
+    def test_summarize_pending_interventions(self) -> None:
+        summary = _summarize_pending_interventions({"in2": 0, "in0": 1})
+        self.assertTrue(summary.startswith("Pending interventions:"))
+        self.assertIn("in0=1", summary)
+        self.assertIn("in2=0", summary)
+
+    def test_summarize_pending_interventions_none(self) -> None:
+        self.assertEqual(
+            _summarize_pending_interventions({}),
+            "Pending interventions: none selected",
+        )
 
 
 if __name__ == "__main__":
