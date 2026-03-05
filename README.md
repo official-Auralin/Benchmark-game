@@ -110,6 +110,7 @@ Visual renderer notes (both backends):
   - `mark` row (`N` = now, `T` = target, `B` = now and target are same step)
   - `pressure` band inside each sector cell (dim = lower observed output
     activity, bright = higher observed output activity)
+  - `P` token row (`P0..P10`) for numeric pressure readout per visible sector
   - `edits` row (count of interventions applied at each timestep so far)
 - Canonical scoring semantics are unchanged.
 
