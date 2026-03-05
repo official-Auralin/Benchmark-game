@@ -32,7 +32,9 @@ from gf01.renderers.r1_pygame import (
     _paginate_input_aps,
     _pressure_token,
     _pressure_level_from_observation,
+    _format_top_pressure_summary,
     _sector_pressure_fill,
+    _top_pressure_sectors,
     _summarize_observed_outputs,
     _summarize_committed_action,
     _summarize_pending_interventions,
@@ -274,6 +276,26 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(_edits_token(-5), "E0")
         self.assertEqual(_edits_token(0), "E0")
         self.assertEqual(_edits_token(4), "E4")
+
+    def test_top_pressure_sectors_ranking(self) -> None:
+        ranked = _top_pressure_sectors(
+            {
+                0: 4,
+                1: 7,
+                2: 7,
+                3: 2,
+                4: 10,
+            },
+            max_items=3,
+        )
+        self.assertEqual(ranked, [(4, 10), (2, 7), (1, 7)])
+
+    def test_format_top_pressure_summary(self) -> None:
+        self.assertEqual(_format_top_pressure_summary({}, max_items=3), "(none yet)")
+        self.assertEqual(
+            _format_top_pressure_summary({3: 5, 4: 7, 2: 7}, max_items=2),
+            "t=4:P7, t=2:P7",
+        )
 
     def test_wave_strip_model_trail_dedup_and_window(self) -> None:
         model = _WaveStripModel()

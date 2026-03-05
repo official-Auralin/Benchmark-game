@@ -165,6 +165,30 @@ def _edits_token(edits: int | None) -> str:
     return f"E{max(0, int(edits))}"
 
 
+def _top_pressure_sectors(
+    pressure_levels: Mapping[int, int], *, max_items: int = 4
+) -> list[tuple[int, int]]:
+    if not pressure_levels:
+        return []
+    ranked = sorted(
+        (
+            (int(t), max(0, min(SECTOR_PRESSURE_BANDS, int(level))))
+            for t, level in pressure_levels.items()
+        ),
+        key=lambda item: (-item[1], -item[0]),
+    )
+    return ranked[: max(1, int(max_items))]
+
+
+def _format_top_pressure_summary(
+    pressure_levels: Mapping[int, int], *, max_items: int = 4
+) -> str:
+    top = _top_pressure_sectors(pressure_levels, max_items=max_items)
+    if not top:
+        return "(none yet)"
+    return ", ".join(f"t={t}:{_pressure_token(level)}" for t, level in top)
+
+
 def _timeline_window_bounds(
     *,
     timestep: int,
@@ -740,6 +764,7 @@ class _R1PygameSession:
         filled: int,
         fill_color: tuple[int, int, int],
         trend: str,
+        pressure_levels: Mapping[int, int] | None = None,
     ) -> None:
         x = 620
         y = 184
@@ -770,8 +795,15 @@ class _R1PygameSession:
         self._draw_text(label, x + 14, y + 36, small=True, color=(198, 212, 234))
 
         self._wave_strip.update_history(timestep=timestep, trend=trend)
+        hot_summary = _format_top_pressure_summary(pressure_levels or {}, max_items=3)
         self._draw_text(
-            "Recent wave trends: " + self._wave_strip.trail_text(),
+            _truncate_ui_text(
+                "Recent wave trends: "
+                + self._wave_strip.trail_text()
+                + " | Hot sectors: "
+                + hot_summary,
+                max_len=90,
+            ),
             x + 14,
             y + 58,
             small=True,
@@ -935,6 +967,7 @@ class _R1PygameSession:
                 command=self._last_committed_action_summary,
                 response_delta=delta_summary,
             )
+        pressure_levels = self._sector_pressure_history.levels()
         while True:
             visible_pool = _control_visible_pool(
                 input_aps_all,
@@ -1030,6 +1063,7 @@ class _R1PygameSession:
                 filled=wave_filled,
                 fill_color=wave_fill,
                 trend=wave_trend,
+                pressure_levels=pressure_levels,
             )
             self._draw_command_response_lane(x=620, y=278)
 
@@ -1041,7 +1075,7 @@ class _R1PygameSession:
                 window_size=int(instance.window_size),
                 history_atoms=history_atoms,
                 timeline_span=timeline_span,
-                pressure_levels=self._sector_pressure_history.levels(),
+                pressure_levels=pressure_levels,
             )
             current_buttons, page, _, _ = self._draw_controls(
                 input_aps=visible_pool,
