@@ -152,6 +152,19 @@ def _sector_pressure_fill(level: int) -> tuple[int, int, int]:
     )
 
 
+def _pressure_token(level: int | None) -> str:
+    if level is None:
+        return "P."
+    clamped = max(0, min(SECTOR_PRESSURE_BANDS, int(level)))
+    return f"P{clamped}"
+
+
+def _edits_token(edits: int | None) -> str:
+    if edits is None:
+        return "E."
+    return f"E{max(0, int(edits))}"
+
+
 def _timeline_window_bounds(
     *,
     timestep: int,
@@ -621,27 +634,38 @@ class _R1PygameSession:
             if mark:
                 self._draw_text(mark, x + 9, y0 - 16, small=True, color=(196, 212, 236))
             self._draw_text(str(t), x + 7, y0 + 8, small=True)
-            edits = history_counts.get(t)
-            if edits is not None:
-                self._draw_text(f"{edits}", x + 9, y0 + 38, small=True)
-        self._draw_text("marks: N=now, T=target, B=both", x0, y0 + 58, small=True)
+            self._draw_text(
+                _pressure_token(observed_pressure.get(t)),
+                x + 4,
+                y0 + 38,
+                small=True,
+                color=(176, 191, 216),
+            )
+            self._draw_text(
+                _edits_token(history_counts.get(t)),
+                x + 4,
+                y0 + 52,
+                small=True,
+                color=(176, 191, 216),
+            )
+        self._draw_text("marks: N=now, T=target, B=both", x0, y0 + 66, small=True)
         self._draw_text(
-            "pressure band in sector + edits per t below sectors",
+            "P=row pressure (0..10), E=row edits per t",
             x0,
-            y0 + 74,
+            y0 + 80,
             small=True,
         )
         self._draw_text(
             f"objective window: t={window_start}..{window_end}",
             x0,
-            y0 + 90,
+            y0 + 96,
             small=True,
             color=(176, 191, 216),
         )
         self._draw_text(
             f"window t={start_t}..{end_t} (span={cols}, [ / ] zoom)",
             x0,
-            y0 + 106,
+            y0 + 112,
             small=True,
             color=(176, 191, 216),
         )
@@ -649,7 +673,7 @@ class _R1PygameSession:
             self._draw_text(
                 "target t* is left of view (press ] to widen or advance time)",
                 x0 + 360,
-                y0 + 106,
+                y0 + 112,
                 small=True,
                 color=(214, 194, 138),
             )
@@ -657,7 +681,7 @@ class _R1PygameSession:
             self._draw_text(
                 "target t* is right of view (press ] to widen or advance time)",
                 x0 + 360,
-                y0 + 106,
+                y0 + 112,
                 small=True,
                 color=(214, 194, 138),
             )

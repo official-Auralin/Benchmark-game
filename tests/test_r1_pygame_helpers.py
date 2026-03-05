@@ -30,6 +30,7 @@ from gf01.renderers.r1_pygame import (
     _onboarding_strip_lines,
     _objective_window_bounds,
     _paginate_input_aps,
+    _pressure_token,
     _pressure_level_from_observation,
     _sector_pressure_fill,
     _summarize_observed_outputs,
@@ -40,6 +41,7 @@ from gf01.renderers.r1_pygame import (
     _timeline_window_bounds,
     _truncate_ui_text,
     _wave_pressure_strip_state,
+    _edits_token,
 )
 
 
@@ -260,6 +262,18 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(model.levels(), {1: 5, 2: 10})
         model.reset()
         self.assertEqual(model.levels(), {})
+
+    def test_pressure_token(self) -> None:
+        self.assertEqual(_pressure_token(None), "P.")
+        self.assertEqual(_pressure_token(-4), "P0")
+        self.assertEqual(_pressure_token(3), "P3")
+        self.assertEqual(_pressure_token(999), "P10")
+
+    def test_edits_token(self) -> None:
+        self.assertEqual(_edits_token(None), "E.")
+        self.assertEqual(_edits_token(-5), "E0")
+        self.assertEqual(_edits_token(0), "E0")
+        self.assertEqual(_edits_token(4), "E4")
 
     def test_wave_strip_model_trail_dedup_and_window(self) -> None:
         model = _WaveStripModel()
