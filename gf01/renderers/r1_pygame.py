@@ -20,7 +20,9 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 from dataclasses import dataclass
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from ..semantics import history_counts_by_t, timeline_marker_for_t
@@ -411,24 +413,24 @@ class _SectorPressureHistoryModel:
 
     def __init__(self, *, max_entries: int = SECTOR_PRESSURE_HISTORY_MAX) -> None:
         self._max_entries = max(1, int(max_entries))
-        self._levels: dict[int, int] = {}
+        self._levels: OrderedDict[int, int] = OrderedDict()
 
     def reset(self) -> None:
-        self._levels = {}
+        self._levels = OrderedDict()
 
     def record(self, *, timestep: int, y_t: object) -> None:
         level = _pressure_level_from_observation(y_t)
         if level is None:
             return
-        self._levels[int(timestep)] = int(level)
-        if len(self._levels) > self._max_entries:
-            keys = sorted(self._levels)
-            drop_count = len(self._levels) - self._max_entries
-            for stale in keys[:drop_count]:
-                self._levels.pop(stale, None)
+        t = int(timestep)
+        if t in self._levels:
+            self._levels.pop(t, None)
+        self._levels[t] = level
+        while len(self._levels) > self._max_entries:
+            self._levels.popitem(last=False)
 
-    def levels(self) -> dict[int, int]:
-        return {int(k): int(self._levels[k]) for k in sorted(self._levels)}
+    def levels(self) -> Mapping[int, int]:
+        return MappingProxyType(self._levels)
 
 
 class _CommandResponseTrailModel:
@@ -556,6 +558,17 @@ class _R1PygameSession:
         self.pg.draw.rect(self.screen, fill, self.pg.Rect(x, y, w, h))
         self.pg.draw.rect(self.screen, border, self.pg.Rect(x, y, w, h), border_width)
 
+    def _draw_pressure_band(self, *, x: int, y0: int, cell_w: int, level: int) -> None:
+        self._draw_rect(
+            x + 2,
+            y0 + 2,
+            cell_w - 4,
+            6,
+            fill=_sector_pressure_fill(level),
+            border=(88, 103, 128),
+            border_width=1,
+        )
+
     def _draw_timeline(
         self,
         *,
@@ -565,18 +578,10 @@ class _R1PygameSession:
         window_size: int,
         history_atoms: object,
         timeline_span: int,
-        pressure_levels: dict[int, int] | None = None,
+        pressure_levels: Mapping[int, int] | None = None,
     ) -> None:
         history_counts = history_counts_by_t(history_atoms)
-        observed_pressure: dict[int, int] = {}
-        if isinstance(pressure_levels, dict):
-            for raw_t, raw_level in pressure_levels.items():
-                try:
-                    key_t = int(raw_t)
-                    value = max(0, min(SECTOR_PRESSURE_BANDS, int(raw_level)))
-                except (TypeError, ValueError):
-                    continue
-                observed_pressure[key_t] = value
+        observed_pressure: Mapping[int, int] = pressure_levels or {}
         window_start, window_end = _objective_window_bounds(
             mode=mode,
             t_star=t_star,
@@ -609,16 +614,9 @@ class _R1PygameSession:
                 # Slightly brighter when interventions happened at t.
                 fill = tuple(min(255, c + 30) for c in fill)
             self._draw_rect(x, y0, cell_w, 30, fill=fill)
-            if t in observed_pressure:
-                self._draw_rect(
-                    x + 2,
-                    y0 + 2,
-                    cell_w - 4,
-                    6,
-                    fill=_sector_pressure_fill(observed_pressure[t]),
-                    border=(88, 103, 128),
-                    border_width=1,
-                )
+            level = observed_pressure.get(t)
+            if level is not None:
+                self._draw_pressure_band(x=x, y0=y0, cell_w=cell_w, level=level)
             mark = _timeline_mark(t, timestep, t_star)
             if mark:
                 self._draw_text(mark, x + 9, y0 - 16, small=True, color=(196, 212, 236))
