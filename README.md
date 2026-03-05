@@ -92,6 +92,8 @@ Visual renderer notes (both backends):
   (`now`, `target`, `both`) in addition to color coding.
 - In `pygame` mode, the objective window is explicitly labeled and highlighted
   on the timeline (`hard`: exact `t*`; `normal`: window `t* - w .. t*`).
+- In `pygame` mode, timeline text now includes an objective-window pressure
+  coverage summary (`observed/total`, peak sector token, and average pressure).
 - In `pygame` mode, `[`/`]` zoom the visible timeline window (narrow/wide) so
   long traces remain readable without shrinking each sector cell.
 - In `pygame` mode, closing the window aborts the interactive run (it is not
