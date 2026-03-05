@@ -35,6 +35,7 @@ from gf01.renderers.r1_pygame import (
     _format_top_pressure_summary,
     _sector_pressure_fill,
     _top_pressure_sectors,
+    _objective_window_pressure_summary,
     _summarize_observed_outputs,
     _summarize_committed_action,
     _summarize_pending_interventions,
@@ -295,6 +296,24 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(
             _format_top_pressure_summary({3: 5, 4: 7, 2: 7}, max_items=2),
             "t=4:P7, t=2:P7",
+        )
+
+    def test_objective_window_pressure_summary(self) -> None:
+        self.assertEqual(
+            _objective_window_pressure_summary(
+                pressure_levels={},
+                window_start=5,
+                window_end=7,
+            ),
+            "Window pressure: 0/3 observed",
+        )
+        self.assertEqual(
+            _objective_window_pressure_summary(
+                pressure_levels={5: 2, 6: 9, 8: 10},
+                window_start=5,
+                window_end=7,
+            ),
+            "Window pressure: 2/3 observed, peak t=6:P9, avg=5.5",
         )
 
     def test_wave_strip_model_trail_dedup_and_window(self) -> None:

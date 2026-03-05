@@ -189,6 +189,35 @@ def _format_top_pressure_summary(
     return ", ".join(f"t={t}:{_pressure_token(level)}" for t, level in top)
 
 
+def _objective_window_pressure_summary(
+    *,
+    pressure_levels: Mapping[int, int],
+    window_start: int,
+    window_end: int,
+) -> str:
+    low = int(window_start)
+    high = int(window_end)
+    if high < low:
+        return "Window pressure: invalid"
+    total = high - low + 1
+    observed = [
+        (
+            int(t),
+            max(0, min(SECTOR_PRESSURE_BANDS, int(level))),
+        )
+        for t, level in pressure_levels.items()
+        if low <= int(t) <= high
+    ]
+    if not observed:
+        return f"Window pressure: 0/{total} observed"
+    peak_t, peak_level = max(observed, key=lambda item: (item[1], item[0]))
+    avg = sum(level for _, level in observed) / float(len(observed))
+    return (
+        f"Window pressure: {len(observed)}/{total} observed, "
+        f"peak t={peak_t}:{_pressure_token(peak_level)}, avg={avg:.1f}"
+    )
+
+
 def _timeline_window_bounds(
     *,
     timestep: int,
@@ -693,6 +722,20 @@ class _R1PygameSession:
             small=True,
             color=(176, 191, 216),
         )
+        self._draw_text(
+            _truncate_ui_text(
+                _objective_window_pressure_summary(
+                    pressure_levels=observed_pressure,
+                    window_start=window_start,
+                    window_end=window_end,
+                ),
+                max_len=62,
+            ),
+            x0,
+            y0 + 126,
+            small=True,
+            color=(176, 191, 216),
+        )
         if t_star < start_t:
             self._draw_text(
                 "target t* is left of view (press ] to widen or advance time)",
@@ -1081,7 +1124,7 @@ class _R1PygameSession:
                 input_aps=visible_pool,
                 all_input_aps=input_aps_all,
                 pending=pending,
-                y_start=250,
+                y_start=286,
                 page=page,
                 page_size=page_size,
                 group_filter=group_filter,
