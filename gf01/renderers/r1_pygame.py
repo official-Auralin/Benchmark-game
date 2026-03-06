@@ -68,6 +68,7 @@ class _SectorBoardCell:
     marker: str
     in_viewport: bool
     in_objective_window: bool
+    is_command_focus: bool
 
 
 def _paginate_input_aps(
@@ -408,6 +409,7 @@ def _build_sector_board_cells(
     window_end: int,
     history_counts: Mapping[int, int],
     pressure_levels: Mapping[int, int],
+    focus_timestep: int | None = None,
     cols: int = SECTOR_BOARD_COLS,
     rows: int = SECTOR_BOARD_ROWS,
 ) -> list[_SectorBoardCell]:
@@ -421,6 +423,7 @@ def _build_sector_board_cells(
     view_end = int(end_t)
     objective_start = int(window_start)
     objective_end = int(window_end)
+    focus_t = None if focus_timestep is None else int(focus_timestep)
     edits_by_bucket = _bucketize_history_counts(
         history_counts=history_counts,
         max_t=clamped_max_t,
@@ -450,6 +453,9 @@ def _build_sector_board_cells(
         )
         edits = edits_by_bucket[idx]
         pressure_level = pressure_by_bucket[idx]
+        is_command_focus = (
+            focus_t is not None and int(bucket_start) <= focus_t <= int(bucket_end)
+        )
 
         cells.append(
             _SectorBoardCell(
@@ -462,6 +468,7 @@ def _build_sector_board_cells(
                 marker=marker,
                 in_viewport=in_viewport,
                 in_objective_window=in_objective_window,
+                is_command_focus=is_command_focus,
             )
         )
     return cells
@@ -471,10 +478,11 @@ def _sector_board_hover_summary(cell: _SectorBoardCell | None) -> str:
     if cell is None:
         return "Hover a board cell for sector-range details."
     marker_part = "marker=." if not cell.marker else f"marker={cell.marker}"
+    focus_part = "focus=Y" if cell.is_command_focus else "focus=."
     return (
         f"t={cell.start_t}..{cell.end_t} | "
         f"{_pressure_token(cell.pressure_level)} | "
-        f"{_edits_token(cell.edits)} | {marker_part}"
+        f"{_edits_token(cell.edits)} | {marker_part} | {focus_part}"
     )
 
 
@@ -1104,6 +1112,7 @@ class _R1PygameSession:
         window_end: int,
         history_counts: Mapping[int, int],
         pressure_levels: Mapping[int, int],
+        command_focus_timestep: int | None = None,
         mouse_pos: tuple[int, int] | None = None,
     ) -> None:
         x = 620
@@ -1121,7 +1130,7 @@ class _R1PygameSession:
         )
         self._draw_text("Sector board (sampled full horizon):", x + 14, y + 10, small=True)
         self._draw_text(
-            "Borders: bright=in viewport, amber=now/target | fill=observed pressure",
+            "Borders: bright=viewport, amber=now/target, green=last command",
             x + 14,
             y + 30,
             small=True,
@@ -1137,6 +1146,7 @@ class _R1PygameSession:
             window_end=window_end,
             history_counts=history_counts,
             pressure_levels=pressure_levels,
+            focus_timestep=command_focus_timestep,
         )
         cell_size = 18
         gap = 4
@@ -1158,6 +1168,8 @@ class _R1PygameSession:
             border = (76, 92, 118)
             if cell.in_viewport:
                 border = (164, 184, 214)
+            if cell.is_command_focus:
+                border = (126, 196, 134)
             if cell.marker:
                 border = (212, 188, 122)
             rect = self.pg.Rect(cx, cy, cell_size, cell_size)
@@ -1217,6 +1229,18 @@ class _R1PygameSession:
             "Cell labels: N=now, T=target, B=both",
             x + 220,
             y + 122,
+            small=True,
+            color=(176, 191, 216),
+        )
+        focus_label = (
+            "last command focus: none yet"
+            if command_focus_timestep is None
+            else f"last command focus: t={int(command_focus_timestep)}"
+        )
+        self._draw_text(
+            focus_label,
+            x + 220,
+            y + 164,
             small=True,
             color=(176, 191, 216),
         )
@@ -1655,6 +1679,7 @@ class _R1PygameSession:
                 window_end=window_end,
                 history_counts=history_counts,
                 pressure_levels=pressure_levels,
+                command_focus_timestep=self._last_committed_t,
                 mouse_pos=self.pg.mouse.get_pos(),
             )
             current_buttons, page, _, _ = self._draw_controls(
