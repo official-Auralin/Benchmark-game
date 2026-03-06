@@ -10,11 +10,13 @@ used by the visual backend.
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from gf01.renderers.r1_pygame import (
     _CommandResponseTrailModel,
     _SectorPressureHistoryModel,
     _WaveStripModel,
+    _canonical_exposure_payload,
     _apply_group_filter,
     _ap_group_key,
     _clamp_page_size,
@@ -29,6 +31,7 @@ from gf01.renderers.r1_pygame import (
     _normalize_binary_map,
     _onboarding_strip_lines,
     _objective_window_bounds,
+    _observation_inspector_lines,
     _paginate_input_aps,
     _pressure_token,
     _pressure_level_from_observation,
@@ -141,7 +144,68 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertTrue(any("Output delta" in line for line in lines))
         self.assertTrue(any("collapse" in line.lower() for line in lines))
         self.assertTrue(any("timeline zoom" in line for line in lines))
+        self.assertTrue(any("inspector" in line.lower() for line in lines))
         self.assertTrue(any("Press H" in line for line in lines))
+
+    def test_canonical_exposure_payload_without_observation(self) -> None:
+        instance = SimpleNamespace(
+            effect_ap="out0",
+            t_star=7,
+            mode="normal",
+            budget_timestep=3,
+            budget_atoms=9,
+        )
+        payload = _canonical_exposure_payload(
+            last_obs=None,
+            timestep=0,
+            instance=instance,
+            objective_text="Goal text",
+        )
+        mission = payload["mission"]
+        self.assertEqual(mission["effect_ap"], "out0")
+        self.assertEqual(mission["t_star"], 7)
+        self.assertEqual(payload["observation"], None)
+
+    def test_canonical_exposure_payload_with_observation_uses_canonical_keys(self) -> None:
+        instance = SimpleNamespace(
+            effect_ap="out0",
+            t_star=5,
+            mode="hard",
+            budget_timestep=2,
+            budget_atoms=4,
+        )
+        payload = _canonical_exposure_payload(
+            last_obs={
+                "t": 2,
+                "y_t": {"out0": 1},
+                "effect_status_t": "triggered",
+                "budget_t_remaining": 1,
+                "budget_a_remaining": 3,
+                "history_atoms": [[0, "in0", 1]],
+                "mode": "hard",
+                "t_star": 5,
+                "non_canonical": "ignore",
+            },
+            timestep=3,
+            instance=instance,
+            objective_text="Goal text",
+        )
+        observation = payload["observation"]
+        self.assertIsInstance(observation, dict)
+        self.assertIn("history_atoms", observation)
+        self.assertNotIn("non_canonical", observation)
+
+    def test_observation_inspector_lines_render_mission_and_observation_json(self) -> None:
+        lines = _observation_inspector_lines(
+            {
+                "mission": {"effect_ap": "out0", "mode": "normal"},
+                "observation": {"t": 1, "y_t": {"out0": 1}},
+            }
+        )
+        self.assertGreaterEqual(len(lines), 3)
+        self.assertIn("inspector", lines[0].lower())
+        self.assertIn("mission:", lines[1])
+        self.assertIn("observation:", lines[2])
 
     def test_ap_group_key(self) -> None:
         self.assertEqual(_ap_group_key("in0"), "in")

@@ -108,6 +108,9 @@ Visual renderer notes (both backends):
   group=`ALL`, AP rows are collapsed until a specific group is selected.
 - In `pygame` mode, `H` toggles an in-session quick-help overlay with control
   reminders and action->effect reading tips.
+- In `pygame` mode, `I` toggles a canonical observation inspector that shows
+  mission metadata plus the full canonical observation payload (`O(s)`) for
+  parity with agent-visible information.
 - The pygame control header also shows a compact AP-group summary for the
   current page (e.g., `groups: in(6), sensor(4)`).
 - The timeline rail includes:

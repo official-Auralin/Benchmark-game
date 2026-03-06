@@ -19,6 +19,7 @@ __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
+import json
 from dataclasses import dataclass
 from collections import OrderedDict, defaultdict
 from collections.abc import Mapping
@@ -268,10 +269,70 @@ def _help_overlay_lines() -> list[str]:
         "Keys: Left/Right page APs | +/- AP density.",
         "Keys: [ / ] timeline zoom (narrow/wide).",
         "Keys: G AP group filter | C collapse/expand map rows.",
+        "Keys: I canonical observation inspector toggle.",
         "Keys: Enter commit | Esc skip | Backspace clear all.",
         "Tip: read Previous command, Output delta, and Wave strip together.",
         "Press H to hide/show this panel.",
     ]
+
+
+def _canonical_exposure_payload(
+    *,
+    last_obs: dict[str, object] | None,
+    timestep: int,
+    instance: "GF01Instance",
+    objective_text: str,
+) -> dict[str, object]:
+    mission = {
+        "objective_text": str(objective_text),
+        "effect_ap": str(instance.effect_ap),
+        "t_star": int(instance.t_star),
+        "mode": str(instance.mode),
+        "budget_timestep": int(instance.budget_timestep),
+        "budget_atoms": int(instance.budget_atoms),
+        "timestep_prompt": int(timestep),
+    }
+    if last_obs is None:
+        return {"mission": mission, "observation": None}
+    canonical_order = [
+        "t",
+        "y_t",
+        "effect_status_t",
+        "budget_t_remaining",
+        "budget_a_remaining",
+        "history_atoms",
+        "mode",
+        "t_star",
+    ]
+    observation: dict[str, object] = {}
+    for key in canonical_order:
+        if key in last_obs:
+            observation[key] = last_obs[key]
+    return {"mission": mission, "observation": observation}
+
+
+def _observation_inspector_lines(payload: dict[str, object]) -> list[str]:
+    mission = payload.get("mission", {})
+    observation = payload.get("observation", None)
+    lines = ["Canonical observation inspector (I): I(s)"]
+    lines.append(
+        _truncate_ui_text(
+            "mission: "
+            + json.dumps(mission, sort_keys=True, separators=(",", ":")),
+            max_len=96,
+        )
+    )
+    if observation is None:
+        lines.append("observation: (none yet)")
+    else:
+        lines.append(
+            _truncate_ui_text(
+                "observation: "
+                + json.dumps(observation, sort_keys=True, separators=(",", ":")),
+                max_len=96,
+            )
+        )
+    return lines
 
 
 def _ap_group_key(ap: str) -> str:
@@ -595,6 +656,7 @@ class _R1PygameSession:
         self._sector_pressure_history = _SectorPressureHistoryModel()
         self._command_response_trail = _CommandResponseTrailModel()
         self._show_help_overlay = True
+        self._show_observation_inspector = False
 
     def _draw_text(
         self,
@@ -777,6 +839,45 @@ class _R1PygameSession:
                 color=color,
                 small=(idx != 0),
                 title=False,
+            )
+
+    def _draw_observation_inspector(
+        self,
+        *,
+        last_obs: dict[str, object] | None,
+        timestep: int,
+        instance: "GF01Instance",
+        objective_text: str,
+    ) -> None:
+        lines = _observation_inspector_lines(
+            _canonical_exposure_payload(
+                last_obs=last_obs,
+                timestep=timestep,
+                instance=instance,
+                objective_text=objective_text,
+            )
+        )
+        x = 620
+        y = 520
+        w = 540
+        h = 30 + len(lines) * 22
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(24, 34, 50),
+            border=(115, 136, 168),
+            border_width=2,
+        )
+        for idx, line in enumerate(lines):
+            color = (229, 236, 250) if idx == 0 else (206, 216, 234)
+            self._draw_text(
+                line,
+                x + 14,
+                y + 10 + idx * 22,
+                small=True,
+                color=color,
             )
 
     def _draw_onboarding_strip(self, *, timestep: int) -> None:
@@ -980,6 +1081,7 @@ class _R1PygameSession:
             self._sector_pressure_history.reset()
             self._command_response_trail.reset()
             self._show_help_overlay = True
+            self._show_observation_inspector = False
         previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(
             None if last_obs is None else last_obs.get("y_t", {})
@@ -1043,6 +1145,10 @@ class _R1PygameSession:
                         pending.clear()
                     if event.key == self.pg.K_h:
                         self._show_help_overlay = not self._show_help_overlay
+                    if event.key == self.pg.K_i:
+                        self._show_observation_inspector = (
+                            not self._show_observation_inspector
+                        )
                     if event.key in (self.pg.K_LEFT, self.pg.K_PAGEUP):
                         page = max(0, page - 1)
                     if event.key in (self.pg.K_RIGHT, self.pg.K_PAGEDOWN):
@@ -1200,13 +1306,20 @@ class _R1PygameSession:
                 "Click 0/1 to set AP value, clear to unset | 1..9,0 cycle APs | "
                 "Enter=commit | Esc=skip | Backspace=clear all | "
                 "Left/Right=AP page | +/-=AP density | [ ]=timeline zoom | "
-                "G=group | C=collapse | H=help",
+                "G=group | C=collapse | H=help | I=inspector",
                 100,
                 footer_y,
                 small=True,
             )
             if self._show_help_overlay:
                 self._draw_help_overlay()
+            if self._show_observation_inspector:
+                self._draw_observation_inspector(
+                    last_obs=last_obs,
+                    timestep=timestep,
+                    instance=instance,
+                    objective_text=objective_text,
+                )
             self.pg.display.flip()
 
 
