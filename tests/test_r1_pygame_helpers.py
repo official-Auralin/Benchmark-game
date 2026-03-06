@@ -44,6 +44,8 @@ from gf01.renderers.r1_pygame import (
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
     _build_sector_board_cells,
+    _sector_board_cell_glyph,
+    _sector_board_cell_name,
     _sector_board_hover_summary,
     _build_timeline_minimap,
     _range_contains_t,
@@ -698,6 +700,27 @@ class TestR1PygameHelpers(unittest.TestCase):
 
     def test_sector_board_hover_summary_without_cell(self) -> None:
         self.assertIn("Hover", _sector_board_hover_summary(None))
+
+    def test_sector_board_cell_name(self) -> None:
+        self.assertEqual(_sector_board_cell_name(row=0, col=0), "A1")
+        self.assertEqual(_sector_board_cell_name(row=5, col=7), "H6")
+
+    def test_sector_board_cell_glyph(self) -> None:
+        cell = _build_sector_board_cells(
+            max_t=7,
+            timestep=2,
+            t_star=5,
+            start_t=0,
+            end_t=7,
+            window_start=4,
+            window_end=6,
+            history_counts={2: 1},
+            pressure_levels={2: 6},
+            cols=4,
+            rows=2,
+        )[2]
+        glyph = _sector_board_cell_glyph(cell)
+        self.assertIn(glyph, {"*", "p", "e", "N", "T", "B", "."})
 
     def test_objective_window_bounds_hard_mode(self) -> None:
         self.assertEqual(

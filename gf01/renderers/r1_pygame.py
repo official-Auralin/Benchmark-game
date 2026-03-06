@@ -501,16 +501,38 @@ def _build_sector_board_cells(
 def _sector_board_hover_summary(cell: _SectorBoardCell | None) -> str:
     if cell is None:
         return "Hover a board cell for sector-range details."
+    cell_name = _sector_board_cell_name(row=cell.row, col=cell.col)
     marker_part = "marker=." if not cell.marker else f"marker={cell.marker}"
     if cell.focus_age is None:
         focus_part = "focus=."
     else:
         focus_part = f"focus=F{int(cell.focus_age)}"
     return (
-        f"t={cell.start_t}..{cell.end_t} | "
+        f"{cell_name} t={cell.start_t}..{cell.end_t} | "
         f"{_pressure_token(cell.pressure_level)} | "
         f"{_edits_token(cell.edits)} | {marker_part} | {focus_part}"
     )
+
+
+def _sector_board_cell_name(*, row: int, col: int) -> str:
+    col_idx = max(0, int(col))
+    if col_idx < 26:
+        col_token = chr(ord("A") + col_idx)
+    else:
+        col_token = f"C{col_idx + 1}"
+    return f"{col_token}{max(1, int(row) + 1)}"
+
+
+def _sector_board_cell_glyph(cell: _SectorBoardCell) -> str:
+    if cell.marker:
+        return cell.marker
+    if cell.edits > 0 and cell.pressure_level is not None:
+        return "*"
+    if cell.edits > 0:
+        return "e"
+    if cell.pressure_level is not None:
+        return "p"
+    return "."
 
 
 def _timeline_window_bounds(
@@ -1203,12 +1225,29 @@ class _R1PygameSession:
         )
         cell_size = 18
         gap = 4
-        board_x = x + 14
+        board_x = x + 36
         board_y = y + 52
+        for col_idx in range(SECTOR_BOARD_COLS):
+            col_label = _sector_board_cell_name(row=0, col=col_idx)[:-1]
+            self._draw_text(
+                col_label,
+                board_x + col_idx * (cell_size + gap) + 5,
+                board_y - 16,
+                small=True,
+                color=(176, 191, 216),
+            )
         hovered_cell: _SectorBoardCell | None = None
         for cell in cells:
             cx = board_x + cell.col * (cell_size + gap)
             cy = board_y + cell.row * (cell_size + gap)
+            if cell.col == 0:
+                self._draw_text(
+                    str(cell.row + 1),
+                    board_x - 18,
+                    cy + 2,
+                    small=True,
+                    color=(176, 191, 216),
+                )
             fill = (38, 48, 66)
             if cell.in_objective_window:
                 fill = (58, 65, 80)
@@ -1242,9 +1281,10 @@ class _R1PygameSession:
                 border=border,
                 border_width=2 if cell.marker else 1,
             )
-            if cell.marker:
+            glyph = _sector_board_cell_glyph(cell)
+            if glyph != ".":
                 self._draw_text(
-                    cell.marker,
+                    glyph,
                     cx + 5,
                     cy + 2,
                     small=True,
@@ -1295,6 +1335,13 @@ class _R1PygameSession:
             small=True,
             color=(176, 191, 216),
         )
+        self._draw_text(
+            "Glyphs: p=pressure, e=edits, *=both",
+            x + 220,
+            y + 142,
+            small=True,
+            color=(176, 191, 216),
+        )
         trail_tokens: list[str] = []
         if command_focus_timesteps is not None:
             for age, t_focus in enumerate(command_focus_timesteps):
@@ -1311,7 +1358,7 @@ class _R1PygameSession:
         self._draw_text(
             focus_label,
             x + 220,
-            y + 164,
+            y + 162,
             small=True,
             color=(176, 191, 216),
         )
