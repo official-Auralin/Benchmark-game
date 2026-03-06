@@ -86,6 +86,20 @@ def cmd_profile(args: argparse.Namespace) -> int:
 
 
 def cmd_gate(args: argparse.Namespace) -> int:
+    if int(args.unittest_shards) < 1:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "invalid_unittest_shards",
+                    "message": "--unittest-shards must be >= 1",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     summary = run_regression_gate(
         root=Path(".").resolve(),
         fixture_root=Path(args.fixture_root),
@@ -93,6 +107,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
         seed_profile=int(args.seed_profile),
         public_count=int(args.public_count),
         private_count=int(args.private_count),
+        unittest_shards=int(args.unittest_shards),
         fail_fast=bool(args.fail_fast),
     )
     print(json.dumps(summary, indent=2, sort_keys=True))

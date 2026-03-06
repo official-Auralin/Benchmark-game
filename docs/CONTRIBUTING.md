@@ -12,6 +12,7 @@
 
 - Full tests: `python3 -m unittest discover -s tests -p 'test_*.py' -v`
 - Baseline checks: `python3 -m gf01 checks --seed 3000`
+- Faster gate run: `python3 -m gf01 gate --fixture-root tests/fixtures/official_example --seed-profile 4200 --unittest-shards 2`
 - Build the formal spec PDF: `python3 scripts/build_spec.py`
 
 ## Workflow Rules

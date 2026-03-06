@@ -18,55 +18,72 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 import json
-import subprocess
-import sys
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-m", "gf01", *args],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+try:
+    from .workflow_artifact_harness import clone_tree, q033_manifest_paths, run_cli
+except ImportError:  # pragma: no cover
+    from workflow_artifact_harness import clone_tree, q033_manifest_paths, run_cli
 
 
 class TestQ033ProtocolWorkflow(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._prepared_root = Path(tempfile.mkdtemp(prefix="gf01-q033-fixtures-"))
+        cls.addClassCleanup(shutil.rmtree, cls._prepared_root, ignore_errors=True)
+
+        cls.smoke_manifests_dir = cls._prepared_root / "smoke_manifests"
+        build = run_cli(
+            [
+                "q033-build-manifests",
+                "--seed-start",
+                "9500",
+                "--candidate-count",
+                "80",
+                "--replicates",
+                "2",
+                "--per-quartile",
+                "1",
+                "--out-dir",
+                str(cls.smoke_manifests_dir),
+            ]
+        )
+        if build.returncode != 0:
+            raise AssertionError(build.stdout + build.stderr)
+
+        cls.overlap_manifests_dir = cls._prepared_root / "overlap_manifests"
+        overlap_build = run_cli(
+            [
+                "q033-build-manifests",
+                "--seed-start",
+                "9600",
+                "--candidate-count",
+                "80",
+                "--replicates",
+                "2",
+                "--per-quartile",
+                "1",
+                "--out-dir",
+                str(cls.overlap_manifests_dir),
+            ]
+        )
+        if overlap_build.returncode != 0:
+            raise AssertionError(overlap_build.stdout + overlap_build.stderr)
+
     def test_q033_manifest_sweep_and_closure_smoke(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-q033-") as tmp:
-            out_dir = Path(tmp) / "manifests"
-            build = _run_cli(
-                [
-                    "q033-build-manifests",
-                    "--seed-start",
-                    "9500",
-                    "--candidate-count",
-                    "80",
-                    "--replicates",
-                    "2",
-                    "--per-quartile",
-                    "1",
-                    "--out-dir",
-                    str(out_dir),
-                ]
-            )
-            self.assertEqual(build.returncode, 0, msg=build.stdout + build.stderr)
-            build_payload = json.loads(build.stdout)
-            self.assertEqual(build_payload.get("status"), "ok")
-            manifests = build_payload.get("manifest_paths", [])
+            out_dir = clone_tree(self.smoke_manifests_dir, Path(tmp) / "manifests")
+            manifests = q033_manifest_paths(out_dir)
             self.assertEqual(len(manifests), 2)
 
             sweep_paths: list[str] = []
             for idx, manifest_path in enumerate(manifests, start=1):
                 sweep_out = Path(tmp) / f"sweep_{idx}.json"
-                sweep = _run_cli(
+                sweep = run_cli(
                     [
                         "q033-sweep",
                         "--manifest",
@@ -101,7 +118,7 @@ class TestQ033ProtocolWorkflow(unittest.TestCase):
                 self.assertTrue(sweep_payload.get("gates", {}).get("passed_all", False))
                 sweep_paths.append(str(sweep_out))
 
-            close = _run_cli(
+            close = run_cli(
                 [
                     "q033-closure-check",
                     "--sweep",
@@ -117,28 +134,11 @@ class TestQ033ProtocolWorkflow(unittest.TestCase):
 
     def test_q033_closure_detects_seed_overlap(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-q033-") as tmp:
-            out_dir = Path(tmp) / "manifests"
-            build = _run_cli(
-                [
-                    "q033-build-manifests",
-                    "--seed-start",
-                    "9600",
-                    "--candidate-count",
-                    "80",
-                    "--replicates",
-                    "2",
-                    "--per-quartile",
-                    "1",
-                    "--out-dir",
-                    str(out_dir),
-                ]
-            )
-            self.assertEqual(build.returncode, 0, msg=build.stdout + build.stderr)
-            manifest_path = json.loads(build.stdout).get("manifest_paths", [])[0]
-            self.assertTrue(manifest_path)
+            out_dir = clone_tree(self.overlap_manifests_dir, Path(tmp) / "manifests")
+            manifest_path = q033_manifest_paths(out_dir)[0]
 
             sweep_out = Path(tmp) / "sweep_same.json"
-            sweep = _run_cli(
+            sweep = run_cli(
                 [
                     "q033-sweep",
                     "--manifest",
@@ -169,7 +169,7 @@ class TestQ033ProtocolWorkflow(unittest.TestCase):
             )
             self.assertEqual(sweep.returncode, 0, msg=sweep.stdout + sweep.stderr)
 
-            close = _run_cli(
+            close = run_cli(
                 [
                     "q033-closure-check",
                     "--sweep",

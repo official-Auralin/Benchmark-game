@@ -44,7 +44,8 @@ jobs:
           set -o pipefail
           timeout 18m python -m gf01 gate \
             --fixture-root tests/fixtures/official_example \
-            --seed-profile 4200 | tee gf01_gate_summary.json
+            --seed-profile 4200 \
+            --unittest-shards 2 | tee gf01_gate_summary.json
 
       - name: Upload Gate Summary
         if: always()

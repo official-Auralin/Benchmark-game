@@ -18,85 +18,89 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 import json
-import subprocess
-import sys
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-m", "gf01", *args],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+try:
+    from .workflow_artifact_harness import clone_tree, run_cli
+except ImportError:  # pragma: no cover
+    from workflow_artifact_harness import clone_tree, run_cli
 
 
 class TestReleasePackage(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._prepared_root = Path(
+            tempfile.mkdtemp(prefix="gf01-release-package-fixtures-")
+        )
+        cls.addClassCleanup(shutil.rmtree, cls._prepared_root, ignore_errors=True)
+        cls.freeze_dir = cls._prepared_root / "freeze"
+        cls.campaign_dir = cls._prepared_root / "campaign"
+
+        freeze = run_cli(
+            [
+                "freeze-pilot",
+                "--freeze-id",
+                "gf01-release-package-test",
+                "--split",
+                "pilot_internal_release_test",
+                "--seed-start",
+                "9400",
+                "--count",
+                "1",
+                "--mode",
+                "normal",
+                "--out-dir",
+                str(cls.freeze_dir),
+            ]
+        )
+        if freeze.returncode != 0:
+            raise AssertionError(freeze.stdout + freeze.stderr)
+
+        campaign = run_cli(
+            [
+                "pilot-campaign",
+                "--freeze-dir",
+                str(cls.freeze_dir),
+                "--out-dir",
+                str(cls.campaign_dir),
+                "--baseline-panel",
+                "random,greedy,oracle",
+                "--baseline-policy-level",
+                "core",
+                "--renderer-track",
+                "json",
+                "--seed",
+                "55",
+            ]
+        )
+        if campaign.returncode != 0:
+            raise AssertionError(campaign.stdout + campaign.stderr)
+
+        analysis = run_cli(
+            [
+                "pilot-analyze",
+                "--campaign-dir",
+                str(cls.campaign_dir),
+                "--eval-track",
+                "EVAL-CB",
+                "--mode",
+                "normal",
+            ]
+        )
+        if analysis.returncode != 0:
+            raise AssertionError(analysis.stdout + analysis.stderr)
+
     def test_release_package_emits_manifest_and_instructions(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-release-package-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
-            campaign_dir = Path(tmp) / "campaign"
+            freeze_dir = clone_tree(self.freeze_dir, Path(tmp) / "freeze")
+            campaign_dir = clone_tree(self.campaign_dir, Path(tmp) / "campaign")
             package_dir = Path(tmp) / "package"
 
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-release-package-test",
-                    "--split",
-                    "pilot_internal_release_test",
-                    "--seed-start",
-                    "9400",
-                    "--count",
-                    "1",
-                    "--mode",
-                    "normal",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
-                [
-                    "pilot-campaign",
-                    "--freeze-dir",
-                    str(freeze_dir),
-                    "--out-dir",
-                    str(campaign_dir),
-                    "--baseline-panel",
-                    "random,greedy,oracle",
-                    "--baseline-policy-level",
-                    "core",
-                    "--renderer-track",
-                    "json",
-                    "--seed",
-                    "55",
-                ]
-            )
-            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
-
-            analysis = _run_cli(
-                [
-                    "pilot-analyze",
-                    "--campaign-dir",
-                    str(campaign_dir),
-                    "--eval-track",
-                    "EVAL-CB",
-                    "--mode",
-                    "normal",
-                ]
-            )
-            self.assertEqual(analysis.returncode, 0, msg=analysis.stdout + analysis.stderr)
-
-            package = _run_cli(
+            package = run_cli(
                 [
                     "release-package",
                     "--freeze-dir",
@@ -133,51 +137,13 @@ class TestReleasePackage(unittest.TestCase):
 
     def test_release_package_requires_force_for_non_empty_output_dir(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-release-package-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
-            campaign_dir = Path(tmp) / "campaign"
+            freeze_dir = clone_tree(self.freeze_dir, Path(tmp) / "freeze")
+            campaign_dir = clone_tree(self.campaign_dir, Path(tmp) / "campaign")
             package_dir = Path(tmp) / "package"
             package_dir.mkdir(parents=True, exist_ok=True)
             (package_dir / "existing.txt").write_text("x", encoding="utf-8")
 
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-release-package-test",
-                    "--split",
-                    "pilot_internal_release_test",
-                    "--seed-start",
-                    "9400",
-                    "--count",
-                    "1",
-                    "--mode",
-                    "normal",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
-                [
-                    "pilot-campaign",
-                    "--freeze-dir",
-                    str(freeze_dir),
-                    "--out-dir",
-                    str(campaign_dir),
-                    "--baseline-panel",
-                    "random,greedy,oracle",
-                    "--baseline-policy-level",
-                    "core",
-                    "--renderer-track",
-                    "json",
-                    "--seed",
-                    "55",
-                ]
-            )
-            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
-
-            package = _run_cli(
+            package = run_cli(
                 [
                     "release-package",
                     "--freeze-dir",

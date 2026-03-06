@@ -18,139 +18,131 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 import json
-import subprocess
-import sys
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-m", "gf01", *args],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+try:
+    from .workflow_artifact_harness import (
+        clone_tree,
+        remap_freeze_to_official_splits,
+        run_cli,
     )
-
-
-def _remap_freeze_to_official_splits(freeze_dir: Path) -> None:
-    bundle_path = freeze_dir / "instance_bundle_v1.json"
-    manifest_path = freeze_dir / "split_manifest_v1.json"
-    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    instances = bundle.get("instances", [])
-    if not isinstance(instances, list) or len(instances) != 3:
-        raise AssertionError("expected exactly 3 instances for deterministic remap")
-
-    split_order = [
-        "public_dev",
-        "public_val",
-        "private_eval",
-    ]
-    for instance, split_id in zip(instances, split_order):
-        if not isinstance(instance, dict):
-            raise AssertionError("instance row is not an object")
-        instance["split_id"] = split_id
-
-    manifest_rows = []
-    for instance in instances:
-        manifest_rows.append(
-            {
-                "instance_id": str(instance.get("instance_id", "")),
-                "split_id": str(instance.get("split_id", "")),
-                "mode": str(instance.get("mode", "normal")),
-                "seed": int(instance.get("seed", 0)),
-                "t_star": int(instance.get("t_star", 0)),
-                "window_size": int(instance.get("window_size", 0)),
-                "budget_timestep": int(instance.get("budget_timestep", 0)),
-                "budget_atoms": int(instance.get("budget_atoms", 0)),
-            }
-        )
-    manifest["instance_count"] = len(manifest_rows)
-    manifest["instances"] = manifest_rows
-
-    bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+except ImportError:  # pragma: no cover
+    from workflow_artifact_harness import (
+        clone_tree,
+        remap_freeze_to_official_splits,
+        run_cli,
     )
 
 
 class TestReleaseCandidateCheck(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._prepared_root = Path(
+            tempfile.mkdtemp(prefix="gf01-release-candidate-fixtures-")
+        )
+        cls.addClassCleanup(shutil.rmtree, cls._prepared_root, ignore_errors=True)
+
+        cls.current_freeze = cls._prepared_root / "current_freeze"
+        cls.previous_freeze = cls._prepared_root / "previous_freeze"
+        cls.full_campaign = cls._prepared_root / "campaign_full"
+        cls.core_campaign = cls._prepared_root / "campaign_core"
+
+        current = run_cli(
+            [
+                "freeze-pilot",
+                "--freeze-id",
+                "gf01-release-candidate-current",
+                "--split",
+                "pilot_internal_release_candidate",
+                "--seed-start",
+                "9600",
+                "--count",
+                "3",
+                "--mode",
+                "normal",
+                "--out-dir",
+                str(cls.current_freeze),
+            ]
+        )
+        if current.returncode != 0:
+            raise AssertionError(current.stdout + current.stderr)
+
+        previous = run_cli(
+            [
+                "freeze-pilot",
+                "--freeze-id",
+                "gf01-release-candidate-previous",
+                "--split",
+                "pilot_internal_release_candidate_prev",
+                "--seed-start",
+                "9700",
+                "--count",
+                "3",
+                "--mode",
+                "normal",
+                "--out-dir",
+                str(cls.previous_freeze),
+            ]
+        )
+        if previous.returncode != 0:
+            raise AssertionError(previous.stdout + previous.stderr)
+
+        remap_freeze_to_official_splits(cls.current_freeze)
+        remap_freeze_to_official_splits(cls.previous_freeze)
+
+        full_campaign = run_cli(
+            [
+                "pilot-campaign",
+                "--freeze-dir",
+                str(cls.current_freeze),
+                "--out-dir",
+                str(cls.full_campaign),
+                "--baseline-panel",
+                "random,greedy,search,tool,oracle",
+                "--baseline-policy-level",
+                "full",
+                "--renderer-track",
+                "json",
+                "--seed",
+                "55",
+            ]
+        )
+        if full_campaign.returncode != 0:
+            raise AssertionError(full_campaign.stdout + full_campaign.stderr)
+
+        core_campaign = run_cli(
+            [
+                "pilot-campaign",
+                "--freeze-dir",
+                str(cls.current_freeze),
+                "--out-dir",
+                str(cls.core_campaign),
+                "--baseline-panel",
+                "random,greedy,oracle",
+                "--baseline-policy-level",
+                "core",
+                "--renderer-track",
+                "json",
+                "--seed",
+                "55",
+            ]
+        )
+        if core_campaign.returncode != 0:
+            raise AssertionError(core_campaign.stdout + core_campaign.stderr)
+
     def test_release_candidate_check_passes_end_to_end(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-release-candidate-") as tmp:
             base = Path(tmp)
-            current_freeze = base / "current_freeze"
-            previous_freeze = base / "previous_freeze"
-            campaign_dir = base / "campaign"
+            current_freeze = clone_tree(self.current_freeze, base / "current_freeze")
+            previous_freeze = clone_tree(self.previous_freeze, base / "previous_freeze")
+            campaign_dir = clone_tree(self.full_campaign, base / "campaign")
             package_dir = base / "package"
 
-            current = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-release-candidate-current",
-                    "--split",
-                    "pilot_internal_release_candidate",
-                    "--seed-start",
-                    "9600",
-                    "--count",
-                    "3",
-                    "--mode",
-                    "normal",
-                    "--out-dir",
-                    str(current_freeze),
-                ]
-            )
-            self.assertEqual(current.returncode, 0, msg=current.stdout + current.stderr)
-
-            previous = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-release-candidate-previous",
-                    "--split",
-                    "pilot_internal_release_candidate_prev",
-                    "--seed-start",
-                    "9700",
-                    "--count",
-                    "3",
-                    "--mode",
-                    "normal",
-                    "--out-dir",
-                    str(previous_freeze),
-                ]
-            )
-            self.assertEqual(previous.returncode, 0, msg=previous.stdout + previous.stderr)
-
-            _remap_freeze_to_official_splits(current_freeze)
-            _remap_freeze_to_official_splits(previous_freeze)
-
-            campaign = _run_cli(
-                [
-                    "pilot-campaign",
-                    "--freeze-dir",
-                    str(current_freeze),
-                    "--out-dir",
-                    str(campaign_dir),
-                    "--baseline-panel",
-                    "random,greedy,search,tool,oracle",
-                    "--baseline-policy-level",
-                    "full",
-                    "--renderer-track",
-                    "json",
-                    "--seed",
-                    "55",
-                ]
-            )
-            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
-
-            check = _run_cli(
+            check = run_cli(
                 [
                     "release-candidate-check",
                     "--freeze-dir",
@@ -183,49 +175,10 @@ class TestReleaseCandidateCheck(unittest.TestCase):
     def test_release_candidate_check_fails_when_release_report_fails(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-release-candidate-") as tmp:
             base = Path(tmp)
-            current_freeze = base / "current_freeze"
-            campaign_dir = base / "campaign"
+            current_freeze = clone_tree(self.current_freeze, base / "current_freeze")
+            campaign_dir = clone_tree(self.core_campaign, base / "campaign")
 
-            current = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-release-candidate-core",
-                    "--split",
-                    "pilot_internal_release_candidate",
-                    "--seed-start",
-                    "9800",
-                    "--count",
-                    "3",
-                    "--mode",
-                    "normal",
-                    "--out-dir",
-                    str(current_freeze),
-                ]
-            )
-            self.assertEqual(current.returncode, 0, msg=current.stdout + current.stderr)
-            _remap_freeze_to_official_splits(current_freeze)
-
-            campaign = _run_cli(
-                [
-                    "pilot-campaign",
-                    "--freeze-dir",
-                    str(current_freeze),
-                    "--out-dir",
-                    str(campaign_dir),
-                    "--baseline-panel",
-                    "random,greedy,oracle",
-                    "--baseline-policy-level",
-                    "core",
-                    "--renderer-track",
-                    "json",
-                    "--seed",
-                    "55",
-                ]
-            )
-            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
-
-            check = _run_cli(
+            check = run_cli(
                 [
                     "release-candidate-check",
                     "--freeze-dir",
