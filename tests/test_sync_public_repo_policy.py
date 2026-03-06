@@ -65,7 +65,12 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
             include_paths,
             (
                 "README.md",
+                "requirements.txt",
+                "docs",
                 "spec/Spec.pdf",
+                "spec/overview.md",
+                "spec/contracts.md",
+                "spec/acceptance-tests.md",
                 ".github/workflows/gf01-gate.yml",
                 "gf01",
                 "tests",
@@ -125,9 +130,17 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
 
             # Build only the allowlisted content plus private/noise artifacts.
             (root / "README.md").write_text("readme\n", encoding="utf-8")
+            (root / "requirements.txt").write_text("pygame-ce>=2.5\n", encoding="utf-8")
+            docs_dir = root / "docs"
+            docs_dir.mkdir()
+            (docs_dir / "ARCHITECTURE.md").write_text("architecture\n", encoding="utf-8")
+            (docs_dir / "CONTRIBUTING.md").write_text("contributing\n", encoding="utf-8")
             spec_dir = root / "spec"
             spec_dir.mkdir()
             (spec_dir / "Spec.pdf").write_bytes(b"%PDF-1.4\n")
+            (spec_dir / "overview.md").write_text("overview\n", encoding="utf-8")
+            (spec_dir / "contracts.md").write_text("contracts\n", encoding="utf-8")
+            (spec_dir / "acceptance-tests.md").write_text("acceptance\n", encoding="utf-8")
             wf = root / ".github" / "workflows"
             wf.mkdir(parents=True)
             (wf / "gf01-gate.yml").write_text("name: test\njobs: {}\n", encoding="utf-8")
@@ -157,7 +170,13 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
 
             # Allowlisted paths are copied.
             self.assertTrue((target / "README.md").exists())
+            self.assertTrue((target / "requirements.txt").exists())
+            self.assertTrue((target / "docs" / "ARCHITECTURE.md").exists())
+            self.assertTrue((target / "docs" / "CONTRIBUTING.md").exists())
             self.assertTrue((target / "spec" / "Spec.pdf").exists())
+            self.assertTrue((target / "spec" / "overview.md").exists())
+            self.assertTrue((target / "spec" / "contracts.md").exists())
+            self.assertTrue((target / "spec" / "acceptance-tests.md").exists())
             self.assertTrue((target / ".github" / "workflows" / "gf01-gate.yml").exists())
             self.assertTrue((target / "gf01" / "core.py").exists())
             self.assertTrue((target / "tests" / "test_ok.py").exists())

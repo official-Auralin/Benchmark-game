@@ -7,23 +7,34 @@ from pathlib import Path
 
 from gf01 import meta
 
+try:
+    from .repo_scope import is_public_mirror
+except ImportError:  # pragma: no cover
+    from repo_scope import is_public_mirror
+
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_PATHS = (
+COMMON_REQUIRED_PATHS = (
     ROOT / "docs" / "ARCHITECTURE.md",
     ROOT / "docs" / "CONTRIBUTING.md",
     ROOT / "spec" / "overview.md",
     ROOT / "spec" / "contracts.md",
     ROOT / "spec" / "acceptance-tests.md",
     ROOT / "spec" / "Spec.pdf",
-    ROOT / "spec" / "tex_files" / "Spec.tex",
     ROOT / "requirements.txt",
 )
+SOURCE_ONLY_REQUIRED_PATHS = (
+    ROOT / "spec" / "tex_files" / "Spec.tex",
+)
+IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
 
 
 class TestDocsSpecSync(unittest.TestCase):
     def test_required_docs_and_spec_paths_exist(self) -> None:
-        for path in REQUIRED_PATHS:
+        required_paths = list(COMMON_REQUIRED_PATHS)
+        if not IS_PUBLIC_MIRROR:
+            required_paths.extend(SOURCE_ONLY_REQUIRED_PATHS)
+        for path in required_paths:
             self.assertTrue(path.exists(), msg=f"missing required artifact: {path}")
 
     def test_contracts_page_mentions_current_schema_and_policy_versions(self) -> None:
