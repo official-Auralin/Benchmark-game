@@ -18,49 +18,67 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 import json
-import subprocess
-import sys
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-m", "gf01", *args],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+try:
+    from .workflow_artifact_harness import clone_tree, run_cli
+except ImportError:  # pragma: no cover
+    from workflow_artifact_harness import clone_tree, run_cli
 
 
 class TestPilotCampaign(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._prepared_root = Path(tempfile.mkdtemp(prefix="gf01-campaign-fixtures-"))
+        cls.addClassCleanup(shutil.rmtree, cls._prepared_root, ignore_errors=True)
+
+        cls.full_freeze_dir = cls._prepared_root / "full_freeze"
+        full_freeze = run_cli(
+            [
+                "freeze-pilot",
+                "--freeze-id",
+                "gf01-pilot-freeze-campaign-test",
+                "--split",
+                "pilot_internal_test",
+                "--seed-start",
+                "9300",
+                "--count",
+                "2",
+                "--out-dir",
+                str(cls.full_freeze_dir),
+            ]
+        )
+        if full_freeze.returncode != 0:
+            raise AssertionError(full_freeze.stdout + full_freeze.stderr)
+
+        cls.single_freeze_dir = cls._prepared_root / "single_freeze"
+        single_freeze = run_cli(
+            [
+                "freeze-pilot",
+                "--freeze-id",
+                "gf01-pilot-freeze-campaign-single-test",
+                "--split",
+                "pilot_internal_test",
+                "--seed-start",
+                "9310",
+                "--count",
+                "1",
+                "--out-dir",
+                str(cls.single_freeze_dir),
+            ]
+        )
+        if single_freeze.returncode != 0:
+            raise AssertionError(single_freeze.stdout + single_freeze.stderr)
+
     def test_campaign_writes_official_artifacts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
+            freeze_dir = clone_tree(self.full_freeze_dir, Path(tmp) / "freeze")
             run_dir = Path(tmp) / "runs"
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-pilot-freeze-campaign-test",
-                    "--split",
-                    "pilot_internal_test",
-                    "--seed-start",
-                    "9300",
-                    "--count",
-                    "2",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
+            campaign = run_cli(
                 [
                     "pilot-campaign",
                     "--freeze-dir",
@@ -121,29 +139,12 @@ class TestPilotCampaign(unittest.TestCase):
 
     def test_campaign_requires_force_for_non_empty_output_dir(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
+            freeze_dir = clone_tree(self.full_freeze_dir, Path(tmp) / "freeze")
             run_dir = Path(tmp) / "runs"
             run_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / "existing.txt").write_text("x", encoding="utf-8")
 
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-pilot-freeze-campaign-test",
-                    "--split",
-                    "pilot_internal_test",
-                    "--seed-start",
-                    "9300",
-                    "--count",
-                    "2",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
+            campaign = run_cli(
                 [
                     "pilot-campaign",
                     "--freeze-dir",
@@ -160,26 +161,9 @@ class TestPilotCampaign(unittest.TestCase):
 
     def test_campaign_rejects_panel_missing_required_full_policy_ids(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
+            freeze_dir = clone_tree(self.full_freeze_dir, Path(tmp) / "freeze")
             run_dir = Path(tmp) / "runs"
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-pilot-freeze-campaign-test",
-                    "--split",
-                    "pilot_internal_test",
-                    "--seed-start",
-                    "9300",
-                    "--count",
-                    "2",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
+            campaign = run_cli(
                 [
                     "pilot-campaign",
                     "--freeze-dir",
@@ -196,26 +180,9 @@ class TestPilotCampaign(unittest.TestCase):
 
     def test_campaign_core_policy_accepts_core_panel(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
+            freeze_dir = clone_tree(self.full_freeze_dir, Path(tmp) / "freeze")
             run_dir = Path(tmp) / "runs"
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-pilot-freeze-campaign-test",
-                    "--split",
-                    "pilot_internal_test",
-                    "--seed-start",
-                    "9300",
-                    "--count",
-                    "2",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
+            campaign = run_cli(
                 [
                     "pilot-campaign",
                     "--freeze-dir",
@@ -235,30 +202,13 @@ class TestPilotCampaign(unittest.TestCase):
 
     def test_campaign_ingests_external_episode_artifacts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
+            freeze_dir = clone_tree(self.single_freeze_dir, Path(tmp) / "freeze")
             run_dir = Path(tmp) / "runs"
             episode_path = Path(tmp) / "external_episode.json"
             script_path = Path(tmp) / "script.json"
             script_path.write_text("{}", encoding="utf-8")
 
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-pilot-freeze-campaign-test",
-                    "--split",
-                    "pilot_internal_test",
-                    "--seed-start",
-                    "9300",
-                    "--count",
-                    "1",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            play = _run_cli(
+            play = run_cli(
                 [
                     "play",
                     "--instances",
@@ -275,7 +225,7 @@ class TestPilotCampaign(unittest.TestCase):
             )
             self.assertEqual(play.returncode, 0, msg=play.stdout + play.stderr)
 
-            campaign = _run_cli(
+            campaign = run_cli(
                 [
                     "pilot-campaign",
                     "--freeze-dir",
@@ -317,29 +267,12 @@ class TestPilotCampaign(unittest.TestCase):
 
     def test_campaign_rejects_invalid_external_episode_payload(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-campaign-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
+            freeze_dir = clone_tree(self.single_freeze_dir, Path(tmp) / "freeze")
             run_dir = Path(tmp) / "runs"
             bad_payload_path = Path(tmp) / "bad_episode.json"
             bad_payload_path.write_text("{}", encoding="utf-8")
 
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-pilot-freeze-campaign-test",
-                    "--split",
-                    "pilot_internal_test",
-                    "--seed-start",
-                    "9300",
-                    "--count",
-                    "1",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
+            campaign = run_cli(
                 [
                     "pilot-campaign",
                     "--freeze-dir",

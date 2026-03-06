@@ -10,7 +10,7 @@ family (human-playable and agent-playable temporal-causality tasks).
 - `spec/`: compact operational spec for contracts and acceptance scenarios.
 - `docs/ARCHITECTURE.md`: system map and module-boundary guide.
 - `docs/CONTRIBUTING.md`: setup, test, spec-build, and docs-freshness workflow.
-- `requirements.txt`: public-scope contributor dependencies only.
+- `requirements.txt`: contributor dependencies.
 - `gf01/`: benchmark runtime, generator, verifier, baselines, and CLI.
 - `tests/`: regression tests and fixture artifacts.
 
@@ -18,7 +18,6 @@ family (human-playable and agent-playable temporal-causality tasks).
 
 - Python 3.10+.
 - Install mirrored/public-scope dependencies with `python3 -m pip install -r requirements.txt`.
-- `requirements.txt` intentionally excludes local-only or private-repo tooling.
 - Optional for graphical human play: `pygame-ce` is the only current external dependency.
 
 ## Contributor entrypoints

@@ -19,69 +19,109 @@ __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
 import json
-import subprocess
-import sys
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-m", "gf01", *args],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+try:
+    from .workflow_artifact_harness import clone_tree, run_cli
+except ImportError:  # pragma: no cover
+    from workflow_artifact_harness import clone_tree, run_cli
 
 
 class TestPilotAnalysis(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._prepared_root = Path(tempfile.mkdtemp(prefix="gf01-analysis-fixtures-"))
+        cls.addClassCleanup(shutil.rmtree, cls._prepared_root, ignore_errors=True)
+
+        cls.standard_freeze_dir = cls._prepared_root / "standard_freeze"
+        cls.standard_run_dir = cls._prepared_root / "standard_runs"
+        standard_freeze = run_cli(
+            [
+                "freeze-pilot",
+                "--freeze-id",
+                "gf01-pilot-freeze-analysis-test",
+                "--split",
+                "pilot_internal_test",
+                "--seed-start",
+                "9400",
+                "--count",
+                "8",
+                "--out-dir",
+                str(cls.standard_freeze_dir),
+            ]
+        )
+        if standard_freeze.returncode != 0:
+            raise AssertionError(standard_freeze.stdout + standard_freeze.stderr)
+
+        standard_campaign = run_cli(
+            [
+                "pilot-campaign",
+                "--freeze-dir",
+                str(cls.standard_freeze_dir),
+                "--out-dir",
+                str(cls.standard_run_dir),
+                "--baseline-panel",
+                "random,greedy,oracle",
+                "--baseline-policy-level",
+                "core",
+                "--renderer-track",
+                "json",
+                "--seed",
+                "77",
+            ]
+        )
+        if standard_campaign.returncode != 0:
+            raise AssertionError(standard_campaign.stdout + standard_campaign.stderr)
+
+        cls.legacy_freeze_dir = cls._prepared_root / "legacy_freeze"
+        cls.legacy_run_dir = cls._prepared_root / "legacy_runs"
+        legacy_freeze = run_cli(
+            [
+                "freeze-pilot",
+                "--freeze-id",
+                "gf01-pilot-freeze-analysis-legacy-test",
+                "--split",
+                "pilot_internal_test",
+                "--seed-start",
+                "9500",
+                "--count",
+                "6",
+                "--out-dir",
+                str(cls.legacy_freeze_dir),
+            ]
+        )
+        if legacy_freeze.returncode != 0:
+            raise AssertionError(legacy_freeze.stdout + legacy_freeze.stderr)
+
+        legacy_campaign = run_cli(
+            [
+                "pilot-campaign",
+                "--freeze-dir",
+                str(cls.legacy_freeze_dir),
+                "--out-dir",
+                str(cls.legacy_run_dir),
+                "--baseline-panel",
+                "random,greedy,oracle",
+                "--baseline-policy-level",
+                "core",
+                "--renderer-track",
+                "json",
+                "--seed",
+                "91",
+            ]
+        )
+        if legacy_campaign.returncode != 0:
+            raise AssertionError(legacy_campaign.stdout + legacy_campaign.stderr)
+
     def test_pilot_analysis_emits_trigger_report(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-analysis-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
-            run_dir = Path(tmp) / "runs"
+            run_dir = clone_tree(self.standard_run_dir, Path(tmp) / "runs")
 
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-pilot-freeze-analysis-test",
-                    "--split",
-                    "pilot_internal_test",
-                    "--seed-start",
-                    "9400",
-                    "--count",
-                    "8",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
-                [
-                    "pilot-campaign",
-                    "--freeze-dir",
-                    str(freeze_dir),
-                    "--out-dir",
-                    str(run_dir),
-                    "--baseline-panel",
-                    "random,greedy,oracle",
-                    "--baseline-policy-level",
-                    "core",
-                    "--renderer-track",
-                    "json",
-                    "--seed",
-                    "77",
-                ]
-            )
-            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
-
-            analysis = _run_cli(
+            analysis = run_cli(
                 [
                     "pilot-analyze",
                     "--campaign-dir",
@@ -106,44 +146,7 @@ class TestPilotAnalysis(unittest.TestCase):
 
     def test_pilot_analysis_migrates_legacy_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gf01-analysis-") as tmp:
-            freeze_dir = Path(tmp) / "freeze"
-            run_dir = Path(tmp) / "runs"
-
-            freeze = _run_cli(
-                [
-                    "freeze-pilot",
-                    "--freeze-id",
-                    "gf01-pilot-freeze-analysis-legacy-test",
-                    "--split",
-                    "pilot_internal_test",
-                    "--seed-start",
-                    "9500",
-                    "--count",
-                    "6",
-                    "--out-dir",
-                    str(freeze_dir),
-                ]
-            )
-            self.assertEqual(freeze.returncode, 0, msg=freeze.stdout + freeze.stderr)
-
-            campaign = _run_cli(
-                [
-                    "pilot-campaign",
-                    "--freeze-dir",
-                    str(freeze_dir),
-                    "--out-dir",
-                    str(run_dir),
-                    "--baseline-panel",
-                    "random,greedy,oracle",
-                    "--baseline-policy-level",
-                    "core",
-                    "--renderer-track",
-                    "json",
-                    "--seed",
-                    "91",
-                ]
-            )
-            self.assertEqual(campaign.returncode, 0, msg=campaign.stdout + campaign.stderr)
+            run_dir = clone_tree(self.legacy_run_dir, Path(tmp) / "runs")
 
             runs_path = run_dir / "runs_combined.jsonl"
             rows = [json.loads(line) for line in runs_path.read_text().splitlines() if line.strip()]
@@ -157,7 +160,7 @@ class TestPilotAnalysis(unittest.TestCase):
                 row.pop("adaptation_protocol_id", None)
             runs_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows))
 
-            analysis = _run_cli(
+            analysis = run_cli(
                 [
                     "pilot-analyze",
                     "--campaign-dir",
@@ -179,7 +182,7 @@ class TestPilotAnalysis(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="gf01-analysis-") as tmp:
             campaign_dir = Path(tmp) / "campaign"
             campaign_dir.mkdir(parents=True, exist_ok=True)
-            proc = _run_cli(
+            proc = run_cli(
                 [
                     "pilot-analyze",
                     "--campaign-dir",

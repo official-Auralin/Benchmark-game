@@ -81,6 +81,7 @@ class TestCiPolicyWorkflow(unittest.TestCase):
 
         gate_run = str(gate_steps["Run GF01 Gate"].get("run", ""))
         self.assertIn("python -m gf01 gate", gate_run)
+        self.assertIn("--unittest-shards 2", gate_run)
 
         rc_run = str(rc_steps["Run Integrated Release Candidate Check"].get("run", ""))
         self.assertIn("python -m gf01 release-candidate-check", rc_run)

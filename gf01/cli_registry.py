@@ -232,6 +232,12 @@ def register_quality_commands(
     p_gate.add_argument("--public-count", type=int, default=3)
     p_gate.add_argument("--private-count", type=int, default=3)
     p_gate.add_argument(
+        "--unittest-shards",
+        type=int,
+        default=1,
+        help="Split the unittest stage into N balanced shards for faster gate runs",
+    )
+    p_gate.add_argument(
         "--fail-fast",
         action="store_true",
         help="Stop the gate immediately on first failed step",
