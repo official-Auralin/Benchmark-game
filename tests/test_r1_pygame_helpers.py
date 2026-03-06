@@ -736,9 +736,10 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertIn("Cell", lines[0])
         self.assertIn("t=", lines[0])
+        self.assertIn("Status", lines[1])
         self.assertIn("Pressure", lines[1])
         self.assertIn("Edits", lines[1])
-        self.assertIn("Focus", lines[1])
+        self.assertIn("focus", lines[1].lower())
 
     def test_sector_board_cell_name(self) -> None:
         self.assertEqual(_sector_board_cell_name(row=0, col=0), "A1")
