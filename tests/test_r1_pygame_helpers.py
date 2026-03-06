@@ -44,6 +44,7 @@ from gf01.renderers.r1_pygame import (
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
     _build_sector_board_cells,
+    _sector_board_hover_summary,
     _build_timeline_minimap,
     _timeline_mark,
     _timeline_window_bounds,
@@ -594,6 +595,28 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertTrue(levels)
         self.assertTrue(all(level <= 10 for level in levels))
         self.assertTrue(any(cell.marker == "B" for cell in cells))
+
+    def test_sector_board_hover_summary_for_cell(self) -> None:
+        cell = _build_sector_board_cells(
+            max_t=7,
+            timestep=2,
+            t_star=5,
+            start_t=0,
+            end_t=7,
+            window_start=4,
+            window_end=6,
+            history_counts={2: 1},
+            pressure_levels={2: 6},
+            cols=4,
+            rows=2,
+        )[2]
+        summary = _sector_board_hover_summary(cell)
+        self.assertIn("t=", summary)
+        self.assertIn("P", summary)
+        self.assertIn("E", summary)
+
+    def test_sector_board_hover_summary_without_cell(self) -> None:
+        self.assertIn("Hover", _sector_board_hover_summary(None))
 
     def test_objective_window_bounds_hard_mode(self) -> None:
         self.assertEqual(

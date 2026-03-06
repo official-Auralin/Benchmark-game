@@ -101,6 +101,8 @@ Visual renderer notes (both backends):
 - In `pygame` mode, a sampled rectangular `Sector board` panel shows the full
   horizon as a grid (viewport-highlighted cells, objective-window tint, and
   `N/T/B` markers for now/target/both).
+- In `pygame` mode, hover a sector-board cell to inspect the represented
+  timestep bucket (`t` range, pressure token, edit token, and marker).
 - In `pygame` mode, closing the window aborts the interactive run (it is not
   treated as a `skip`/no-op action).
 - In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP

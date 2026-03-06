@@ -393,6 +393,17 @@ def _build_sector_board_cells(
     return cells
 
 
+def _sector_board_hover_summary(cell: _SectorBoardCell | None) -> str:
+    if cell is None:
+        return "Hover a board cell for sector-range details."
+    marker_part = "marker=." if not cell.marker else f"marker={cell.marker}"
+    return (
+        f"t={cell.start_t}..{cell.end_t} | "
+        f"{_pressure_token(cell.pressure_level)} | "
+        f"{_edits_token(cell.edits)} | {marker_part}"
+    )
+
+
 def _timeline_window_bounds(
     *,
     timestep: int,
@@ -1019,6 +1030,7 @@ class _R1PygameSession:
         window_end: int,
         history_counts: Mapping[int, int],
         pressure_levels: Mapping[int, int],
+        mouse_pos: tuple[int, int] | None = None,
     ) -> None:
         x = 620
         y = 390
@@ -1056,6 +1068,7 @@ class _R1PygameSession:
         gap = 4
         board_x = x + 14
         board_y = y + 52
+        hovered_cell: _SectorBoardCell | None = None
         for cell in cells:
             cx = board_x + cell.col * (cell_size + gap)
             cy = board_y + cell.row * (cell_size + gap)
@@ -1073,6 +1086,10 @@ class _R1PygameSession:
                 border = (164, 184, 214)
             if cell.marker:
                 border = (212, 188, 122)
+            rect = self.pg.Rect(cx, cy, cell_size, cell_size)
+            if mouse_pos is not None and rect.collidepoint(mouse_pos):
+                hovered_cell = cell
+                border = (230, 220, 162)
             self._draw_rect(
                 cx,
                 cy,
@@ -1091,6 +1108,13 @@ class _R1PygameSession:
                     color=(18, 24, 34),
                 )
 
+        self._draw_text(
+            _truncate_ui_text(_sector_board_hover_summary(hovered_cell), max_len=66),
+            x + 220,
+            y + 144,
+            small=True,
+            color=(198, 212, 234),
+        )
         self._draw_text(
             _truncate_ui_text(
                 "Hot sectors: " + _format_top_pressure_summary(pressure_levels, max_items=4),
@@ -1557,6 +1581,7 @@ class _R1PygameSession:
                 window_end=window_end,
                 history_counts=history_counts,
                 pressure_levels=pressure_levels,
+                mouse_pos=self.pg.mouse.get_pos(),
             )
             current_buttons, page, _, _ = self._draw_controls(
                 input_aps=visible_pool,
