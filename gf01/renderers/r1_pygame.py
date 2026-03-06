@@ -250,50 +250,62 @@ def _build_timeline_minimap(
 ) -> str:
     chars = max(8, int(width))
     horizon = max(0, int(max_t))
+    t_now = int(timestep)
+    t_target = int(t_star)
+    view_start = int(start_t)
+    view_end = int(end_t)
+    win_start = int(window_start)
+    win_end = int(window_end)
+
     if chars == 1:
         return "N"
     if horizon == 0:
         base = ["." for _ in range(chars)]
-        idx = 0
-        if int(timestep) == int(t_star):
-            base[idx] = "B"
-        elif int(timestep) == 0:
-            base[idx] = "N"
-        elif int(t_star) == 0:
-            base[idx] = "T"
-        base[idx] = "["
+        marker = _bucket_marker(0, 0, t_now=t_now, t_target=t_target)
+        base[0] = "["
         base[-1] = "]"
+        if marker:
+            marker_idx = 1 if chars > 2 else 0
+            base[marker_idx] = marker
+        elif win_start <= 0 <= win_end and chars > 2:
+            base[1] = "w"
         return "".join(base)
 
-    def _sample_t(col: int) -> int:
-        return int(round(col * horizon / float(chars - 1)))
-
+    history_bucket = _bucketize_history_counts(
+        history_counts=history_counts,
+        max_t=horizon,
+        bucket_count=chars,
+    )
+    pressure_bucket = _bucketize_pressure_levels(
+        pressure_levels=pressure_levels,
+        max_t=horizon,
+        bucket_count=chars,
+    )
     strip: list[str] = []
-    for col in range(chars):
-        t = _sample_t(col)
+    for idx in range(chars):
+        bucket_start, bucket_end = _sector_bucket_bounds(
+            index=idx,
+            bucket_count=chars,
+            max_t=horizon,
+        )
         token = "."
-        if int(window_start) <= t <= int(window_end):
+        if _ranges_overlap(bucket_start, bucket_end, win_start, win_end):
             token = "w"
-        if int(history_counts.get(t, 0)) > 0:
+        if history_bucket[idx] > 0:
             token = "e"
-        if t in pressure_levels:
+        if pressure_bucket[idx] is not None:
             token = "p"
-        if t == int(timestep) and t == int(t_star):
-            token = "B"
-        elif t == int(timestep):
-            token = "N"
-        elif t == int(t_star):
-            token = "T"
+        marker = _bucket_marker(bucket_start, bucket_end, t_now=t_now, t_target=t_target)
+        if marker:
+            token = marker
         strip.append(token)
 
-    start_idx = int(round(max(0, int(start_t)) * (chars - 1) / float(horizon)))
-    end_idx = int(round(max(0, int(end_t)) * (chars - 1) / float(horizon)))
-    start_idx = max(0, min(chars - 1, start_idx))
-    end_idx = max(0, min(chars - 1, end_idx))
+    start_idx = _bucket_index_for_t(t=view_start, max_t=horizon, bucket_count=chars)
+    end_idx = _bucket_index_for_t(t=view_end, max_t=horizon, bucket_count=chars)
     if end_idx < start_idx:
         start_idx, end_idx = end_idx, start_idx
-    strip[start_idx] = "["
-    strip[end_idx] = "]"
+    _place_minimap_bracket(strip, index=start_idx, symbol="[", step=1)
+    _place_minimap_bracket(strip, index=end_idx, symbol="]", step=-1)
     return "".join(strip)
 
 
@@ -309,6 +321,80 @@ def _sector_bucket_bounds(
         end = start
     max_step = max(0, int(max_t))
     return (min(start, max_step), min(end, max_step))
+
+
+def _bucket_index_for_t(*, t: int, max_t: int, bucket_count: int) -> int:
+    max_step = max(0, int(max_t))
+    bucket_n = max(1, int(bucket_count))
+    t_clamped = max(0, min(max_step, int(t)))
+    return min(bucket_n - 1, (t_clamped * bucket_n) // (max_step + 1))
+
+
+def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    low_a = min(int(a_start), int(a_end))
+    high_a = max(int(a_start), int(a_end))
+    low_b = min(int(b_start), int(b_end))
+    high_b = max(int(b_start), int(b_end))
+    return not (high_a < low_b or low_a > high_b)
+
+
+def _bucket_marker(bucket_start: int, bucket_end: int, *, t_now: int, t_target: int) -> str:
+    now_in = int(bucket_start) <= int(t_now) <= int(bucket_end)
+    target_in = int(bucket_start) <= int(t_target) <= int(bucket_end)
+    if now_in and target_in:
+        return "B"
+    if now_in:
+        return "N"
+    if target_in:
+        return "T"
+    return ""
+
+
+def _bucketize_history_counts(
+    *,
+    history_counts: Mapping[int, int],
+    max_t: int,
+    bucket_count: int,
+) -> list[int]:
+    bucket_n = max(1, int(bucket_count))
+    edits = [0 for _ in range(bucket_n)]
+    for t_key, count in history_counts.items():
+        idx = _bucket_index_for_t(t=int(t_key), max_t=max_t, bucket_count=bucket_n)
+        edits[idx] += max(0, int(count))
+    return edits
+
+
+def _bucketize_pressure_levels(
+    *,
+    pressure_levels: Mapping[int, int],
+    max_t: int,
+    bucket_count: int,
+) -> list[int | None]:
+    bucket_n = max(1, int(bucket_count))
+    pressure: list[int | None] = [None for _ in range(bucket_n)]
+    for t_key, level in pressure_levels.items():
+        idx = _bucket_index_for_t(t=int(t_key), max_t=max_t, bucket_count=bucket_n)
+        clamped = max(0, min(SECTOR_PRESSURE_BANDS, int(level)))
+        current = pressure[idx]
+        pressure[idx] = clamped if current is None else max(current, clamped)
+    return pressure
+
+
+def _place_minimap_bracket(strip: list[str], *, index: int, symbol: str, step: int) -> None:
+    if not strip:
+        return
+    idx = max(0, min(len(strip) - 1, int(index)))
+    marker_tokens = {"N", "T", "B"}
+    if strip[idx] not in marker_tokens:
+        strip[idx] = symbol
+        return
+    cursor = idx + (1 if int(step) >= 0 else -1)
+    while 0 <= cursor < len(strip):
+        if strip[cursor] not in marker_tokens:
+            strip[cursor] = symbol
+            return
+        cursor += 1 if int(step) >= 0 else -1
+    strip[idx] = symbol
 
 
 def _build_sector_board_cells(
@@ -335,6 +421,16 @@ def _build_sector_board_cells(
     view_end = int(end_t)
     objective_start = int(window_start)
     objective_end = int(window_end)
+    edits_by_bucket = _bucketize_history_counts(
+        history_counts=history_counts,
+        max_t=clamped_max_t,
+        bucket_count=bucket_count,
+    )
+    pressure_by_bucket = _bucketize_pressure_levels(
+        pressure_levels=pressure_levels,
+        max_t=clamped_max_t,
+        bucket_count=bucket_count,
+    )
     cells: list[_SectorBoardCell] = []
     for idx in range(bucket_count):
         row = idx // cols_n
@@ -347,35 +443,13 @@ def _build_sector_board_cells(
         if bucket_end < bucket_start:
             bucket_end = bucket_start
 
-        marker = ""
-        now_in = bucket_start <= t_now <= bucket_end
-        target_in = bucket_start <= t_target <= bucket_end
-        if now_in and target_in:
-            marker = "B"
-        elif now_in:
-            marker = "N"
-        elif target_in:
-            marker = "T"
-
-        in_viewport = not (bucket_end < view_start or bucket_start > view_end)
-        in_objective_window = not (
-            bucket_end < objective_start or bucket_start > objective_end
+        marker = _bucket_marker(bucket_start, bucket_end, t_now=t_now, t_target=t_target)
+        in_viewport = _ranges_overlap(bucket_start, bucket_end, view_start, view_end)
+        in_objective_window = _ranges_overlap(
+            bucket_start, bucket_end, objective_start, objective_end
         )
-
-        edits = 0
-        for t_key, count in history_counts.items():
-            t_val = int(t_key)
-            if bucket_start <= t_val <= bucket_end:
-                edits += max(0, int(count))
-
-        pressure_level: int | None = None
-        for t_key, level in pressure_levels.items():
-            t_val = int(t_key)
-            if bucket_start <= t_val <= bucket_end:
-                clamped = max(0, min(SECTOR_PRESSURE_BANDS, int(level)))
-                pressure_level = (
-                    clamped if pressure_level is None else max(pressure_level, clamped)
-                )
+        edits = edits_by_bucket[idx]
+        pressure_level = pressure_by_bucket[idx]
 
         cells.append(
             _SectorBoardCell(
@@ -1190,7 +1264,7 @@ class _R1PygameSession:
             )
         )
         x = 620
-        y = 520
+        y = 580
         w = 540
         h = 30 + len(lines) * 22
         self._draw_rect(

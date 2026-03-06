@@ -210,6 +210,18 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("mission:", lines[1])
         self.assertIn("observation:", lines[2])
 
+    def test_observation_inspector_lines_handles_none_observation(self) -> None:
+        lines = _observation_inspector_lines(
+            {
+                "mission": {"effect_ap": "out0", "mode": "normal"},
+                "observation": None,
+            }
+        )
+        self.assertGreaterEqual(len(lines), 3)
+        self.assertIn("inspector", lines[0].lower())
+        self.assertIn("mission:", lines[1])
+        self.assertIn("observation: (none yet)", lines[2].lower())
+
     def test_ap_group_key(self) -> None:
         self.assertEqual(_ap_group_key("in0"), "in")
         self.assertEqual(_ap_group_key("sensor_temp_1"), "sensor_temp")
@@ -555,6 +567,24 @@ class TestR1PygameHelpers(unittest.TestCase):
             pressure_levels={},
             width=24,
         )
+        self.assertIn("B", minimap)
+
+    def test_build_timeline_minimap_horizon_zero_keeps_marker_visible(self) -> None:
+        minimap = _build_timeline_minimap(
+            max_t=0,
+            start_t=0,
+            end_t=0,
+            timestep=0,
+            t_star=0,
+            window_start=0,
+            window_end=0,
+            history_counts={},
+            pressure_levels={},
+            width=16,
+        )
+        self.assertEqual(len(minimap), 16)
+        self.assertIn("[", minimap)
+        self.assertIn("]", minimap)
         self.assertIn("B", minimap)
 
     def test_build_sector_board_cells_assigns_markers_and_flags(self) -> None:
