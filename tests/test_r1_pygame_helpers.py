@@ -606,6 +606,7 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertTrue(any(cell.marker == "T" for cell in cells))
         self.assertTrue(any(cell.in_viewport for cell in cells))
         self.assertTrue(any(cell.in_objective_window for cell in cells))
+        self.assertFalse(any(cell.is_command_focus for cell in cells))
 
     def test_build_sector_board_cells_clamps_pressure_levels(self) -> None:
         cells = _build_sector_board_cells(
@@ -644,6 +645,28 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("t=", summary)
         self.assertIn("P", summary)
         self.assertIn("E", summary)
+        self.assertIn("focus=.", summary)
+
+    def test_build_sector_board_cells_marks_command_focus_bucket(self) -> None:
+        cells = _build_sector_board_cells(
+            max_t=23,
+            timestep=5,
+            t_star=18,
+            start_t=4,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={},
+            pressure_levels={},
+            focus_timestep=9,
+            cols=8,
+            rows=6,
+        )
+        focused = [cell for cell in cells if cell.is_command_focus]
+        self.assertTrue(focused)
+        self.assertTrue(
+            any(int(cell.start_t) <= 9 <= int(cell.end_t) for cell in focused)
+        )
 
     def test_sector_board_hover_summary_without_cell(self) -> None:
         self.assertIn("Hover", _sector_board_hover_summary(None))
