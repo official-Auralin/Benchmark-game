@@ -108,6 +108,9 @@ Visual renderer notes (both backends):
 - In `pygame` mode, the sector-board border shows a short command-focus trail:
   green = most recent command bucket, cyan = previous, blue = third-most-recent.
   This links command and observed-response views without exposing hidden state.
+- In `pygame` mode, the sector board includes grid coordinates (`A..H`, `1..6`)
+  and compact glyphs (`p`, `e`, `*`) so non-experts can parse state changes
+  quickly while keeping the same canonical information.
 - In `pygame` mode, closing the window aborts the interactive run (it is not
   treated as a `skip`/no-op action).
 - In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP
