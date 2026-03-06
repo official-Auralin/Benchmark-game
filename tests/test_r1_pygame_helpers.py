@@ -43,6 +43,7 @@ from gf01.renderers.r1_pygame import (
     _summarize_committed_action,
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
+    _build_sector_board_cells,
     _build_timeline_minimap,
     _timeline_mark,
     _timeline_window_bounds,
@@ -554,6 +555,45 @@ class TestR1PygameHelpers(unittest.TestCase):
             width=24,
         )
         self.assertIn("B", minimap)
+
+    def test_build_sector_board_cells_assigns_markers_and_flags(self) -> None:
+        cells = _build_sector_board_cells(
+            max_t=23,
+            timestep=5,
+            t_star=18,
+            start_t=4,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={5: 1, 6: 2, 18: 1},
+            pressure_levels={4: 3, 8: 7, 18: 9},
+            cols=8,
+            rows=6,
+        )
+        self.assertEqual(len(cells), 48)
+        self.assertTrue(any(cell.marker == "N" for cell in cells))
+        self.assertTrue(any(cell.marker == "T" for cell in cells))
+        self.assertTrue(any(cell.in_viewport for cell in cells))
+        self.assertTrue(any(cell.in_objective_window for cell in cells))
+
+    def test_build_sector_board_cells_clamps_pressure_levels(self) -> None:
+        cells = _build_sector_board_cells(
+            max_t=7,
+            timestep=3,
+            t_star=3,
+            start_t=0,
+            end_t=7,
+            window_start=0,
+            window_end=7,
+            history_counts={},
+            pressure_levels={3: 99},
+            cols=4,
+            rows=2,
+        )
+        levels = [cell.pressure_level for cell in cells if cell.pressure_level is not None]
+        self.assertTrue(levels)
+        self.assertTrue(all(level <= 10 for level in levels))
+        self.assertTrue(any(cell.marker == "B" for cell in cells))
 
     def test_objective_window_bounds_hard_mode(self) -> None:
         self.assertEqual(

@@ -98,6 +98,9 @@ Visual renderer notes (both backends):
   long traces remain readable without shrinking each sector cell.
 - In `pygame` mode, a compact timeline minimap strip shows the full horizon and
   current viewport window at a glance (`[` and `]` mark the visible range).
+- In `pygame` mode, a sampled rectangular `Sector board` panel shows the full
+  horizon as a grid (viewport-highlighted cells, objective-window tint, and
+  `N/T/B` markers for now/target/both).
 - In `pygame` mode, closing the window aborts the interactive run (it is not
   treated as a `skip`/no-op action).
 - In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP

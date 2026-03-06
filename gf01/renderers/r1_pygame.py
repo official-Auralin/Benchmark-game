@@ -40,6 +40,8 @@ COMMAND_RESPONSE_MAX_VISIBLE = 3
 SECTOR_PRESSURE_BANDS = 10
 SECTOR_PRESSURE_HISTORY_MAX = 256
 TIMELINE_MINIMAP_CHARS = 48
+SECTOR_BOARD_COLS = 8
+SECTOR_BOARD_ROWS = 6
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,19 @@ class _Button:
 
     def contains(self, px: int, py: int) -> bool:
         return self.x <= px <= self.x + self.w and self.y <= py <= self.y + self.h
+
+
+@dataclass(frozen=True)
+class _SectorBoardCell:
+    row: int
+    col: int
+    start_t: int
+    end_t: int
+    pressure_level: int | None
+    edits: int
+    marker: str
+    in_viewport: bool
+    in_objective_window: bool
 
 
 def _paginate_input_aps(
@@ -280,6 +295,102 @@ def _build_timeline_minimap(
     strip[start_idx] = "["
     strip[end_idx] = "]"
     return "".join(strip)
+
+
+def _sector_bucket_bounds(
+    *, index: int, bucket_count: int, max_t: int
+) -> tuple[int, int]:
+    horizon = max(1, int(max_t) + 1)
+    bucket_n = max(1, int(bucket_count))
+    idx = min(max(0, int(index)), bucket_n - 1)
+    start = (idx * horizon) // bucket_n
+    end = ((idx + 1) * horizon) // bucket_n - 1
+    if end < start:
+        end = start
+    max_step = max(0, int(max_t))
+    return (min(start, max_step), min(end, max_step))
+
+
+def _build_sector_board_cells(
+    *,
+    max_t: int,
+    timestep: int,
+    t_star: int,
+    start_t: int,
+    end_t: int,
+    window_start: int,
+    window_end: int,
+    history_counts: Mapping[int, int],
+    pressure_levels: Mapping[int, int],
+    cols: int = SECTOR_BOARD_COLS,
+    rows: int = SECTOR_BOARD_ROWS,
+) -> list[_SectorBoardCell]:
+    clamped_max_t = max(0, int(max_t))
+    cols_n = max(2, int(cols))
+    rows_n = max(2, int(rows))
+    bucket_count = cols_n * rows_n
+    t_now = int(timestep)
+    t_target = int(t_star)
+    view_start = int(start_t)
+    view_end = int(end_t)
+    objective_start = int(window_start)
+    objective_end = int(window_end)
+    cells: list[_SectorBoardCell] = []
+    for idx in range(bucket_count):
+        row = idx // cols_n
+        col = idx % cols_n
+        bucket_start, bucket_end = _sector_bucket_bounds(
+            index=idx,
+            bucket_count=bucket_count,
+            max_t=clamped_max_t,
+        )
+        if bucket_end < bucket_start:
+            bucket_end = bucket_start
+
+        marker = ""
+        now_in = bucket_start <= t_now <= bucket_end
+        target_in = bucket_start <= t_target <= bucket_end
+        if now_in and target_in:
+            marker = "B"
+        elif now_in:
+            marker = "N"
+        elif target_in:
+            marker = "T"
+
+        in_viewport = not (bucket_end < view_start or bucket_start > view_end)
+        in_objective_window = not (
+            bucket_end < objective_start or bucket_start > objective_end
+        )
+
+        edits = 0
+        for t_key, count in history_counts.items():
+            t_val = int(t_key)
+            if bucket_start <= t_val <= bucket_end:
+                edits += max(0, int(count))
+
+        pressure_level: int | None = None
+        for t_key, level in pressure_levels.items():
+            t_val = int(t_key)
+            if bucket_start <= t_val <= bucket_end:
+                clamped = max(0, min(SECTOR_PRESSURE_BANDS, int(level)))
+                pressure_level = (
+                    clamped if pressure_level is None else max(pressure_level, clamped)
+                )
+
+        cells.append(
+            _SectorBoardCell(
+                row=row,
+                col=col,
+                start_t=bucket_start,
+                end_t=bucket_end,
+                pressure_level=pressure_level,
+                edits=edits,
+                marker=marker,
+                in_viewport=in_viewport,
+                in_objective_window=in_objective_window,
+            )
+        )
+    return cells
 
 
 def _timeline_window_bounds(
@@ -896,6 +1007,122 @@ class _R1PygameSession:
                 color=(214, 194, 138),
             )
 
+    def _draw_sector_board(
+        self,
+        *,
+        max_t: int,
+        timestep: int,
+        t_star: int,
+        start_t: int,
+        end_t: int,
+        window_start: int,
+        window_end: int,
+        history_counts: Mapping[int, int],
+        pressure_levels: Mapping[int, int],
+    ) -> None:
+        x = 620
+        y = 390
+        w = 540
+        h = 178
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(24, 34, 50),
+            border=(102, 124, 156),
+            border_width=2,
+        )
+        self._draw_text("Sector board (sampled full horizon):", x + 14, y + 10, small=True)
+        self._draw_text(
+            "Borders: bright=in viewport, amber=now/target | fill=observed pressure",
+            x + 14,
+            y + 30,
+            small=True,
+            color=(176, 191, 216),
+        )
+        cells = _build_sector_board_cells(
+            max_t=max_t,
+            timestep=timestep,
+            t_star=t_star,
+            start_t=start_t,
+            end_t=end_t,
+            window_start=window_start,
+            window_end=window_end,
+            history_counts=history_counts,
+            pressure_levels=pressure_levels,
+        )
+        cell_size = 18
+        gap = 4
+        board_x = x + 14
+        board_y = y + 52
+        for cell in cells:
+            cx = board_x + cell.col * (cell_size + gap)
+            cy = board_y + cell.row * (cell_size + gap)
+            fill = (38, 48, 66)
+            if cell.in_objective_window:
+                fill = (58, 65, 80)
+            if cell.pressure_level is not None:
+                fill = _sector_pressure_fill(cell.pressure_level)
+                if cell.in_objective_window:
+                    fill = tuple(min(255, channel + 18) for channel in fill)
+            if cell.edits > 0:
+                fill = tuple(min(255, channel + 10) for channel in fill)
+            border = (76, 92, 118)
+            if cell.in_viewport:
+                border = (164, 184, 214)
+            if cell.marker:
+                border = (212, 188, 122)
+            self._draw_rect(
+                cx,
+                cy,
+                cell_size,
+                cell_size,
+                fill=fill,
+                border=border,
+                border_width=2 if cell.marker else 1,
+            )
+            if cell.marker:
+                self._draw_text(
+                    cell.marker,
+                    cx + 5,
+                    cy + 2,
+                    small=True,
+                    color=(18, 24, 34),
+                )
+
+        self._draw_text(
+            _truncate_ui_text(
+                "Hot sectors: " + _format_top_pressure_summary(pressure_levels, max_items=4),
+                max_len=66,
+            ),
+            x + 220,
+            y + 56,
+            small=True,
+            color=(198, 212, 234),
+        )
+        self._draw_text(
+            f"window t={window_start}..{window_end} | viewport t={start_t}..{end_t}",
+            x + 220,
+            y + 78,
+            small=True,
+            color=(176, 191, 216),
+        )
+        self._draw_text(
+            f"horizon sectors: {max_t + 1} sampled into {SECTOR_BOARD_ROWS}x{SECTOR_BOARD_COLS}",
+            x + 220,
+            y + 100,
+            small=True,
+            color=(176, 191, 216),
+        )
+        self._draw_text(
+            "Cell labels: N=now, T=target, B=both",
+            x + 220,
+            y + 122,
+            small=True,
+            color=(176, 191, 216),
+        )
+
     def _draw_help_overlay(self) -> None:
         lines = _help_overlay_lines()
         x = 620
@@ -1298,6 +1525,19 @@ class _R1PygameSession:
             self._draw_command_response_lane(x=620, y=278)
 
             history_atoms = [] if last_obs is None else last_obs.get("history_atoms", [])
+            history_counts = history_counts_by_t(history_atoms)
+            max_t = max([0, int(timestep), int(instance.t_star), *history_counts.keys()])
+            window_start, window_end = _objective_window_bounds(
+                mode=str(instance.mode),
+                t_star=int(instance.t_star),
+                window_size=int(instance.window_size),
+            )
+            start_t, end_t = _timeline_window_bounds(
+                timestep=int(timestep),
+                t_star=int(instance.t_star),
+                history_counts=history_counts,
+                span=timeline_span,
+            )
             self._draw_timeline(
                 timestep=timestep,
                 t_star=int(instance.t_star),
@@ -1305,6 +1545,17 @@ class _R1PygameSession:
                 window_size=int(instance.window_size),
                 history_atoms=history_atoms,
                 timeline_span=timeline_span,
+                pressure_levels=pressure_levels,
+            )
+            self._draw_sector_board(
+                max_t=max_t,
+                timestep=int(timestep),
+                t_star=int(instance.t_star),
+                start_t=start_t,
+                end_t=end_t,
+                window_start=window_start,
+                window_end=window_end,
+                history_counts=history_counts,
                 pressure_levels=pressure_levels,
             )
             current_buttons, page, _, _ = self._draw_controls(
