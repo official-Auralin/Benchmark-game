@@ -69,6 +69,7 @@ class _SectorBoardCell:
     in_viewport: bool
     in_objective_window: bool
     is_command_focus: bool
+    focus_age: int | None
 
 
 def _paginate_input_aps(
@@ -410,6 +411,7 @@ def _build_sector_board_cells(
     history_counts: Mapping[int, int],
     pressure_levels: Mapping[int, int],
     focus_timestep: int | None = None,
+    focus_timesteps: tuple[int, ...] | list[int] | None = None,
     cols: int = SECTOR_BOARD_COLS,
     rows: int = SECTOR_BOARD_ROWS,
 ) -> list[_SectorBoardCell]:
@@ -423,7 +425,17 @@ def _build_sector_board_cells(
     view_end = int(end_t)
     objective_start = int(window_start)
     objective_end = int(window_end)
-    focus_t = None if focus_timestep is None else int(focus_timestep)
+    normalized_focus: list[int] = []
+    if focus_timesteps is not None:
+        for raw in focus_timesteps:
+            try:
+                token = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if token not in normalized_focus:
+                normalized_focus.append(token)
+    elif focus_timestep is not None:
+        normalized_focus = [int(focus_timestep)]
     edits_by_bucket = _bucketize_history_counts(
         history_counts=history_counts,
         max_t=clamped_max_t,
@@ -453,9 +465,12 @@ def _build_sector_board_cells(
         )
         edits = edits_by_bucket[idx]
         pressure_level = pressure_by_bucket[idx]
-        is_command_focus = (
-            focus_t is not None and int(bucket_start) <= focus_t <= int(bucket_end)
-        )
+        focus_age: int | None = None
+        for age, focus_t in enumerate(normalized_focus):
+            if int(bucket_start) <= int(focus_t) <= int(bucket_end):
+                focus_age = age
+                break
+        is_command_focus = focus_age is not None
 
         cells.append(
             _SectorBoardCell(
@@ -469,6 +484,7 @@ def _build_sector_board_cells(
                 in_viewport=in_viewport,
                 in_objective_window=in_objective_window,
                 is_command_focus=is_command_focus,
+                focus_age=focus_age,
             )
         )
     return cells
@@ -478,7 +494,10 @@ def _sector_board_hover_summary(cell: _SectorBoardCell | None) -> str:
     if cell is None:
         return "Hover a board cell for sector-range details."
     marker_part = "marker=." if not cell.marker else f"marker={cell.marker}"
-    focus_part = "focus=Y" if cell.is_command_focus else "focus=."
+    if cell.focus_age is None:
+        focus_part = "focus=."
+    else:
+        focus_part = f"focus=F{int(cell.focus_age)}"
     return (
         f"t={cell.start_t}..{cell.end_t} | "
         f"{_pressure_token(cell.pressure_level)} | "
@@ -922,6 +941,7 @@ class _R1PygameSession:
         self._wave_strip = _WaveStripModel()
         self._sector_pressure_history = _SectorPressureHistoryModel()
         self._command_response_trail = _CommandResponseTrailModel()
+        self._command_focus_timesteps: list[int] = []
         self._show_help_overlay = True
         self._show_observation_inspector = False
 
@@ -938,6 +958,14 @@ class _R1PygameSession:
         font = self.font_title if title else self.font_small if small else self.font
         surface = font.render(text, True, color)
         self.screen.blit(surface, (x, y))
+
+    def _record_command_focus(self, timestep: int) -> None:
+        t = int(timestep)
+        if self._command_focus_timesteps and self._command_focus_timesteps[0] == t:
+            return
+        self._command_focus_timesteps.insert(0, t)
+        if len(self._command_focus_timesteps) > 3:
+            self._command_focus_timesteps = self._command_focus_timesteps[:3]
 
     def _draw_rect(
         self,
@@ -1113,6 +1141,7 @@ class _R1PygameSession:
         history_counts: Mapping[int, int],
         pressure_levels: Mapping[int, int],
         command_focus_timestep: int | None = None,
+        command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
         mouse_pos: tuple[int, int] | None = None,
     ) -> None:
         x = 620
@@ -1130,7 +1159,7 @@ class _R1PygameSession:
         )
         self._draw_text("Sector board (sampled full horizon):", x + 14, y + 10, small=True)
         self._draw_text(
-            "Borders: bright=viewport, amber=now/target, green=last command",
+            "Borders: bright=viewport, amber=now/target, green/cyan/blue=focus trail",
             x + 14,
             y + 30,
             small=True,
@@ -1147,6 +1176,7 @@ class _R1PygameSession:
             history_counts=history_counts,
             pressure_levels=pressure_levels,
             focus_timestep=command_focus_timestep,
+            focus_timesteps=command_focus_timesteps,
         )
         cell_size = 18
         gap = 4
@@ -1168,8 +1198,12 @@ class _R1PygameSession:
             border = (76, 92, 118)
             if cell.in_viewport:
                 border = (164, 184, 214)
-            if cell.is_command_focus:
+            if cell.focus_age == 0:
                 border = (126, 196, 134)
+            elif cell.focus_age == 1:
+                border = (112, 176, 204)
+            elif cell.focus_age == 2:
+                border = (98, 148, 188)
             if cell.marker:
                 border = (212, 188, 122)
             rect = self.pg.Rect(cx, cy, cell_size, cell_size)
@@ -1232,10 +1266,18 @@ class _R1PygameSession:
             small=True,
             color=(176, 191, 216),
         )
+        trail_tokens: list[str] = []
+        if command_focus_timesteps is not None:
+            for age, t_focus in enumerate(command_focus_timesteps):
+                if age >= 3:
+                    break
+                trail_tokens.append(f"F{age}=t{int(t_focus)}")
+        elif command_focus_timestep is not None:
+            trail_tokens.append(f"F0=t{int(command_focus_timestep)}")
         focus_label = (
-            "last command focus: none yet"
-            if command_focus_timestep is None
-            else f"last command focus: t={int(command_focus_timestep)}"
+            "command focus trail: none yet"
+            if not trail_tokens
+            else "command focus trail: " + " | ".join(trail_tokens)
         )
         self._draw_text(
             focus_label,
@@ -1510,6 +1552,7 @@ class _R1PygameSession:
             self._wave_strip.reset()
             self._sector_pressure_history.reset()
             self._command_response_trail.reset()
+            self._command_focus_timesteps = []
             self._show_help_overlay = True
             self._show_observation_inspector = False
         previous_y_t = self._previous_observed_y_t
@@ -1564,12 +1607,14 @@ class _R1PygameSession:
                             _summarize_committed_action(pending)
                         )
                         self._last_committed_t = int(timestep)
+                        self._record_command_focus(int(timestep))
                         return dict(pending)
                     if event.key == self.pg.K_ESCAPE:
                         self._last_committed_action_summary = (
                             _summarize_committed_action({})
                         )
                         self._last_committed_t = int(timestep)
+                        self._record_command_focus(int(timestep))
                         return {}
                     if event.key == self.pg.K_BACKSPACE:
                         pending.clear()
@@ -1680,6 +1725,7 @@ class _R1PygameSession:
                 history_counts=history_counts,
                 pressure_levels=pressure_levels,
                 command_focus_timestep=self._last_committed_t,
+                command_focus_timesteps=self._command_focus_timesteps,
                 mouse_pos=self.pg.mouse.get_pos(),
             )
             current_buttons, page, _, _ = self._draw_controls(

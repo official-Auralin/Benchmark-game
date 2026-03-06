@@ -607,6 +607,7 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertTrue(any(cell.in_viewport for cell in cells))
         self.assertTrue(any(cell.in_objective_window for cell in cells))
         self.assertFalse(any(cell.is_command_focus for cell in cells))
+        self.assertTrue(all(cell.focus_age is None for cell in cells))
 
     def test_build_sector_board_cells_clamps_pressure_levels(self) -> None:
         cells = _build_sector_board_cells(
@@ -667,6 +668,26 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertTrue(
             any(int(cell.start_t) <= 9 <= int(cell.end_t) for cell in focused)
         )
+        self.assertTrue(any(cell.focus_age == 0 for cell in focused))
+
+    def test_build_sector_board_cells_assigns_focus_ages_from_trail(self) -> None:
+        cells = _build_sector_board_cells(
+            max_t=23,
+            timestep=5,
+            t_star=18,
+            start_t=4,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={},
+            pressure_levels={},
+            focus_timesteps=[9, 3, 20],
+            cols=8,
+            rows=6,
+        )
+        self.assertTrue(any(cell.focus_age == 0 for cell in cells))
+        self.assertTrue(any(cell.focus_age == 1 for cell in cells))
+        self.assertTrue(any(cell.focus_age == 2 for cell in cells))
 
     def test_sector_board_hover_summary_without_cell(self) -> None:
         self.assertIn("Hover", _sector_board_hover_summary(None))

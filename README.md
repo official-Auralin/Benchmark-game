@@ -103,9 +103,9 @@ Visual renderer notes (both backends):
   `N/T/B` markers for now/target/both).
 - In `pygame` mode, hover a sector-board cell to inspect the represented
   timestep bucket (`t` range, pressure token, edit token, and marker).
-- In `pygame` mode, the sector-board border uses green to show the most recent
-  committed-command timestep bucket (`last command focus`), linking command and
-  observed response views without exposing hidden state.
+- In `pygame` mode, the sector-board border shows a short command-focus trail:
+  green = most recent command bucket, cyan = previous, blue = third-most-recent.
+  This links command and observed-response views without exposing hidden state.
 - In `pygame` mode, closing the window aborts the interactive run (it is not
   treated as a `skip`/no-op action).
 - In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP
