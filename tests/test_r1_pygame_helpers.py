@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from gf01.renderers.r1_pygame import (
+from gf01.renderers.r1_pygame_helpers import (
     _CommandResponseTrailModel,
     _SectorPressureHistoryModel,
     _WaveStripModel,

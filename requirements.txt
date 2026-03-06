@@ -1,0 +1,5 @@
+# Public-scope runtime dependencies for the mirrored repository only.
+# Keep local-only or private-repo tooling out of this file.
+# The core CLI is stdlib-only; pygame-ce is required only for
+# `python -m gf01 play --renderer-track visual --visual-backend pygame`.
+pygame-ce>=2.5
