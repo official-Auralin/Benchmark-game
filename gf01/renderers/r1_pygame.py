@@ -19,6 +19,7 @@ __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
+import json
 from dataclasses import dataclass
 from collections import OrderedDict, defaultdict
 from collections.abc import Mapping
@@ -38,6 +39,9 @@ COMMAND_RESPONSE_MAX_ENTRIES = 4
 COMMAND_RESPONSE_MAX_VISIBLE = 3
 SECTOR_PRESSURE_BANDS = 10
 SECTOR_PRESSURE_HISTORY_MAX = 256
+TIMELINE_MINIMAP_CHARS = 48
+SECTOR_BOARD_COLS = 8
+SECTOR_BOARD_ROWS = 6
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,19 @@ class _Button:
 
     def contains(self, px: int, py: int) -> bool:
         return self.x <= px <= self.x + self.w and self.y <= py <= self.y + self.h
+
+
+@dataclass(frozen=True)
+class _SectorBoardCell:
+    row: int
+    col: int
+    start_t: int
+    end_t: int
+    pressure_level: int | None
+    edits: int
+    marker: str
+    in_viewport: bool
+    in_objective_window: bool
 
 
 def _paginate_input_aps(
@@ -218,6 +235,175 @@ def _objective_window_pressure_summary(
     )
 
 
+def _build_timeline_minimap(
+    *,
+    max_t: int,
+    start_t: int,
+    end_t: int,
+    timestep: int,
+    t_star: int,
+    window_start: int,
+    window_end: int,
+    history_counts: Mapping[int, int],
+    pressure_levels: Mapping[int, int],
+    width: int = TIMELINE_MINIMAP_CHARS,
+) -> str:
+    chars = max(8, int(width))
+    horizon = max(0, int(max_t))
+    if chars == 1:
+        return "N"
+    if horizon == 0:
+        base = ["." for _ in range(chars)]
+        idx = 0
+        if int(timestep) == int(t_star):
+            base[idx] = "B"
+        elif int(timestep) == 0:
+            base[idx] = "N"
+        elif int(t_star) == 0:
+            base[idx] = "T"
+        base[idx] = "["
+        base[-1] = "]"
+        return "".join(base)
+
+    def _sample_t(col: int) -> int:
+        return int(round(col * horizon / float(chars - 1)))
+
+    strip: list[str] = []
+    for col in range(chars):
+        t = _sample_t(col)
+        token = "."
+        if int(window_start) <= t <= int(window_end):
+            token = "w"
+        if int(history_counts.get(t, 0)) > 0:
+            token = "e"
+        if t in pressure_levels:
+            token = "p"
+        if t == int(timestep) and t == int(t_star):
+            token = "B"
+        elif t == int(timestep):
+            token = "N"
+        elif t == int(t_star):
+            token = "T"
+        strip.append(token)
+
+    start_idx = int(round(max(0, int(start_t)) * (chars - 1) / float(horizon)))
+    end_idx = int(round(max(0, int(end_t)) * (chars - 1) / float(horizon)))
+    start_idx = max(0, min(chars - 1, start_idx))
+    end_idx = max(0, min(chars - 1, end_idx))
+    if end_idx < start_idx:
+        start_idx, end_idx = end_idx, start_idx
+    strip[start_idx] = "["
+    strip[end_idx] = "]"
+    return "".join(strip)
+
+
+def _sector_bucket_bounds(
+    *, index: int, bucket_count: int, max_t: int
+) -> tuple[int, int]:
+    horizon = max(1, int(max_t) + 1)
+    bucket_n = max(1, int(bucket_count))
+    idx = min(max(0, int(index)), bucket_n - 1)
+    start = (idx * horizon) // bucket_n
+    end = ((idx + 1) * horizon) // bucket_n - 1
+    if end < start:
+        end = start
+    max_step = max(0, int(max_t))
+    return (min(start, max_step), min(end, max_step))
+
+
+def _build_sector_board_cells(
+    *,
+    max_t: int,
+    timestep: int,
+    t_star: int,
+    start_t: int,
+    end_t: int,
+    window_start: int,
+    window_end: int,
+    history_counts: Mapping[int, int],
+    pressure_levels: Mapping[int, int],
+    cols: int = SECTOR_BOARD_COLS,
+    rows: int = SECTOR_BOARD_ROWS,
+) -> list[_SectorBoardCell]:
+    clamped_max_t = max(0, int(max_t))
+    cols_n = max(2, int(cols))
+    rows_n = max(2, int(rows))
+    bucket_count = cols_n * rows_n
+    t_now = int(timestep)
+    t_target = int(t_star)
+    view_start = int(start_t)
+    view_end = int(end_t)
+    objective_start = int(window_start)
+    objective_end = int(window_end)
+    cells: list[_SectorBoardCell] = []
+    for idx in range(bucket_count):
+        row = idx // cols_n
+        col = idx % cols_n
+        bucket_start, bucket_end = _sector_bucket_bounds(
+            index=idx,
+            bucket_count=bucket_count,
+            max_t=clamped_max_t,
+        )
+        if bucket_end < bucket_start:
+            bucket_end = bucket_start
+
+        marker = ""
+        now_in = bucket_start <= t_now <= bucket_end
+        target_in = bucket_start <= t_target <= bucket_end
+        if now_in and target_in:
+            marker = "B"
+        elif now_in:
+            marker = "N"
+        elif target_in:
+            marker = "T"
+
+        in_viewport = not (bucket_end < view_start or bucket_start > view_end)
+        in_objective_window = not (
+            bucket_end < objective_start or bucket_start > objective_end
+        )
+
+        edits = 0
+        for t_key, count in history_counts.items():
+            t_val = int(t_key)
+            if bucket_start <= t_val <= bucket_end:
+                edits += max(0, int(count))
+
+        pressure_level: int | None = None
+        for t_key, level in pressure_levels.items():
+            t_val = int(t_key)
+            if bucket_start <= t_val <= bucket_end:
+                clamped = max(0, min(SECTOR_PRESSURE_BANDS, int(level)))
+                pressure_level = (
+                    clamped if pressure_level is None else max(pressure_level, clamped)
+                )
+
+        cells.append(
+            _SectorBoardCell(
+                row=row,
+                col=col,
+                start_t=bucket_start,
+                end_t=bucket_end,
+                pressure_level=pressure_level,
+                edits=edits,
+                marker=marker,
+                in_viewport=in_viewport,
+                in_objective_window=in_objective_window,
+            )
+        )
+    return cells
+
+
+def _sector_board_hover_summary(cell: _SectorBoardCell | None) -> str:
+    if cell is None:
+        return "Hover a board cell for sector-range details."
+    marker_part = "marker=." if not cell.marker else f"marker={cell.marker}"
+    return (
+        f"t={cell.start_t}..{cell.end_t} | "
+        f"{_pressure_token(cell.pressure_level)} | "
+        f"{_edits_token(cell.edits)} | {marker_part}"
+    )
+
+
 def _timeline_window_bounds(
     *,
     timestep: int,
@@ -268,10 +454,70 @@ def _help_overlay_lines() -> list[str]:
         "Keys: Left/Right page APs | +/- AP density.",
         "Keys: [ / ] timeline zoom (narrow/wide).",
         "Keys: G AP group filter | C collapse/expand map rows.",
+        "Keys: I canonical observation inspector toggle.",
         "Keys: Enter commit | Esc skip | Backspace clear all.",
         "Tip: read Previous command, Output delta, and Wave strip together.",
         "Press H to hide/show this panel.",
     ]
+
+
+def _canonical_exposure_payload(
+    *,
+    last_obs: dict[str, object] | None,
+    timestep: int,
+    instance: "GF01Instance",
+    objective_text: str,
+) -> dict[str, object]:
+    mission = {
+        "objective_text": str(objective_text),
+        "effect_ap": str(instance.effect_ap),
+        "t_star": int(instance.t_star),
+        "mode": str(instance.mode),
+        "budget_timestep": int(instance.budget_timestep),
+        "budget_atoms": int(instance.budget_atoms),
+        "timestep_prompt": int(timestep),
+    }
+    if last_obs is None:
+        return {"mission": mission, "observation": None}
+    canonical_order = [
+        "t",
+        "y_t",
+        "effect_status_t",
+        "budget_t_remaining",
+        "budget_a_remaining",
+        "history_atoms",
+        "mode",
+        "t_star",
+    ]
+    observation: dict[str, object] = {}
+    for key in canonical_order:
+        if key in last_obs:
+            observation[key] = last_obs[key]
+    return {"mission": mission, "observation": observation}
+
+
+def _observation_inspector_lines(payload: dict[str, object]) -> list[str]:
+    mission = payload.get("mission", {})
+    observation = payload.get("observation", None)
+    lines = ["Canonical observation inspector (I): I(s)"]
+    lines.append(
+        _truncate_ui_text(
+            "mission: "
+            + json.dumps(mission, sort_keys=True, separators=(",", ":")),
+            max_len=96,
+        )
+    )
+    if observation is None:
+        lines.append("observation: (none yet)")
+    else:
+        lines.append(
+            _truncate_ui_text(
+                "observation: "
+                + json.dumps(observation, sort_keys=True, separators=(",", ":")),
+                max_len=96,
+            )
+        )
+    return lines
 
 
 def _ap_group_key(ap: str) -> str:
@@ -595,6 +841,7 @@ class _R1PygameSession:
         self._sector_pressure_history = _SectorPressureHistoryModel()
         self._command_response_trail = _CommandResponseTrailModel()
         self._show_help_overlay = True
+        self._show_observation_inspector = False
 
     def _draw_text(
         self,
@@ -736,6 +983,24 @@ class _R1PygameSession:
             small=True,
             color=(176, 191, 216),
         )
+        minimap = _build_timeline_minimap(
+            max_t=max_t,
+            start_t=start_t,
+            end_t=end_t,
+            timestep=timestep,
+            t_star=t_star,
+            window_start=window_start,
+            window_end=window_end,
+            history_counts=history_counts,
+            pressure_levels=observed_pressure,
+        )
+        self._draw_text(
+            f"minimap: {minimap}",
+            x0,
+            y0 + 140,
+            small=True,
+            color=(176, 191, 216),
+        )
         if t_star < start_t:
             self._draw_text(
                 "target t* is left of view (press ] to widen or advance time)",
@@ -752,6 +1017,135 @@ class _R1PygameSession:
                 small=True,
                 color=(214, 194, 138),
             )
+
+    def _draw_sector_board(
+        self,
+        *,
+        max_t: int,
+        timestep: int,
+        t_star: int,
+        start_t: int,
+        end_t: int,
+        window_start: int,
+        window_end: int,
+        history_counts: Mapping[int, int],
+        pressure_levels: Mapping[int, int],
+        mouse_pos: tuple[int, int] | None = None,
+    ) -> None:
+        x = 620
+        y = 390
+        w = 540
+        h = 178
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(24, 34, 50),
+            border=(102, 124, 156),
+            border_width=2,
+        )
+        self._draw_text("Sector board (sampled full horizon):", x + 14, y + 10, small=True)
+        self._draw_text(
+            "Borders: bright=in viewport, amber=now/target | fill=observed pressure",
+            x + 14,
+            y + 30,
+            small=True,
+            color=(176, 191, 216),
+        )
+        cells = _build_sector_board_cells(
+            max_t=max_t,
+            timestep=timestep,
+            t_star=t_star,
+            start_t=start_t,
+            end_t=end_t,
+            window_start=window_start,
+            window_end=window_end,
+            history_counts=history_counts,
+            pressure_levels=pressure_levels,
+        )
+        cell_size = 18
+        gap = 4
+        board_x = x + 14
+        board_y = y + 52
+        hovered_cell: _SectorBoardCell | None = None
+        for cell in cells:
+            cx = board_x + cell.col * (cell_size + gap)
+            cy = board_y + cell.row * (cell_size + gap)
+            fill = (38, 48, 66)
+            if cell.in_objective_window:
+                fill = (58, 65, 80)
+            if cell.pressure_level is not None:
+                fill = _sector_pressure_fill(cell.pressure_level)
+                if cell.in_objective_window:
+                    fill = tuple(min(255, channel + 18) for channel in fill)
+            if cell.edits > 0:
+                fill = tuple(min(255, channel + 10) for channel in fill)
+            border = (76, 92, 118)
+            if cell.in_viewport:
+                border = (164, 184, 214)
+            if cell.marker:
+                border = (212, 188, 122)
+            rect = self.pg.Rect(cx, cy, cell_size, cell_size)
+            if mouse_pos is not None and rect.collidepoint(mouse_pos):
+                hovered_cell = cell
+                border = (230, 220, 162)
+            self._draw_rect(
+                cx,
+                cy,
+                cell_size,
+                cell_size,
+                fill=fill,
+                border=border,
+                border_width=2 if cell.marker else 1,
+            )
+            if cell.marker:
+                self._draw_text(
+                    cell.marker,
+                    cx + 5,
+                    cy + 2,
+                    small=True,
+                    color=(18, 24, 34),
+                )
+
+        self._draw_text(
+            _truncate_ui_text(_sector_board_hover_summary(hovered_cell), max_len=66),
+            x + 220,
+            y + 144,
+            small=True,
+            color=(198, 212, 234),
+        )
+        self._draw_text(
+            _truncate_ui_text(
+                "Hot sectors: " + _format_top_pressure_summary(pressure_levels, max_items=4),
+                max_len=66,
+            ),
+            x + 220,
+            y + 56,
+            small=True,
+            color=(198, 212, 234),
+        )
+        self._draw_text(
+            f"window t={window_start}..{window_end} | viewport t={start_t}..{end_t}",
+            x + 220,
+            y + 78,
+            small=True,
+            color=(176, 191, 216),
+        )
+        self._draw_text(
+            f"horizon sectors: {max_t + 1} sampled into {SECTOR_BOARD_ROWS}x{SECTOR_BOARD_COLS}",
+            x + 220,
+            y + 100,
+            small=True,
+            color=(176, 191, 216),
+        )
+        self._draw_text(
+            "Cell labels: N=now, T=target, B=both",
+            x + 220,
+            y + 122,
+            small=True,
+            color=(176, 191, 216),
+        )
 
     def _draw_help_overlay(self) -> None:
         lines = _help_overlay_lines()
@@ -777,6 +1171,45 @@ class _R1PygameSession:
                 color=color,
                 small=(idx != 0),
                 title=False,
+            )
+
+    def _draw_observation_inspector(
+        self,
+        *,
+        last_obs: dict[str, object] | None,
+        timestep: int,
+        instance: "GF01Instance",
+        objective_text: str,
+    ) -> None:
+        lines = _observation_inspector_lines(
+            _canonical_exposure_payload(
+                last_obs=last_obs,
+                timestep=timestep,
+                instance=instance,
+                objective_text=objective_text,
+            )
+        )
+        x = 620
+        y = 520
+        w = 540
+        h = 30 + len(lines) * 22
+        self._draw_rect(
+            x,
+            y,
+            w,
+            h,
+            fill=(24, 34, 50),
+            border=(115, 136, 168),
+            border_width=2,
+        )
+        for idx, line in enumerate(lines):
+            color = (229, 236, 250) if idx == 0 else (206, 216, 234)
+            self._draw_text(
+                line,
+                x + 14,
+                y + 10 + idx * 22,
+                small=True,
+                color=color,
             )
 
     def _draw_onboarding_strip(self, *, timestep: int) -> None:
@@ -980,6 +1413,7 @@ class _R1PygameSession:
             self._sector_pressure_history.reset()
             self._command_response_trail.reset()
             self._show_help_overlay = True
+            self._show_observation_inspector = False
         previous_y_t = self._previous_observed_y_t
         current_y_t = _normalize_binary_map(
             None if last_obs is None else last_obs.get("y_t", {})
@@ -1043,6 +1477,10 @@ class _R1PygameSession:
                         pending.clear()
                     if event.key == self.pg.K_h:
                         self._show_help_overlay = not self._show_help_overlay
+                    if event.key == self.pg.K_i:
+                        self._show_observation_inspector = (
+                            not self._show_observation_inspector
+                        )
                     if event.key in (self.pg.K_LEFT, self.pg.K_PAGEUP):
                         page = max(0, page - 1)
                     if event.key in (self.pg.K_RIGHT, self.pg.K_PAGEDOWN):
@@ -1111,6 +1549,19 @@ class _R1PygameSession:
             self._draw_command_response_lane(x=620, y=278)
 
             history_atoms = [] if last_obs is None else last_obs.get("history_atoms", [])
+            history_counts = history_counts_by_t(history_atoms)
+            max_t = max([0, int(timestep), int(instance.t_star), *history_counts.keys()])
+            window_start, window_end = _objective_window_bounds(
+                mode=str(instance.mode),
+                t_star=int(instance.t_star),
+                window_size=int(instance.window_size),
+            )
+            start_t, end_t = _timeline_window_bounds(
+                timestep=int(timestep),
+                t_star=int(instance.t_star),
+                history_counts=history_counts,
+                span=timeline_span,
+            )
             self._draw_timeline(
                 timestep=timestep,
                 t_star=int(instance.t_star),
@@ -1119,6 +1570,18 @@ class _R1PygameSession:
                 history_atoms=history_atoms,
                 timeline_span=timeline_span,
                 pressure_levels=pressure_levels,
+            )
+            self._draw_sector_board(
+                max_t=max_t,
+                timestep=int(timestep),
+                t_star=int(instance.t_star),
+                start_t=start_t,
+                end_t=end_t,
+                window_start=window_start,
+                window_end=window_end,
+                history_counts=history_counts,
+                pressure_levels=pressure_levels,
+                mouse_pos=self.pg.mouse.get_pos(),
             )
             current_buttons, page, _, _ = self._draw_controls(
                 input_aps=visible_pool,
@@ -1200,13 +1663,20 @@ class _R1PygameSession:
                 "Click 0/1 to set AP value, clear to unset | 1..9,0 cycle APs | "
                 "Enter=commit | Esc=skip | Backspace=clear all | "
                 "Left/Right=AP page | +/-=AP density | [ ]=timeline zoom | "
-                "G=group | C=collapse | H=help",
+                "G=group | C=collapse | H=help | I=inspector",
                 100,
                 footer_y,
                 small=True,
             )
             if self._show_help_overlay:
                 self._draw_help_overlay()
+            if self._show_observation_inspector:
+                self._draw_observation_inspector(
+                    last_obs=last_obs,
+                    timestep=timestep,
+                    instance=instance,
+                    objective_text=objective_text,
+                )
             self.pg.display.flip()
 
 

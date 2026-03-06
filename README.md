@@ -96,6 +96,13 @@ Visual renderer notes (both backends):
   coverage summary (`observed/total`, peak sector token, and average pressure).
 - In `pygame` mode, `[`/`]` zoom the visible timeline window (narrow/wide) so
   long traces remain readable without shrinking each sector cell.
+- In `pygame` mode, a compact timeline minimap strip shows the full horizon and
+  current viewport window at a glance (`[` and `]` mark the visible range).
+- In `pygame` mode, a sampled rectangular `Sector board` panel shows the full
+  horizon as a grid (viewport-highlighted cells, objective-window tint, and
+  `N/T/B` markers for now/target/both).
+- In `pygame` mode, hover a sector-board cell to inspect the represented
+  timestep bucket (`t` range, pressure token, edit token, and marker).
 - In `pygame` mode, closing the window aborts the interactive run (it is not
   treated as a `skip`/no-op action).
 - In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP
@@ -108,6 +115,9 @@ Visual renderer notes (both backends):
   group=`ALL`, AP rows are collapsed until a specific group is selected.
 - In `pygame` mode, `H` toggles an in-session quick-help overlay with control
   reminders and action->effect reading tips.
+- In `pygame` mode, `I` toggles a canonical observation inspector that shows
+  mission metadata plus the full canonical observation payload (`O(s)`) for
+  parity with agent-visible information.
 - The pygame control header also shows a compact AP-group summary for the
   current page (e.g., `groups: in(6), sensor(4)`).
 - The timeline rail includes:

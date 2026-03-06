@@ -10,11 +10,13 @@ used by the visual backend.
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from gf01.renderers.r1_pygame import (
     _CommandResponseTrailModel,
     _SectorPressureHistoryModel,
     _WaveStripModel,
+    _canonical_exposure_payload,
     _apply_group_filter,
     _ap_group_key,
     _clamp_page_size,
@@ -29,6 +31,7 @@ from gf01.renderers.r1_pygame import (
     _normalize_binary_map,
     _onboarding_strip_lines,
     _objective_window_bounds,
+    _observation_inspector_lines,
     _paginate_input_aps,
     _pressure_token,
     _pressure_level_from_observation,
@@ -40,6 +43,9 @@ from gf01.renderers.r1_pygame import (
     _summarize_committed_action,
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
+    _build_sector_board_cells,
+    _sector_board_hover_summary,
+    _build_timeline_minimap,
     _timeline_mark,
     _timeline_window_bounds,
     _truncate_ui_text,
@@ -141,7 +147,68 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertTrue(any("Output delta" in line for line in lines))
         self.assertTrue(any("collapse" in line.lower() for line in lines))
         self.assertTrue(any("timeline zoom" in line for line in lines))
+        self.assertTrue(any("inspector" in line.lower() for line in lines))
         self.assertTrue(any("Press H" in line for line in lines))
+
+    def test_canonical_exposure_payload_without_observation(self) -> None:
+        instance = SimpleNamespace(
+            effect_ap="out0",
+            t_star=7,
+            mode="normal",
+            budget_timestep=3,
+            budget_atoms=9,
+        )
+        payload = _canonical_exposure_payload(
+            last_obs=None,
+            timestep=0,
+            instance=instance,
+            objective_text="Goal text",
+        )
+        mission = payload["mission"]
+        self.assertEqual(mission["effect_ap"], "out0")
+        self.assertEqual(mission["t_star"], 7)
+        self.assertEqual(payload["observation"], None)
+
+    def test_canonical_exposure_payload_with_observation_uses_canonical_keys(self) -> None:
+        instance = SimpleNamespace(
+            effect_ap="out0",
+            t_star=5,
+            mode="hard",
+            budget_timestep=2,
+            budget_atoms=4,
+        )
+        payload = _canonical_exposure_payload(
+            last_obs={
+                "t": 2,
+                "y_t": {"out0": 1},
+                "effect_status_t": "triggered",
+                "budget_t_remaining": 1,
+                "budget_a_remaining": 3,
+                "history_atoms": [[0, "in0", 1]],
+                "mode": "hard",
+                "t_star": 5,
+                "non_canonical": "ignore",
+            },
+            timestep=3,
+            instance=instance,
+            objective_text="Goal text",
+        )
+        observation = payload["observation"]
+        self.assertIsInstance(observation, dict)
+        self.assertIn("history_atoms", observation)
+        self.assertNotIn("non_canonical", observation)
+
+    def test_observation_inspector_lines_render_mission_and_observation_json(self) -> None:
+        lines = _observation_inspector_lines(
+            {
+                "mission": {"effect_ap": "out0", "mode": "normal"},
+                "observation": {"t": 1, "y_t": {"out0": 1}},
+            }
+        )
+        self.assertGreaterEqual(len(lines), 3)
+        self.assertIn("inspector", lines[0].lower())
+        self.assertIn("mission:", lines[1])
+        self.assertIn("observation:", lines[2])
 
     def test_ap_group_key(self) -> None:
         self.assertEqual(_ap_group_key("in0"), "in")
@@ -455,6 +522,101 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertLessEqual(start, 5)
         self.assertGreaterEqual(end, 5)
         self.assertEqual(end - start + 1, 12)
+
+    def test_build_timeline_minimap_contains_window_and_markers(self) -> None:
+        minimap = _build_timeline_minimap(
+            max_t=20,
+            start_t=4,
+            end_t=12,
+            timestep=7,
+            t_star=15,
+            window_start=10,
+            window_end=15,
+            history_counts={3: 1, 8: 2},
+            pressure_levels={5: 3, 11: 7},
+            width=32,
+        )
+        self.assertEqual(len(minimap), 32)
+        self.assertIn("[", minimap)
+        self.assertIn("]", minimap)
+        self.assertIn("N", minimap)
+        self.assertIn("T", minimap)
+
+    def test_build_timeline_minimap_marks_shared_now_target_with_b(self) -> None:
+        minimap = _build_timeline_minimap(
+            max_t=10,
+            start_t=0,
+            end_t=5,
+            timestep=4,
+            t_star=4,
+            window_start=2,
+            window_end=6,
+            history_counts={},
+            pressure_levels={},
+            width=24,
+        )
+        self.assertIn("B", minimap)
+
+    def test_build_sector_board_cells_assigns_markers_and_flags(self) -> None:
+        cells = _build_sector_board_cells(
+            max_t=23,
+            timestep=5,
+            t_star=18,
+            start_t=4,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={5: 1, 6: 2, 18: 1},
+            pressure_levels={4: 3, 8: 7, 18: 9},
+            cols=8,
+            rows=6,
+        )
+        self.assertEqual(len(cells), 48)
+        self.assertTrue(any(cell.marker == "N" for cell in cells))
+        self.assertTrue(any(cell.marker == "T" for cell in cells))
+        self.assertTrue(any(cell.in_viewport for cell in cells))
+        self.assertTrue(any(cell.in_objective_window for cell in cells))
+
+    def test_build_sector_board_cells_clamps_pressure_levels(self) -> None:
+        cells = _build_sector_board_cells(
+            max_t=7,
+            timestep=3,
+            t_star=3,
+            start_t=0,
+            end_t=7,
+            window_start=0,
+            window_end=7,
+            history_counts={},
+            pressure_levels={3: 99},
+            cols=4,
+            rows=2,
+        )
+        levels = [cell.pressure_level for cell in cells if cell.pressure_level is not None]
+        self.assertTrue(levels)
+        self.assertTrue(all(level <= 10 for level in levels))
+        self.assertTrue(any(cell.marker == "B" for cell in cells))
+
+    def test_sector_board_hover_summary_for_cell(self) -> None:
+        cell = _build_sector_board_cells(
+            max_t=7,
+            timestep=2,
+            t_star=5,
+            start_t=0,
+            end_t=7,
+            window_start=4,
+            window_end=6,
+            history_counts={2: 1},
+            pressure_levels={2: 6},
+            cols=4,
+            rows=2,
+        )[2]
+        summary = _sector_board_hover_summary(cell)
+        self.assertIn("t=", summary)
+        self.assertIn("P", summary)
+        self.assertIn("E", summary)
+
+    def test_sector_board_hover_summary_without_cell(self) -> None:
+        self.assertIn("Hover", _sector_board_hover_summary(None))
 
     def test_objective_window_bounds_hard_mode(self) -> None:
         self.assertEqual(
