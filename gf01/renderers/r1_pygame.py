@@ -39,6 +39,7 @@ COMMAND_RESPONSE_MAX_ENTRIES = 4
 COMMAND_RESPONSE_MAX_VISIBLE = 3
 SECTOR_PRESSURE_BANDS = 10
 SECTOR_PRESSURE_HISTORY_MAX = 256
+TIMELINE_MINIMAP_CHARS = 48
 
 
 @dataclass(frozen=True)
@@ -217,6 +218,68 @@ def _objective_window_pressure_summary(
         f"Window pressure: {len(observed)}/{total} observed, "
         f"peak t={peak_t}:{_pressure_token(peak_level)}, avg={avg:.1f}"
     )
+
+
+def _build_timeline_minimap(
+    *,
+    max_t: int,
+    start_t: int,
+    end_t: int,
+    timestep: int,
+    t_star: int,
+    window_start: int,
+    window_end: int,
+    history_counts: Mapping[int, int],
+    pressure_levels: Mapping[int, int],
+    width: int = TIMELINE_MINIMAP_CHARS,
+) -> str:
+    chars = max(8, int(width))
+    horizon = max(0, int(max_t))
+    if chars == 1:
+        return "N"
+    if horizon == 0:
+        base = ["." for _ in range(chars)]
+        idx = 0
+        if int(timestep) == int(t_star):
+            base[idx] = "B"
+        elif int(timestep) == 0:
+            base[idx] = "N"
+        elif int(t_star) == 0:
+            base[idx] = "T"
+        base[idx] = "["
+        base[-1] = "]"
+        return "".join(base)
+
+    def _sample_t(col: int) -> int:
+        return int(round(col * horizon / float(chars - 1)))
+
+    strip: list[str] = []
+    for col in range(chars):
+        t = _sample_t(col)
+        token = "."
+        if int(window_start) <= t <= int(window_end):
+            token = "w"
+        if int(history_counts.get(t, 0)) > 0:
+            token = "e"
+        if t in pressure_levels:
+            token = "p"
+        if t == int(timestep) and t == int(t_star):
+            token = "B"
+        elif t == int(timestep):
+            token = "N"
+        elif t == int(t_star):
+            token = "T"
+        strip.append(token)
+
+    start_idx = int(round(max(0, int(start_t)) * (chars - 1) / float(horizon)))
+    end_idx = int(round(max(0, int(end_t)) * (chars - 1) / float(horizon)))
+    start_idx = max(0, min(chars - 1, start_idx))
+    end_idx = max(0, min(chars - 1, end_idx))
+    if end_idx < start_idx:
+        start_idx, end_idx = end_idx, start_idx
+    strip[start_idx] = "["
+    strip[end_idx] = "]"
+    return "".join(strip)
 
 
 def _timeline_window_bounds(
@@ -795,6 +858,24 @@ class _R1PygameSession:
             ),
             x0,
             y0 + 126,
+            small=True,
+            color=(176, 191, 216),
+        )
+        minimap = _build_timeline_minimap(
+            max_t=max_t,
+            start_t=start_t,
+            end_t=end_t,
+            timestep=timestep,
+            t_star=t_star,
+            window_start=window_start,
+            window_end=window_end,
+            history_counts=history_counts,
+            pressure_levels=observed_pressure,
+        )
+        self._draw_text(
+            f"minimap: {minimap}",
+            x0,
+            y0 + 140,
             small=True,
             color=(176, 191, 216),
         )

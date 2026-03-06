@@ -43,6 +43,7 @@ from gf01.renderers.r1_pygame import (
     _summarize_committed_action,
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
+    _build_timeline_minimap,
     _timeline_mark,
     _timeline_window_bounds,
     _truncate_ui_text,
@@ -519,6 +520,40 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertLessEqual(start, 5)
         self.assertGreaterEqual(end, 5)
         self.assertEqual(end - start + 1, 12)
+
+    def test_build_timeline_minimap_contains_window_and_markers(self) -> None:
+        minimap = _build_timeline_minimap(
+            max_t=20,
+            start_t=4,
+            end_t=12,
+            timestep=7,
+            t_star=15,
+            window_start=10,
+            window_end=15,
+            history_counts={3: 1, 8: 2},
+            pressure_levels={5: 3, 11: 7},
+            width=32,
+        )
+        self.assertEqual(len(minimap), 32)
+        self.assertIn("[", minimap)
+        self.assertIn("]", minimap)
+        self.assertIn("N", minimap)
+        self.assertIn("T", minimap)
+
+    def test_build_timeline_minimap_marks_shared_now_target_with_b(self) -> None:
+        minimap = _build_timeline_minimap(
+            max_t=10,
+            start_t=0,
+            end_t=5,
+            timestep=4,
+            t_star=4,
+            window_start=2,
+            window_end=6,
+            history_counts={},
+            pressure_levels={},
+            width=24,
+        )
+        self.assertIn("B", minimap)
 
     def test_objective_window_bounds_hard_mode(self) -> None:
         self.assertEqual(

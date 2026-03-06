@@ -96,6 +96,8 @@ Visual renderer notes (both backends):
   coverage summary (`observed/total`, peak sector token, and average pressure).
 - In `pygame` mode, `[`/`]` zoom the visible timeline window (narrow/wide) so
   long traces remain readable without shrinking each sector cell.
+- In `pygame` mode, a compact timeline minimap strip shows the full horizon and
+  current viewport window at a glance (`[` and `]` mark the visible range).
 - In `pygame` mode, closing the window aborts the interactive run (it is not
   treated as a `skip`/no-op action).
 - In `pygame` mode, keys `1..9` and `0` cycle the corresponding visible AP
