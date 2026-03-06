@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 RESEARCH_PACK = ROOT / "research_pack"
-SPEC_PATH = ROOT / "Spec.tex"
+SPEC_PATH = ROOT / "spec" / "tex_files" / "Spec.tex"
 CLAIMS_LEDGER_PATH = RESEARCH_PACK / "04_claims_ledger.md"
 PRINCIPLES_PATH = RESEARCH_PACK / "06_design_principles.md"
 OPEN_QUESTIONS_PATH = RESEARCH_PACK / "05_open_questions.md"

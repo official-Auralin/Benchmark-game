@@ -65,7 +65,7 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
             include_paths,
             (
                 "README.md",
-                "Spec.pdf",
+                "spec/Spec.pdf",
                 ".github/workflows/gf01-gate.yml",
                 "gf01",
                 "tests",
@@ -125,7 +125,9 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
 
             # Build only the allowlisted content plus private/noise artifacts.
             (root / "README.md").write_text("readme\n", encoding="utf-8")
-            (root / "Spec.pdf").write_bytes(b"%PDF-1.4\n")
+            spec_dir = root / "spec"
+            spec_dir.mkdir()
+            (spec_dir / "Spec.pdf").write_bytes(b"%PDF-1.4\n")
             wf = root / ".github" / "workflows"
             wf.mkdir(parents=True)
             (wf / "gf01-gate.yml").write_text("name: test\njobs: {}\n", encoding="utf-8")
@@ -155,7 +157,7 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
 
             # Allowlisted paths are copied.
             self.assertTrue((target / "README.md").exists())
-            self.assertTrue((target / "Spec.pdf").exists())
+            self.assertTrue((target / "spec" / "Spec.pdf").exists())
             self.assertTrue((target / ".github" / "workflows" / "gf01-gate.yml").exists())
             self.assertTrue((target / "gf01" / "core.py").exists())
             self.assertTrue((target / "tests" / "test_ok.py").exists())

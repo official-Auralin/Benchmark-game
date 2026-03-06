@@ -5,14 +5,28 @@ family (human-playable and agent-playable temporal-causality tasks).
 
 ## What is in this repo
 
-- `Spec.pdf`: current formal specification snapshot.
+- `spec/Spec.pdf`: current formal specification snapshot.
+- `spec/tex_files/Spec.tex`: formal normative source for the benchmark spec.
+- `spec/`: compact operational spec for contracts and acceptance scenarios.
+- `docs/ARCHITECTURE.md`: system map and module-boundary guide.
+- `docs/CONTRIBUTING.md`: setup, test, spec-build, and docs-freshness workflow.
+- `requirements.txt`: public-scope contributor dependencies only.
 - `gf01/`: benchmark runtime, generator, verifier, baselines, and CLI.
 - `tests/`: regression tests and fixture artifacts.
 
 ## Requirements
 
-- Python 3.10+ (no external dependency install is required for basic use).
-- Optional for graphical human play: `pygame-ce` (`pip install pygame-ce`).
+- Python 3.10+.
+- Install mirrored/public-scope dependencies with `python3 -m pip install -r requirements.txt`.
+- `requirements.txt` intentionally excludes local-only or private-repo tooling.
+- Optional for graphical human play: `pygame-ce` is the only current external dependency.
+
+## Contributor entrypoints
+
+- Use `docs/CONTRIBUTING.md` for setup, test commands, and documentation freshness rules.
+- Use `docs/ARCHITECTURE.md` for system boundaries before changing command wiring.
+- Use `spec/contracts.md` and `spec/acceptance-tests.md` as the compact behavior contract.
+- Rebuild the formal spec PDF with `python3 scripts/build_spec.py`.
 
 ## Quick start
 

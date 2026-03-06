@@ -27,8 +27,8 @@ def is_public_mirror(root: Path) -> bool:
 
     Precedence:
     1. `GF01_REPO_SCOPE` env override (`public|public_mirror|private|source`).
-    2. Fallback marker: private source repo contains `Spec.tex`; public mirror
-       intentionally does not.
+    2. Fallback marker: private source repo contains `spec/tex_files/Spec.tex`;
+       public mirror intentionally does not.
     """
 
     scope = os.environ.get("GF01_REPO_SCOPE", "").strip().lower()
@@ -36,4 +36,4 @@ def is_public_mirror(root: Path) -> bool:
         return True
     if scope in {"private", "source"}:
         return False
-    return not (root / "Spec.tex").exists()
+    return not (root / "spec" / "tex_files" / "Spec.tex").exists()

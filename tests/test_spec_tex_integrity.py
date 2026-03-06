@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC_PATH = ROOT / "Spec.tex"
+SPEC_PATH = ROOT / "spec" / "tex_files" / "Spec.tex"
 RESEARCH_PACK = ROOT / "research_pack"
 SOURCES_BIB_PATH = RESEARCH_PACK / "01_sources" / "sources.bib"
 PRIVATE_SPEC_CHECK_PATHS = (SPEC_PATH, RESEARCH_PACK, SOURCES_BIB_PATH)
@@ -72,10 +72,10 @@ class TestSpecTexIntegrity(unittest.TestCase):
                 RESEARCH_PACK.exists(),
                 msg="public mirror should not include private research_pack/",
             )
-            # The public mirror may omit Spec.tex entirely; this test file is
-            # mirrored so private-scope logic remains regression-tested there,
-            # but Spec.tex content itself is only required in the private source
-            # repository unless mirror policy changes.
+            # The public mirror may omit the TeX source entirely; this test
+            # file is mirrored so private-scope logic remains regression-tested
+            # there, but Spec.tex content itself is only required in the
+            # private source repository unless mirror policy changes.
             return
         self.assertTrue(SPEC_PATH.exists(), msg=f"missing Spec.tex: {SPEC_PATH}")
         self.assertTrue(
