@@ -77,6 +77,7 @@ from .r1_pygame_helpers import (
     _pressure_level_from_observation,
     _pressure_token,
     _range_contains_t,
+    _sector_board_col_label,
     _ranges_overlap,
     _sector_board_cell_glyph,
     _sector_board_cell_name,
@@ -383,7 +384,7 @@ class _R1PygameSession:
         board_x = x + 36
         board_y = y + 52
         for col_idx in range(SECTOR_BOARD_COLS):
-            col_label = _sector_board_cell_name(row=0, col=col_idx)[:-1]
+            col_label = _sector_board_col_label(col_idx)
             self._draw_text(
                 col_label,
                 board_x + col_idx * (cell_size + gap) + 5,

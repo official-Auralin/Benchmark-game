@@ -505,13 +505,22 @@ def _sector_board_hover_summary(cell: _SectorBoardCell | None) -> str:
     )
 
 
-def _sector_board_cell_name(*, row: int, col: int) -> str:
+def _sector_board_col_label(col: int) -> str:
     col_idx = max(0, int(col))
-    if col_idx < 26:
-        col_token = chr(ord("A") + col_idx)
-    else:
-        col_token = f"C{col_idx + 1}"
-    return f"{col_token}{max(1, int(row) + 1)}"
+    # Spreadsheet-style labels scale naturally if the board grows past 26 cols.
+    token: list[str] = []
+    value = col_idx
+    while True:
+        value, remainder = divmod(value, 26)
+        token.append(chr(ord("A") + remainder))
+        if value == 0:
+            break
+        value -= 1
+    return "".join(reversed(token))
+
+
+def _sector_board_cell_name(*, row: int, col: int) -> str:
+    return f"{_sector_board_col_label(col)}{max(1, int(row) + 1)}"
 
 
 def _sector_board_cell_glyph(cell: _SectorBoardCell) -> str:
