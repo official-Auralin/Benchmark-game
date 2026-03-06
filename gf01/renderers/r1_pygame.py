@@ -340,6 +340,14 @@ def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
     return not (high_a < low_b or low_a > high_b)
 
 
+def _range_contains_t(bounds: tuple[int, int] | None, t: int) -> bool:
+    if bounds is None:
+        return False
+    low = min(int(bounds[0]), int(bounds[1]))
+    high = max(int(bounds[0]), int(bounds[1]))
+    return low <= int(t) <= high
+
+
 def _bucket_marker(bucket_start: int, bucket_end: int, *, t_now: int, t_target: int) -> str:
     now_in = int(bucket_start) <= int(t_now) <= int(bucket_end)
     target_in = int(bucket_start) <= int(t_target) <= int(bucket_end)
@@ -942,6 +950,7 @@ class _R1PygameSession:
         self._sector_pressure_history = _SectorPressureHistoryModel()
         self._command_response_trail = _CommandResponseTrailModel()
         self._command_focus_timesteps: list[int] = []
+        self._hovered_sector_range: tuple[int, int] | None = None
         self._show_help_overlay = True
         self._show_observation_inspector = False
 
@@ -1002,6 +1011,7 @@ class _R1PygameSession:
         history_atoms: object,
         timeline_span: int,
         pressure_levels: Mapping[int, int] | None = None,
+        linked_range: tuple[int, int] | None = None,
     ) -> None:
         history_counts = history_counts_by_t(history_atoms)
         observed_pressure: Mapping[int, int] = pressure_levels or {}
@@ -1036,7 +1046,20 @@ class _R1PygameSession:
             if history_counts.get(t, 0) > 0:
                 # Slightly brighter when interventions happened at t.
                 fill = tuple(min(255, c + 30) for c in fill)
-            self._draw_rect(x, y0, cell_w, 30, fill=fill)
+            border = (70, 85, 110)
+            border_w = 1
+            if _range_contains_t(linked_range, t):
+                border = (128, 196, 166)
+                border_w = 2
+            self._draw_rect(
+                x,
+                y0,
+                cell_w,
+                30,
+                fill=fill,
+                border=border,
+                border_width=border_w,
+            )
             level = observed_pressure.get(t)
             if level is not None:
                 self._draw_pressure_band(x=x, y0=y0, cell_w=cell_w, level=level)
@@ -1060,7 +1083,7 @@ class _R1PygameSession:
             )
         self._draw_text("marks: N=now, T=target, B=both", x0, y0 + 66, small=True)
         self._draw_text(
-            "P=row pressure (0..10), E=row edits per t",
+            "P=row pressure (0..10), E=row edits per t, mint border=board hover link",
             x0,
             y0 + 80,
             small=True,
@@ -1227,6 +1250,12 @@ class _R1PygameSession:
                     small=True,
                     color=(18, 24, 34),
                 )
+
+        self._hovered_sector_range = (
+            None
+            if hovered_cell is None
+            else (int(hovered_cell.start_t), int(hovered_cell.end_t))
+        )
 
         self._draw_text(
             _truncate_ui_text(_sector_board_hover_summary(hovered_cell), max_len=66),
@@ -1553,6 +1582,7 @@ class _R1PygameSession:
             self._sector_pressure_history.reset()
             self._command_response_trail.reset()
             self._command_focus_timesteps = []
+            self._hovered_sector_range = None
             self._show_help_overlay = True
             self._show_observation_inspector = False
         previous_y_t = self._previous_observed_y_t
@@ -1705,15 +1735,6 @@ class _R1PygameSession:
                 history_counts=history_counts,
                 span=timeline_span,
             )
-            self._draw_timeline(
-                timestep=timestep,
-                t_star=int(instance.t_star),
-                mode=str(instance.mode),
-                window_size=int(instance.window_size),
-                history_atoms=history_atoms,
-                timeline_span=timeline_span,
-                pressure_levels=pressure_levels,
-            )
             self._draw_sector_board(
                 max_t=max_t,
                 timestep=int(timestep),
@@ -1727,6 +1748,16 @@ class _R1PygameSession:
                 command_focus_timestep=self._last_committed_t,
                 command_focus_timesteps=self._command_focus_timesteps,
                 mouse_pos=self.pg.mouse.get_pos(),
+            )
+            self._draw_timeline(
+                timestep=timestep,
+                t_star=int(instance.t_star),
+                mode=str(instance.mode),
+                window_size=int(instance.window_size),
+                history_atoms=history_atoms,
+                timeline_span=timeline_span,
+                pressure_levels=pressure_levels,
+                linked_range=self._hovered_sector_range,
             )
             current_buttons, page, _, _ = self._draw_controls(
                 input_aps=visible_pool,

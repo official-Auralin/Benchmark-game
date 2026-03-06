@@ -46,6 +46,7 @@ from gf01.renderers.r1_pygame import (
     _build_sector_board_cells,
     _sector_board_hover_summary,
     _build_timeline_minimap,
+    _range_contains_t,
     _timeline_mark,
     _timeline_window_bounds,
     _truncate_ui_text,
@@ -534,6 +535,12 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertLessEqual(start, 5)
         self.assertGreaterEqual(end, 5)
         self.assertEqual(end - start + 1, 12)
+
+    def test_range_contains_t(self) -> None:
+        self.assertTrue(_range_contains_t((3, 8), 4))
+        self.assertTrue(_range_contains_t((8, 3), 4))
+        self.assertFalse(_range_contains_t((3, 8), 9))
+        self.assertFalse(_range_contains_t(None, 4))
 
     def test_build_timeline_minimap_contains_window_and_markers(self) -> None:
         minimap = _build_timeline_minimap(

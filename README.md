@@ -103,6 +103,8 @@ Visual renderer notes (both backends):
   `N/T/B` markers for now/target/both).
 - In `pygame` mode, hover a sector-board cell to inspect the represented
   timestep bucket (`t` range, pressure token, edit token, and marker).
+- In `pygame` mode, sector-board hover also links to the timeline: the
+  corresponding timestep range gets a mint border in the timeline row.
 - In `pygame` mode, the sector-board border shows a short command-focus trail:
   green = most recent command bucket, cyan = previous, blue = third-most-recent.
   This links command and observed-response views without exposing hidden state.
