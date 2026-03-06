@@ -45,6 +45,7 @@ from gf01.renderers.r1_pygame_helpers import (
     _summarize_visible_ap_groups,
     _build_sector_board_cells,
     _sector_board_cell_glyph,
+    _sector_board_col_label,
     _sector_board_cell_name,
     _sector_board_hover_summary,
     _build_timeline_minimap,
@@ -704,6 +705,14 @@ class TestR1PygameHelpers(unittest.TestCase):
     def test_sector_board_cell_name(self) -> None:
         self.assertEqual(_sector_board_cell_name(row=0, col=0), "A1")
         self.assertEqual(_sector_board_cell_name(row=5, col=7), "H6")
+        self.assertEqual(_sector_board_cell_name(row=0, col=26), "AA1")
+        self.assertEqual(_sector_board_cell_name(row=1, col=27), "AB2")
+
+    def test_sector_board_col_label(self) -> None:
+        self.assertEqual(_sector_board_col_label(0), "A")
+        self.assertEqual(_sector_board_col_label(25), "Z")
+        self.assertEqual(_sector_board_col_label(26), "AA")
+        self.assertEqual(_sector_board_col_label(27), "AB")
 
     def test_sector_board_cell_glyph(self) -> None:
         cell = _build_sector_board_cells(
