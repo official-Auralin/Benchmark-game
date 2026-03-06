@@ -505,6 +505,40 @@ def _sector_board_hover_summary(cell: _SectorBoardCell | None) -> str:
     )
 
 
+def _sector_board_legend_lines() -> list[str]:
+    return [
+        "Borders: bright=viewport | amber=now/target | mint=hover link",
+        "Focus trail: green=F0 | cyan=F1 | blue=F2",
+        "Glyphs: p=pressure | e=edits | *=both | N/T/B markers",
+    ]
+
+
+def _sector_board_detail_lines(cell: _SectorBoardCell | None) -> list[str]:
+    if cell is None:
+        return [
+            "Hover a board cell for sector-range details.",
+            "Coords use spreadsheet-style labels such as A1, B3, H6.",
+        ]
+    status_tokens: list[str] = []
+    if cell.in_viewport:
+        status_tokens.append("viewport")
+    if cell.in_objective_window:
+        status_tokens.append("window")
+    if cell.marker:
+        status_tokens.append(f"marker {cell.marker}")
+    if cell.focus_age is not None:
+        status_tokens.append(f"focus F{int(cell.focus_age)}")
+    status_part = "sample only" if not status_tokens else ", ".join(status_tokens)
+    return [
+        f"Cell {_sector_board_cell_name(row=cell.row, col=cell.col)}: "
+        f"t={cell.start_t}..{cell.end_t}",
+        (
+            f"Status {status_part} | Pressure {_pressure_token(cell.pressure_level)} | "
+            f"Edits {_edits_token(cell.edits)}"
+        ),
+    ]
+
+
 def _sector_board_col_label(col: int) -> str:
     col_idx = max(0, int(col))
     # Spreadsheet-style labels scale naturally if the board grows past 26 cols.
