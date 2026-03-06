@@ -47,7 +47,9 @@ from gf01.renderers.r1_pygame_helpers import (
     _sector_board_cell_glyph,
     _sector_board_col_label,
     _sector_board_cell_name,
+    _sector_board_detail_lines,
     _sector_board_hover_summary,
+    _sector_board_legend_lines,
     _build_timeline_minimap,
     _range_contains_t,
     _timeline_mark,
@@ -701,6 +703,42 @@ class TestR1PygameHelpers(unittest.TestCase):
 
     def test_sector_board_hover_summary_without_cell(self) -> None:
         self.assertIn("Hover", _sector_board_hover_summary(None))
+
+    def test_sector_board_legend_lines(self) -> None:
+        lines = _sector_board_legend_lines()
+        self.assertEqual(len(lines), 3)
+        self.assertIn("Borders:", lines[0])
+        self.assertIn("Focus trail:", lines[1])
+        self.assertIn("Glyphs:", lines[2])
+
+    def test_sector_board_detail_lines_without_cell(self) -> None:
+        lines = _sector_board_detail_lines(None)
+        self.assertEqual(len(lines), 2)
+        self.assertIn("Hover a board cell", lines[0])
+        self.assertIn("spreadsheet-style labels", lines[1])
+
+    def test_sector_board_detail_lines_for_cell(self) -> None:
+        cell = _build_sector_board_cells(
+            max_t=7,
+            timestep=2,
+            t_star=5,
+            start_t=0,
+            end_t=7,
+            window_start=4,
+            window_end=6,
+            history_counts={2: 1},
+            pressure_levels={2: 6},
+            focus_timesteps=[2],
+            cols=4,
+            rows=2,
+        )[2]
+        lines = _sector_board_detail_lines(cell)
+        self.assertEqual(len(lines), 2)
+        self.assertIn("Cell", lines[0])
+        self.assertIn("t=", lines[0])
+        self.assertIn("Pressure", lines[1])
+        self.assertIn("Edits", lines[1])
+        self.assertIn("Focus", lines[1])
 
     def test_sector_board_cell_name(self) -> None:
         self.assertEqual(_sector_board_cell_name(row=0, col=0), "A1")

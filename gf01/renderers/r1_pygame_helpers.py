@@ -505,6 +505,32 @@ def _sector_board_hover_summary(cell: _SectorBoardCell | None) -> str:
     )
 
 
+def _sector_board_legend_lines() -> list[str]:
+    return [
+        "Borders: bright=viewport | amber=now/target | mint=hover link",
+        "Focus trail: green=F0 | cyan=F1 | blue=F2",
+        "Glyphs: p=pressure | e=edits | *=both | N/T/B markers",
+    ]
+
+
+def _sector_board_detail_lines(cell: _SectorBoardCell | None) -> list[str]:
+    if cell is None:
+        return [
+            "Hover a board cell for sector-range details.",
+            "Coords use spreadsheet-style labels such as A1, B3, H6.",
+        ]
+    marker_part = "none" if not cell.marker else cell.marker
+    focus_part = "." if cell.focus_age is None else f"F{int(cell.focus_age)}"
+    return [
+        f"Cell {_sector_board_cell_name(row=cell.row, col=cell.col)}: "
+        f"t={cell.start_t}..{cell.end_t}",
+        (
+            f"Pressure {_pressure_token(cell.pressure_level)} | "
+            f"Edits {_edits_token(cell.edits)} | Marker {marker_part} | Focus {focus_part}"
+        ),
+    ]
+
+
 def _sector_board_col_label(col: int) -> str:
     col_idx = max(0, int(col))
     # Spreadsheet-style labels scale naturally if the board grows past 26 cols.

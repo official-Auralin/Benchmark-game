@@ -81,7 +81,8 @@ from .r1_pygame_helpers import (
     _ranges_overlap,
     _sector_board_cell_glyph,
     _sector_board_cell_name,
-    _sector_board_hover_summary,
+    _sector_board_detail_lines,
+    _sector_board_legend_lines,
     _sector_bucket_bounds,
     _sector_pressure_fill,
     _summarize_committed_action,
@@ -359,13 +360,14 @@ class _R1PygameSession:
             border_width=2,
         )
         self._draw_text("Sector board (sampled full horizon):", x + 14, y + 10, small=True)
-        self._draw_text(
-            "Borders: bright=viewport, amber=now/target, green/cyan/blue=focus trail",
-            x + 14,
-            y + 30,
-            small=True,
-            color=(176, 191, 216),
-        )
+        for idx, line in enumerate(_sector_board_legend_lines()):
+            self._draw_text(
+                line,
+                x + 14,
+                y + 30 + idx * 18,
+                small=True,
+                color=(176, 191, 216),
+            )
         cells = _build_sector_board_cells(
             max_t=max_t,
             timestep=timestep,
@@ -454,13 +456,6 @@ class _R1PygameSession:
         )
 
         self._draw_text(
-            _truncate_ui_text(_sector_board_hover_summary(hovered_cell), max_len=66),
-            x + 220,
-            y + 144,
-            small=True,
-            color=(198, 212, 234),
-        )
-        self._draw_text(
             _truncate_ui_text(
                 "Hot sectors: " + _format_top_pressure_summary(pressure_levels, max_items=4),
                 max_len=66,
@@ -484,20 +479,15 @@ class _R1PygameSession:
             small=True,
             color=(176, 191, 216),
         )
-        self._draw_text(
-            "Cell labels: N=now, T=target, B=both",
-            x + 220,
-            y + 122,
-            small=True,
-            color=(176, 191, 216),
-        )
-        self._draw_text(
-            "Glyphs: p=pressure, e=edits, *=both",
-            x + 220,
-            y + 142,
-            small=True,
-            color=(176, 191, 216),
-        )
+        detail_lines = _sector_board_detail_lines(hovered_cell)
+        for idx, line in enumerate(detail_lines):
+            self._draw_text(
+                _truncate_ui_text(line, max_len=66),
+                x + 220,
+                y + 122 + idx * 20,
+                small=True,
+                color=(198, 212, 234) if idx == 0 else (176, 191, 216),
+            )
         trail_tokens: list[str] = []
         if command_focus_timesteps is not None:
             for age, t_focus in enumerate(command_focus_timesteps):
