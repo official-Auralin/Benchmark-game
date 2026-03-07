@@ -99,6 +99,19 @@ from .r1_pygame_helpers import (
 
 _SESSION: "_R1PygameSession | None" = None
 
+SECTOR_BOARD_LEGEND_X_OFFSET = 14
+SECTOR_BOARD_LEGEND_Y_OFFSET = 30
+SECTOR_BOARD_LEGEND_LINE_STEP = 18
+SECTOR_BOARD_HUD_X_OFFSET = 220
+SECTOR_BOARD_HUD_Y_HOT = 56
+SECTOR_BOARD_HUD_Y_WINDOW = 78
+SECTOR_BOARD_HUD_Y_HORIZON = 100
+SECTOR_BOARD_HUD_Y_DETAIL = 122
+SECTOR_BOARD_HUD_DETAIL_LINE_STEP = 20
+SECTOR_BOARD_HUD_Y_FOCUS = 162
+SECTOR_BOARD_HUD_PRIMARY_COLOR = (198, 212, 234)
+SECTOR_BOARD_HUD_SECONDARY_COLOR = (176, 191, 216)
+
 class _R1PygameSession:
     def __init__(self) -> None:
         try:
@@ -178,6 +191,91 @@ class _R1PygameSession:
             fill=_sector_pressure_fill(level),
             border=(88, 103, 128),
             border_width=1,
+        )
+
+    def _draw_sector_board_legend(self, *, x: int, y: int) -> None:
+        for idx, line in enumerate(_sector_board_legend_lines()):
+            self._draw_text(
+                line,
+                x + SECTOR_BOARD_LEGEND_X_OFFSET,
+                y + SECTOR_BOARD_LEGEND_Y_OFFSET + idx * SECTOR_BOARD_LEGEND_LINE_STEP,
+                small=True,
+                color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
+            )
+
+    def _draw_sector_board_hud(
+        self,
+        *,
+        x: int,
+        y: int,
+        hovered_cell: _SectorBoardCell | None,
+        pressure_levels: Mapping[int, int],
+        max_t: int,
+        start_t: int,
+        end_t: int,
+        window_start: int,
+        window_end: int,
+        command_focus_timestep: int | None = None,
+        command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
+    ) -> None:
+        hud_x = x + SECTOR_BOARD_HUD_X_OFFSET
+        self._draw_text(
+            _truncate_ui_text(
+                "Hot sectors: " + _format_top_pressure_summary(pressure_levels, max_items=4),
+                max_len=66,
+            ),
+            hud_x,
+            y + SECTOR_BOARD_HUD_Y_HOT,
+            small=True,
+            color=SECTOR_BOARD_HUD_PRIMARY_COLOR,
+        )
+        self._draw_text(
+            f"window t={window_start}..{window_end} | viewport t={start_t}..{end_t}",
+            hud_x,
+            y + SECTOR_BOARD_HUD_Y_WINDOW,
+            small=True,
+            color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
+        )
+        self._draw_text(
+            f"horizon sectors: {max_t + 1} sampled into "
+            f"{SECTOR_BOARD_ROWS}x{SECTOR_BOARD_COLS}",
+            hud_x,
+            y + SECTOR_BOARD_HUD_Y_HORIZON,
+            small=True,
+            color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
+        )
+        detail_lines = _sector_board_detail_lines(hovered_cell)
+        for idx, line in enumerate(detail_lines):
+            self._draw_text(
+                _truncate_ui_text(line, max_len=66),
+                hud_x,
+                y + SECTOR_BOARD_HUD_Y_DETAIL + idx * SECTOR_BOARD_HUD_DETAIL_LINE_STEP,
+                small=True,
+                color=(
+                    SECTOR_BOARD_HUD_PRIMARY_COLOR
+                    if idx == 0
+                    else SECTOR_BOARD_HUD_SECONDARY_COLOR
+                ),
+            )
+        trail_tokens: list[str] = []
+        if command_focus_timesteps is not None:
+            for age, t_focus in enumerate(command_focus_timesteps):
+                if age >= 3:
+                    break
+                trail_tokens.append(f"F{age}=t{int(t_focus)}")
+        elif command_focus_timestep is not None:
+            trail_tokens.append(f"F0=t{int(command_focus_timestep)}")
+        focus_label = (
+            "command focus trail: none yet"
+            if not trail_tokens
+            else "command focus trail: " + " | ".join(trail_tokens)
+        )
+        self._draw_text(
+            focus_label,
+            hud_x,
+            y + SECTOR_BOARD_HUD_Y_FOCUS,
+            small=True,
+            color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
         )
 
     def _draw_timeline(
@@ -360,14 +458,7 @@ class _R1PygameSession:
             border_width=2,
         )
         self._draw_text("Sector board (sampled full horizon):", x + 14, y + 10, small=True)
-        for idx, line in enumerate(_sector_board_legend_lines()):
-            self._draw_text(
-                line,
-                x + 14,
-                y + 30 + idx * 18,
-                small=True,
-                color=(176, 191, 216),
-            )
+        self._draw_sector_board_legend(x=x, y=y)
         cells = _build_sector_board_cells(
             max_t=max_t,
             timestep=timestep,
@@ -454,59 +545,18 @@ class _R1PygameSession:
             if hovered_cell is None
             else (int(hovered_cell.start_t), int(hovered_cell.end_t))
         )
-
-        self._draw_text(
-            _truncate_ui_text(
-                "Hot sectors: " + _format_top_pressure_summary(pressure_levels, max_items=4),
-                max_len=66,
-            ),
-            x + 220,
-            y + 56,
-            small=True,
-            color=(198, 212, 234),
-        )
-        self._draw_text(
-            f"window t={window_start}..{window_end} | viewport t={start_t}..{end_t}",
-            x + 220,
-            y + 78,
-            small=True,
-            color=(176, 191, 216),
-        )
-        self._draw_text(
-            f"horizon sectors: {max_t + 1} sampled into {SECTOR_BOARD_ROWS}x{SECTOR_BOARD_COLS}",
-            x + 220,
-            y + 100,
-            small=True,
-            color=(176, 191, 216),
-        )
-        detail_lines = _sector_board_detail_lines(hovered_cell)
-        for idx, line in enumerate(detail_lines):
-            self._draw_text(
-                _truncate_ui_text(line, max_len=66),
-                x + 220,
-                y + 122 + idx * 20,
-                small=True,
-                color=(198, 212, 234) if idx == 0 else (176, 191, 216),
-            )
-        trail_tokens: list[str] = []
-        if command_focus_timesteps is not None:
-            for age, t_focus in enumerate(command_focus_timesteps):
-                if age >= 3:
-                    break
-                trail_tokens.append(f"F{age}=t{int(t_focus)}")
-        elif command_focus_timestep is not None:
-            trail_tokens.append(f"F0=t{int(command_focus_timestep)}")
-        focus_label = (
-            "command focus trail: none yet"
-            if not trail_tokens
-            else "command focus trail: " + " | ".join(trail_tokens)
-        )
-        self._draw_text(
-            focus_label,
-            x + 220,
-            y + 162,
-            small=True,
-            color=(176, 191, 216),
+        self._draw_sector_board_hud(
+            x=x,
+            y=y,
+            hovered_cell=hovered_cell,
+            pressure_levels=pressure_levels,
+            max_t=max_t,
+            start_t=start_t,
+            end_t=end_t,
+            window_start=window_start,
+            window_end=window_end,
+            command_focus_timestep=command_focus_timestep,
+            command_focus_timesteps=command_focus_timesteps,
         )
 
     def _draw_help_overlay(self) -> None:

@@ -741,6 +741,25 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("Edits", lines[1])
         self.assertIn("focus", lines[1].lower())
 
+    def test_sector_board_detail_lines_for_quiet_cell_are_explicit(self) -> None:
+        cell = _build_sector_board_cells(
+            max_t=23,
+            timestep=8,
+            t_star=18,
+            start_t=7,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={},
+            pressure_levels={},
+            cols=8,
+            rows=6,
+        )[0]
+        lines = _sector_board_detail_lines(cell)
+        self.assertIn("Status", lines[1])
+        self.assertIn("outside viewport/window", lines[1])
+        self.assertIn("no marker or focus", lines[1])
+
     def test_sector_board_cell_name(self) -> None:
         self.assertEqual(_sector_board_cell_name(row=0, col=0), "A1")
         self.assertEqual(_sector_board_cell_name(row=5, col=7), "H6")

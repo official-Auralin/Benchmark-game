@@ -528,7 +528,11 @@ def _sector_board_detail_lines(cell: _SectorBoardCell | None) -> list[str]:
         status_tokens.append(f"marker {cell.marker}")
     if cell.focus_age is not None:
         status_tokens.append(f"focus F{int(cell.focus_age)}")
-    status_part = "sample only" if not status_tokens else ", ".join(status_tokens)
+    status_part = (
+        "outside viewport/window, no marker or focus"
+        if not status_tokens
+        else ", ".join(status_tokens)
+    )
     return [
         f"Cell {_sector_board_cell_name(row=cell.row, col=cell.col)}: "
         f"t={cell.start_t}..{cell.end_t}",
