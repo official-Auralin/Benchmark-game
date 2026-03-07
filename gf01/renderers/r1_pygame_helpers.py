@@ -606,6 +606,7 @@ def _command_console_lines(
     *,
     timestep: int,
     live_sector_name: str | None,
+    target_sector_name: str | None,
     pinned_sector_name: str | None,
     pinned_sector_range: tuple[int, int] | None,
 ) -> list[str]:
@@ -616,12 +617,19 @@ def _command_console_lines(
             else f"Live turn: t={int(timestep)} receives the next commit."
         )
     ]
+    if target_sector_name:
+        lines[0] += f" Mission target sits in {target_sector_name}."
     if pinned_sector_name is None or pinned_sector_range is None:
         lines.append("Board intel: click a sector to pin mission context.")
         return lines
     start_t, end_t = pinned_sector_range
     if start_t <= int(timestep) <= end_t:
         lines.append(f"Pinned intel: {pinned_sector_name} matches the live sector.")
+        return lines
+    if pinned_sector_name == target_sector_name:
+        lines.append(
+            f"Pinned intel: {pinned_sector_name} marks the mission target sector."
+        )
         return lines
     range_label = (
         f"t={start_t}" if int(start_t) == int(end_t) else f"t={start_t}..{end_t}"
@@ -630,6 +638,22 @@ def _command_console_lines(
         f"Pinned intel: {pinned_sector_name} ({range_label}) is reference only."
     )
     return lines
+
+
+def _command_console_sector_tokens(
+    *,
+    live_sector_name: str | None,
+    target_sector_name: str | None,
+    pinned_sector_name: str | None,
+) -> list[str]:
+    tokens: list[str] = []
+    if live_sector_name:
+        tokens.append(f"LIVE {live_sector_name}")
+    if target_sector_name:
+        tokens.append(f"TARGET {target_sector_name}")
+    if pinned_sector_name:
+        tokens.append(f"PIN {pinned_sector_name}")
+    return tokens
 
 
 def _pending_loadout_tokens(
