@@ -116,6 +116,9 @@ Visual renderer notes (both backends):
   `N/T/B` markers for now/target/both).
 - In `pygame` mode, hover a sector-board cell to inspect the represented
   timestep bucket (`t` range, pressure token, edit token, and marker).
+- In `pygame` mode, the `Mission window` card now explains whether the hovered
+  sector contains the live turn, the target timestep, overlaps the scoring
+  window, or sits outside it.
 - In `pygame` mode, sector-board hover also links to the timeline: the
   corresponding timestep range gets a mint border in the timeline row.
 - In `pygame` mode, the sector-board border shows a short command-focus trail:
