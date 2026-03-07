@@ -47,8 +47,8 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "gf01-gate.yml"
 BRANCH_GUIDANCE_PATH = (
     ROOT
-    / "research_pack"
-    / "51_phase_g14_10_branch_protection_guidance.md"
+    / "docs"
+    / "PUBLIC_MIRROR.md"
 )
 
 IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
@@ -122,18 +122,9 @@ class TestCiPolicyWorkflow(unittest.TestCase):
             )
 
     def test_branch_protection_guidance_presence_by_repo_scope(self) -> None:
-        if IS_PUBLIC_MIRROR:
-            self.assertFalse(
-                BRANCH_GUIDANCE_PATH.exists(),
-                msg=(
-                    "public mirror should not include private research_pack "
-                    f"artifact: {BRANCH_GUIDANCE_PATH}"
-                ),
-            )
-            return
         self.assertTrue(
             BRANCH_GUIDANCE_PATH.exists(),
-            msg=f"missing guidance file in private source repo: {BRANCH_GUIDANCE_PATH}",
+            msg=f"missing public-mirror guidance doc: {BRANCH_GUIDANCE_PATH}",
         )
 
     @unittest.skipUnless(
@@ -141,9 +132,6 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         "branch-protection guidance is absent in this repository scope",
     )
     def test_branch_protection_guidance_requires_both_checks(self) -> None:
-        # In the private source repository BRANCH_GUIDANCE_PATH must exist.
-        # This content test is expected to skip only in public mirror scope,
-        # where private research_pack artifacts are intentionally not mirrored.
         text = BRANCH_GUIDANCE_PATH.read_text(encoding="utf-8")
         self.assertIn("GF01 Gate / gate", text)
         self.assertIn("GF01 Gate / release-candidate", text)

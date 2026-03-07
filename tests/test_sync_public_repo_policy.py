@@ -70,7 +70,10 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
                 "spec/Spec.pdf",
                 "spec/overview.md",
                 "spec/contracts.md",
+                "spec/environment.md",
+                "spec/parity.md",
                 "spec/acceptance-tests.md",
+                "spec/plan.md",
                 ".github/workflows/gf01-gate.yml",
                 "gf01",
                 "tests",
@@ -140,7 +143,10 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
             (spec_dir / "Spec.pdf").write_bytes(b"%PDF-1.4\n")
             (spec_dir / "overview.md").write_text("overview\n", encoding="utf-8")
             (spec_dir / "contracts.md").write_text("contracts\n", encoding="utf-8")
+            (spec_dir / "environment.md").write_text("environment\n", encoding="utf-8")
+            (spec_dir / "parity.md").write_text("parity\n", encoding="utf-8")
             (spec_dir / "acceptance-tests.md").write_text("acceptance\n", encoding="utf-8")
+            (spec_dir / "plan.md").write_text("plan\n", encoding="utf-8")
             wf = root / ".github" / "workflows"
             wf.mkdir(parents=True)
             (wf / "gf01-gate.yml").write_text("name: test\njobs: {}\n", encoding="utf-8")
@@ -176,7 +182,10 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
             self.assertTrue((target / "spec" / "Spec.pdf").exists())
             self.assertTrue((target / "spec" / "overview.md").exists())
             self.assertTrue((target / "spec" / "contracts.md").exists())
+            self.assertTrue((target / "spec" / "environment.md").exists())
+            self.assertTrue((target / "spec" / "parity.md").exists())
             self.assertTrue((target / "spec" / "acceptance-tests.md").exists())
+            self.assertTrue((target / "spec" / "plan.md").exists())
             self.assertTrue((target / ".github" / "workflows" / "gf01-gate.yml").exists())
             self.assertTrue((target / "gf01" / "core.py").exists())
             self.assertTrue((target / "tests" / "test_ok.py").exists())
