@@ -561,6 +561,42 @@ def _sector_board_focus_label(
     return " | ".join(trail_tokens)
 
 
+def _sector_board_pending_badge_text(pending_count: int) -> str:
+    count = max(0, int(pending_count))
+    if count <= 0:
+        return ""
+    if count >= 10:
+        return "9+"
+    return str(count)
+
+
+def _sector_board_command_lines(
+    *,
+    live_cell_name: str | None,
+    pending_count: int,
+    command_focus_timestep: int | None = None,
+    command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
+) -> list[str]:
+    lines = [
+        (
+            f"Queued edits: {int(pending_count)}"
+            if int(pending_count) > 0
+            else "Queued edits: none"
+        )
+    ]
+    lines.append(
+        f"Live sector: {live_cell_name}" if live_cell_name else "Live sector: unavailable"
+    )
+    lines.append(
+        "Trail: "
+        + _sector_board_focus_label(
+            command_focus_timestep=command_focus_timestep,
+            command_focus_timesteps=command_focus_timesteps,
+        )
+    )
+    return lines
+
+
 def _sector_board_hud_sections(
     *,
     hovered_cell: _SectorBoardCell | None,
@@ -570,6 +606,8 @@ def _sector_board_hud_sections(
     end_t: int,
     window_start: int,
     window_end: int,
+    live_cell_name: str | None,
+    pending_count: int,
     command_focus_timestep: int | None = None,
     command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
 ) -> list[tuple[str, list[str]]]:
@@ -588,12 +626,12 @@ def _sector_board_hud_sections(
         ("Hover intel", _sector_board_detail_lines(hovered_cell)),
         (
             "Command trail",
-            [
-                _sector_board_focus_label(
-                    command_focus_timestep=command_focus_timestep,
-                    command_focus_timesteps=command_focus_timesteps,
-                )
-            ],
+            _sector_board_command_lines(
+                live_cell_name=live_cell_name,
+                pending_count=pending_count,
+                command_focus_timestep=command_focus_timestep,
+                command_focus_timesteps=command_focus_timesteps,
+            ),
         ),
     ]
 
