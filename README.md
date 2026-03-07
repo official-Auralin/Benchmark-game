@@ -119,6 +119,9 @@ Visual renderer notes (both backends):
 - In `pygame` mode, click a sector-board cell to pin its intel card and keep
   that mission/timeline comparison visible while you move back to the command
   controls.
+- In `pygame` mode, the left-side command area is now a `Command console` that
+  tells you which live sector the next commit will affect and whether any
+  pinned sector is only reference intel or matches the live edit target.
 - In `pygame` mode, the `Mission window` card now explains whether the hovered
   sector contains the live turn, the target timestep, overlaps the scoring
   window, or sits outside it.
