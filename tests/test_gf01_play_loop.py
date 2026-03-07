@@ -17,8 +17,10 @@ __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
+import importlib
 import json
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -326,6 +328,29 @@ class TestPlayableLoop(unittest.TestCase):
         payload = json.loads(out.getvalue())
         self.assertEqual(payload.get("status"), "error")
         self.assertEqual(payload.get("error_type"), "episode_aborted")
+
+    def test_choose_action_pygame_renders_first_frame_under_dummy_sdl(self) -> None:
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
+            module = importlib.import_module("gf01.renderers.r1_pygame")
+            module._SESSION = None
+            try:
+                session = module._session()
+            except RuntimeError as exc:
+                if "pygame is not installed" in str(exc):
+                    self.skipTest(str(exc))
+                raise
+            try:
+                session.pg.event.post(session.pg.event.Event(session.pg.QUIT))
+                action = module.choose_action_pygame(
+                    last_obs=None,
+                    timestep=0,
+                    instance=_toy_instance("normal"),
+                    objective_text=_objective_text(_toy_instance("normal")),
+                )
+            finally:
+                session.pg.quit()
+                module._SESSION = None
+        self.assertIsNone(action)
 
 
 if __name__ == "__main__":
