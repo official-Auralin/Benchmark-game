@@ -59,6 +59,7 @@ from .r1_pygame_helpers import (
     _clamp_page_size,
     _clamp_timeline_span,
     _command_console_lines,
+    _command_console_sector_tokens,
     _control_visible_pool,
     _cycle_pending_bit,
     _describe_output_delta,
@@ -141,6 +142,11 @@ COMMAND_CONSOLE_MIN_H = 196
 COMMAND_CONSOLE_LOADOUT_CHIP_W = 92
 COMMAND_CONSOLE_LOADOUT_CHIP_H = 22
 COMMAND_CONSOLE_LOADOUT_CHIP_GAP = 8
+COMMAND_CONSOLE_SECTOR_CHIP_W = 98
+COMMAND_CONSOLE_SECTOR_CHIP_H = 20
+COMMAND_CONSOLE_SECTOR_CHIP_GAP = 8
+COMMAND_CONSOLE_SECTOR_CHIP_X = 286
+COMMAND_CONSOLE_SECTOR_CHIP_Y = 16
 
 class _R1PygameSession:
     def __init__(self) -> None:
@@ -176,6 +182,7 @@ class _R1PygameSession:
         self._sector_board_hitboxes: list[tuple[int, int, int, int, _SectorBoardCell]] = []
         self._pinned_sector_coords: tuple[int, int] | None = None
         self._live_sector_name: str | None = None
+        self._target_sector_name: str | None = None
         self._pinned_sector_name: str | None = None
         self._pinned_sector_range: tuple[int, int] | None = None
         self._show_help_overlay = True
@@ -328,6 +335,49 @@ class _R1PygameSession:
                 y + 4,
                 small=True,
                 color=(220, 230, 245),
+            )
+
+    def _draw_console_sector_chips(
+        self,
+        *,
+        x: int,
+        y: int,
+        live_sector_name: str | None,
+        target_sector_name: str | None,
+        pinned_sector_name: str | None,
+    ) -> None:
+        chip_styles = {
+            "LIVE": ((36, 64, 52), (126, 196, 134)),
+            "TARGET": ((74, 64, 38), (212, 188, 122)),
+            "PIN": ((62, 46, 82), (205, 154, 228)),
+        }
+        for idx, token in enumerate(
+            _command_console_sector_tokens(
+                live_sector_name=live_sector_name,
+                target_sector_name=target_sector_name,
+                pinned_sector_name=pinned_sector_name,
+            )
+        ):
+            chip_x = x + idx * (
+                COMMAND_CONSOLE_SECTOR_CHIP_W + COMMAND_CONSOLE_SECTOR_CHIP_GAP
+            )
+            label = token.split(" ", 1)[0]
+            fill, border = chip_styles.get(label, ((40, 48, 64), (115, 136, 168)))
+            self._draw_rect(
+                chip_x,
+                y,
+                COMMAND_CONSOLE_SECTOR_CHIP_W,
+                COMMAND_CONSOLE_SECTOR_CHIP_H,
+                fill=fill,
+                border=border,
+                border_width=1,
+            )
+            self._draw_text(
+                _truncate_ui_text(token, max_len=15),
+                chip_x + 8,
+                y + 3,
+                small=True,
+                color=(232, 238, 249),
             )
 
     def _draw_sector_board_hud(
@@ -595,6 +645,7 @@ class _R1PygameSession:
             )
         hovered_cell: _SectorBoardCell | None = None
         live_cell: _SectorBoardCell | None = None
+        target_cell: _SectorBoardCell | None = None
         pinned_cell: _SectorBoardCell | None = None
         for cell in cells:
             cx = board_x + cell.col * (cell_size + gap)
@@ -603,6 +654,8 @@ class _R1PygameSession:
             is_live_cell = _range_contains_t((cell.start_t, cell.end_t), timestep)
             if is_live_cell:
                 live_cell = cell
+            if _range_contains_t((cell.start_t, cell.end_t), t_star):
+                target_cell = cell
             if self._pinned_sector_coords == (cell.row, cell.col):
                 pinned_cell = cell
             if cell.col == 0:
@@ -677,6 +730,11 @@ class _R1PygameSession:
             else _sector_board_cell_name(row=live_cell.row, col=live_cell.col)
         )
         self._live_sector_name = live_cell_name
+        self._target_sector_name = (
+            None
+            if target_cell is None
+            else _sector_board_cell_name(row=target_cell.row, col=target_cell.col)
+        )
         self._pinned_sector_name = (
             None
             if pinned_cell is None
@@ -902,9 +960,17 @@ class _R1PygameSession:
             border_width=2,
         )
         self._draw_text("Command console", 24, panel_y + COMMAND_CONSOLE_TITLE_Y)
+        self._draw_console_sector_chips(
+            x=COMMAND_CONSOLE_X + COMMAND_CONSOLE_SECTOR_CHIP_X,
+            y=panel_y + COMMAND_CONSOLE_SECTOR_CHIP_Y,
+            live_sector_name=self._live_sector_name,
+            target_sector_name=self._target_sector_name,
+            pinned_sector_name=self._pinned_sector_name,
+        )
         console_lines = _command_console_lines(
             timestep=timestep,
             live_sector_name=self._live_sector_name,
+            target_sector_name=self._target_sector_name,
             pinned_sector_name=self._pinned_sector_name,
             pinned_sector_range=self._pinned_sector_range,
         )
@@ -1024,6 +1090,7 @@ class _R1PygameSession:
             self._sector_board_hitboxes = []
             self._pinned_sector_coords = None
             self._live_sector_name = None
+            self._target_sector_name = None
             self._pinned_sector_name = None
             self._pinned_sector_range = None
             self._show_help_overlay = True

@@ -46,6 +46,7 @@ from gf01.renderers.r1_pygame_helpers import (
     _summarize_visible_ap_groups,
     _build_sector_board_cells,
     _command_console_lines,
+    _command_console_sector_tokens,
     _sector_board_cell_glyph,
     _sector_board_col_label,
     _sector_board_command_lines,
@@ -818,30 +819,57 @@ class TestR1PygameHelpers(unittest.TestCase):
         lines = _command_console_lines(
             timestep=8,
             live_sector_name="B2",
+            target_sector_name="E3",
             pinned_sector_name=None,
             pinned_sector_range=None,
         )
-        self.assertEqual(lines[0], "Live sector: B2 receives the next commit.")
+        self.assertEqual(
+            lines[0], "Live sector: B2 receives the next commit. Mission target sits in E3."
+        )
         self.assertIn("click a sector to pin", lines[1].lower())
 
     def test_command_console_lines_with_reference_pinned_sector(self) -> None:
         lines = _command_console_lines(
             timestep=8,
             live_sector_name="B2",
+            target_sector_name="E3",
             pinned_sector_name="F5",
             pinned_sector_range=(16, 19),
         )
-        self.assertEqual(lines[0], "Live sector: B2 receives the next commit.")
+        self.assertEqual(
+            lines[0], "Live sector: B2 receives the next commit. Mission target sits in E3."
+        )
         self.assertIn("F5 (t=16..19) is reference only", lines[1])
 
     def test_command_console_lines_with_live_pinned_sector(self) -> None:
         lines = _command_console_lines(
             timestep=8,
             live_sector_name="B2",
+            target_sector_name="E3",
             pinned_sector_name="B2",
             pinned_sector_range=(8, 8),
         )
         self.assertIn("matches the live sector", lines[1])
+
+    def test_command_console_lines_with_target_pinned_sector(self) -> None:
+        lines = _command_console_lines(
+            timestep=8,
+            live_sector_name="B2",
+            target_sector_name="E3",
+            pinned_sector_name="E3",
+            pinned_sector_range=(18, 18),
+        )
+        self.assertIn("marks the mission target sector", lines[1])
+
+    def test_command_console_sector_tokens(self) -> None:
+        self.assertEqual(
+            _command_console_sector_tokens(
+                live_sector_name="B2",
+                target_sector_name="E3",
+                pinned_sector_name="F5",
+            ),
+            ["LIVE B2", "TARGET E3", "PIN F5"],
+        )
 
     def test_pending_loadout_tokens_empty(self) -> None:
         self.assertEqual(_pending_loadout_tokens({}), ["empty"])
