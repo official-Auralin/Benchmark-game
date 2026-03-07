@@ -543,6 +543,61 @@ def _sector_board_detail_lines(cell: _SectorBoardCell | None) -> list[str]:
     ]
 
 
+def _sector_board_focus_label(
+    *,
+    command_focus_timestep: int | None = None,
+    command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
+) -> str:
+    trail_tokens: list[str] = []
+    if command_focus_timesteps is not None:
+        for age, t_focus in enumerate(command_focus_timesteps):
+            if age >= 3:
+                break
+            trail_tokens.append(f"F{age}=t{int(t_focus)}")
+    elif command_focus_timestep is not None:
+        trail_tokens.append(f"F0=t{int(command_focus_timestep)}")
+    if not trail_tokens:
+        return "No committed sector trail yet."
+    return " | ".join(trail_tokens)
+
+
+def _sector_board_hud_sections(
+    *,
+    hovered_cell: _SectorBoardCell | None,
+    pressure_levels: Mapping[int, int],
+    max_t: int,
+    start_t: int,
+    end_t: int,
+    window_start: int,
+    window_end: int,
+    command_focus_timestep: int | None = None,
+    command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
+) -> list[tuple[str, list[str]]]:
+    hot_summary = _format_top_pressure_summary(pressure_levels, max_items=3)
+    if hot_summary == "(none yet)":
+        hot_summary = "No pressure spikes yet."
+    return [
+        ("Hot sectors", [hot_summary]),
+        (
+            "Mission window",
+            [
+                f"window t={window_start}..{window_end}",
+                f"view t={start_t}..{end_t} | horizon {max_t + 1}",
+            ],
+        ),
+        ("Hover intel", _sector_board_detail_lines(hovered_cell)),
+        (
+            "Command trail",
+            [
+                _sector_board_focus_label(
+                    command_focus_timestep=command_focus_timestep,
+                    command_focus_timesteps=command_focus_timesteps,
+                )
+            ],
+        ),
+    ]
+
+
 def _sector_board_col_label(col: int) -> str:
     col_idx = max(0, int(col))
     # Spreadsheet-style labels scale naturally if the board grows past 26 cols.
