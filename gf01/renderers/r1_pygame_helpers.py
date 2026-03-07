@@ -656,6 +656,25 @@ def _command_console_sector_tokens(
     return tokens
 
 
+def _command_console_stage_status(
+    *,
+    live_sector_name: str | None,
+    target_sector_name: str | None,
+    pinned_sector_name: str | None,
+) -> tuple[str, str]:
+    if live_sector_name and target_sector_name and live_sector_name == target_sector_name:
+        return ("ON TARGET", f"Commit now lands directly in target sector {live_sector_name}.")
+    if pinned_sector_name and live_sector_name and pinned_sector_name == live_sector_name:
+        return ("ARMED", f"Pinned sector {pinned_sector_name} is actionable now.")
+    if pinned_sector_name and target_sector_name and pinned_sector_name == target_sector_name:
+        return ("TRACKING", f"Pinned sector {pinned_sector_name} holds the mission target.")
+    if live_sector_name and target_sector_name:
+        return ("STAGING", f"Route edits now to {live_sector_name}; target stays in {target_sector_name}.")
+    if live_sector_name:
+        return ("STAGING", f"Route edits now to live sector {live_sector_name}.")
+    return ("STAGING", "Route edits to the live sector and commit.")
+
+
 def _pending_loadout_tokens(
     pending: Mapping[str, int],
     *,

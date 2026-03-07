@@ -59,6 +59,7 @@ from .r1_pygame_helpers import (
     _clamp_page_size,
     _clamp_timeline_span,
     _command_console_lines,
+    _command_console_stage_status,
     _command_console_sector_tokens,
     _control_visible_pool,
     _cycle_pending_bit,
@@ -147,6 +148,10 @@ COMMAND_CONSOLE_SECTOR_CHIP_H = 20
 COMMAND_CONSOLE_SECTOR_CHIP_GAP = 8
 COMMAND_CONSOLE_SECTOR_CHIP_X = 286
 COMMAND_CONSOLE_SECTOR_CHIP_Y = 16
+COMMAND_CONSOLE_STAGE_BADGE_X = 186
+COMMAND_CONSOLE_STAGE_BADGE_Y = 40
+COMMAND_CONSOLE_STAGE_BADGE_W = 120
+COMMAND_CONSOLE_STAGE_BADGE_H = 22
 
 class _R1PygameSession:
     def __init__(self) -> None:
@@ -379,6 +384,44 @@ class _R1PygameSession:
                 small=True,
                 color=(232, 238, 249),
             )
+
+    def _draw_command_stage_badge(
+        self,
+        *,
+        x: int,
+        y: int,
+        live_sector_name: str | None,
+        target_sector_name: str | None,
+        pinned_sector_name: str | None,
+    ) -> None:
+        status, _detail = _command_console_stage_status(
+            live_sector_name=live_sector_name,
+            target_sector_name=target_sector_name,
+            pinned_sector_name=pinned_sector_name,
+        )
+        fills = {
+            "ON TARGET": ((92, 78, 42), (212, 188, 122)),
+            "ARMED": ((36, 64, 52), (126, 196, 134)),
+            "TRACKING": ((62, 46, 82), (205, 154, 228)),
+            "STAGING": ((38, 56, 78), (112, 176, 204)),
+        }
+        fill, border = fills.get(status, ((40, 48, 64), (115, 136, 168)))
+        self._draw_rect(
+            x,
+            y,
+            COMMAND_CONSOLE_STAGE_BADGE_W,
+            COMMAND_CONSOLE_STAGE_BADGE_H,
+            fill=fill,
+            border=border,
+            border_width=1,
+        )
+        self._draw_text(
+            status,
+            x + 10,
+            y + 4,
+            small=True,
+            color=(232, 238, 249),
+        )
 
     def _draw_sector_board_hud(
         self,
@@ -960,6 +1003,13 @@ class _R1PygameSession:
             border_width=2,
         )
         self._draw_text("Command console", 24, panel_y + COMMAND_CONSOLE_TITLE_Y)
+        self._draw_command_stage_badge(
+            x=COMMAND_CONSOLE_X + COMMAND_CONSOLE_STAGE_BADGE_X,
+            y=panel_y + COMMAND_CONSOLE_STAGE_BADGE_Y,
+            live_sector_name=self._live_sector_name,
+            target_sector_name=self._target_sector_name,
+            pinned_sector_name=self._pinned_sector_name,
+        )
         self._draw_console_sector_chips(
             x=COMMAND_CONSOLE_X + COMMAND_CONSOLE_SECTOR_CHIP_X,
             y=panel_y + COMMAND_CONSOLE_SECTOR_CHIP_Y,
