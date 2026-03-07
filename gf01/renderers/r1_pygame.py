@@ -76,7 +76,9 @@ from .r1_pygame_helpers import (
     _pressure_level_from_observation,
     _pressure_token,
     _range_contains_t,
+    _sector_board_pending_badge_text,
     _sector_board_col_label,
+    _sector_board_command_lines,
     _ranges_overlap,
     _sector_board_cell_glyph,
     _sector_board_cell_name,
@@ -111,6 +113,9 @@ SECTOR_BOARD_CARD_TITLE_Y = 8
 SECTOR_BOARD_CARD_LINE_Y = 24
 SECTOR_BOARD_CARD_LINE_STEP = 14
 SECTOR_BOARD_CARD_FILL = (28, 38, 54)
+SECTOR_BOARD_PENDING_BADGE_SIZE = 14
+SECTOR_BOARD_PENDING_BADGE_OFFSET_X = 4
+SECTOR_BOARD_PENDING_BADGE_OFFSET_Y = 2
 SECTOR_BOARD_HUD_PRIMARY_COLOR = (198, 212, 234)
 SECTOR_BOARD_HUD_SECONDARY_COLOR = (176, 191, 216)
 SECTOR_BOARD_HUD_CARD_ACCENTS = (
@@ -246,6 +251,33 @@ class _R1PygameSession:
                 color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
             )
 
+    def _draw_sector_pending_badge(
+        self,
+        *,
+        x: int,
+        y: int,
+        pending_count: int,
+    ) -> None:
+        badge_text = _sector_board_pending_badge_text(pending_count)
+        if not badge_text:
+            return
+        self._draw_rect(
+            x,
+            y,
+            SECTOR_BOARD_PENDING_BADGE_SIZE,
+            SECTOR_BOARD_PENDING_BADGE_SIZE,
+            fill=(171, 108, 187),
+            border=(234, 221, 242),
+            border_width=1,
+        )
+        self._draw_text(
+            badge_text,
+            x + 3,
+            y - 1,
+            small=True,
+            color=(18, 24, 34),
+        )
+
     def _draw_sector_board_hud(
         self,
         *,
@@ -258,6 +290,8 @@ class _R1PygameSession:
         end_t: int,
         window_start: int,
         window_end: int,
+        live_cell_name: str | None,
+        pending_count: int,
         command_focus_timestep: int | None = None,
         command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
     ) -> None:
@@ -270,6 +304,8 @@ class _R1PygameSession:
             end_t=end_t,
             window_start=window_start,
             window_end=window_end,
+            live_cell_name=live_cell_name,
+            pending_count=pending_count,
             command_focus_timestep=command_focus_timestep,
             command_focus_timesteps=command_focus_timesteps,
         )
@@ -454,6 +490,7 @@ class _R1PygameSession:
         pressure_levels: Mapping[int, int],
         command_focus_timestep: int | None = None,
         command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
+        pending_count: int = 0,
         mouse_pos: tuple[int, int] | None = None,
     ) -> None:
         x = 620
@@ -498,9 +535,13 @@ class _R1PygameSession:
                 color=(176, 191, 216),
             )
         hovered_cell: _SectorBoardCell | None = None
+        live_cell: _SectorBoardCell | None = None
         for cell in cells:
             cx = board_x + cell.col * (cell_size + gap)
             cy = board_y + cell.row * (cell_size + gap)
+            is_live_cell = _range_contains_t((cell.start_t, cell.end_t), timestep)
+            if is_live_cell:
+                live_cell = cell
             if cell.col == 0:
                 self._draw_text(
                     str(cell.row + 1),
@@ -551,11 +592,22 @@ class _R1PygameSession:
                     small=True,
                     color=(18, 24, 34),
                 )
+            if is_live_cell and pending_count > 0:
+                self._draw_sector_pending_badge(
+                    x=cx + cell_size - SECTOR_BOARD_PENDING_BADGE_OFFSET_X,
+                    y=cy - SECTOR_BOARD_PENDING_BADGE_OFFSET_Y,
+                    pending_count=pending_count,
+                )
 
         self._hovered_sector_range = (
             None
             if hovered_cell is None
             else (int(hovered_cell.start_t), int(hovered_cell.end_t))
+        )
+        live_cell_name = (
+            None
+            if live_cell is None
+            else _sector_board_cell_name(row=live_cell.row, col=live_cell.col)
         )
         self._draw_sector_board_hud(
             x=x,
@@ -567,6 +619,8 @@ class _R1PygameSession:
             end_t=end_t,
             window_start=window_start,
             window_end=window_end,
+            live_cell_name=live_cell_name,
+            pending_count=pending_count,
             command_focus_timestep=command_focus_timestep,
             command_focus_timesteps=command_focus_timesteps,
         )
@@ -1002,6 +1056,7 @@ class _R1PygameSession:
                 pressure_levels=pressure_levels,
                 command_focus_timestep=self._last_committed_t,
                 command_focus_timesteps=self._command_focus_timesteps,
+                pending_count=len(pending),
                 mouse_pos=self.pg.mouse.get_pos(),
             )
             self._draw_timeline(

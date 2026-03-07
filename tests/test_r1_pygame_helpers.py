@@ -46,12 +46,14 @@ from gf01.renderers.r1_pygame_helpers import (
     _build_sector_board_cells,
     _sector_board_cell_glyph,
     _sector_board_col_label,
+    _sector_board_command_lines,
     _sector_board_cell_name,
     _sector_board_detail_lines,
     _sector_board_focus_label,
     _sector_board_hover_summary,
     _sector_board_hud_sections,
     _sector_board_legend_lines,
+    _sector_board_pending_badge_text,
     _build_timeline_minimap,
     _range_contains_t,
     _timeline_mark,
@@ -774,6 +776,21 @@ class TestR1PygameHelpers(unittest.TestCase):
             "F0=t9 | F1=t3 | F2=t20",
         )
 
+    def test_sector_board_pending_badge_text(self) -> None:
+        self.assertEqual(_sector_board_pending_badge_text(0), "")
+        self.assertEqual(_sector_board_pending_badge_text(3), "3")
+        self.assertEqual(_sector_board_pending_badge_text(12), "9+")
+
+    def test_sector_board_command_lines(self) -> None:
+        lines = _sector_board_command_lines(
+            live_cell_name="B2",
+            pending_count=3,
+            command_focus_timesteps=[8, 4],
+        )
+        self.assertEqual(lines[0], "Queued edits: 3")
+        self.assertEqual(lines[1], "Live sector: B2")
+        self.assertIn("Trail: F0=t8 | F1=t4", lines[2])
+
     def test_sector_board_hud_sections(self) -> None:
         cell = _build_sector_board_cells(
             max_t=23,
@@ -797,6 +814,8 @@ class TestR1PygameHelpers(unittest.TestCase):
             end_t=10,
             window_start=16,
             window_end=20,
+            live_cell_name="B2",
+            pending_count=2,
             command_focus_timesteps=[8],
         )
         self.assertEqual(
@@ -806,7 +825,9 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("t=8:P6", sections[0][1][0])
         self.assertIn("window t=16..20", sections[1][1][0])
         self.assertIn("Cell", sections[2][1][0])
-        self.assertIn("F0=t8", sections[3][1][0])
+        self.assertIn("Queued edits: 2", sections[3][1][0])
+        self.assertIn("Live sector: B2", sections[3][1][1])
+        self.assertIn("F0=t8", sections[3][1][2])
 
     def test_sector_board_cell_name(self) -> None:
         self.assertEqual(_sector_board_cell_name(row=0, col=0), "A1")
