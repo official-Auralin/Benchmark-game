@@ -715,12 +715,14 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("Borders:", lines[0])
         self.assertIn("Focus trail:", lines[1])
         self.assertIn("Glyphs:", lines[2])
+        self.assertIn("click=pin", lines[2])
 
     def test_sector_board_detail_lines_without_cell(self) -> None:
         lines = _sector_board_detail_lines(None)
         self.assertEqual(len(lines), 2)
         self.assertIn("Hover a board cell", lines[0])
         self.assertIn("spreadsheet-style labels", lines[1])
+        self.assertIn("Click to pin", lines[1])
 
     def test_sector_board_detail_lines_for_cell(self) -> None:
         cell = _build_sector_board_cells(
@@ -745,6 +747,24 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("Pressure", lines[1])
         self.assertIn("Edits", lines[1])
         self.assertIn("focus", lines[1].lower())
+
+    def test_sector_board_detail_lines_for_pinned_cell(self) -> None:
+        cell = _build_sector_board_cells(
+            max_t=7,
+            timestep=2,
+            t_star=5,
+            start_t=0,
+            end_t=7,
+            window_start=4,
+            window_end=6,
+            history_counts={2: 1},
+            pressure_levels={2: 6},
+            focus_timesteps=[2],
+            cols=4,
+            rows=2,
+        )[2]
+        lines = _sector_board_detail_lines(cell, pinned=True)
+        self.assertIn("Pinned", lines[0])
 
     def test_sector_board_detail_lines_for_quiet_cell_are_explicit(self) -> None:
         cell = _build_sector_board_cells(
@@ -831,6 +851,33 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(lines[0], "window t=16..20 | target t*=18")
         self.assertIn("contains target t*=18", lines[1])
 
+    def test_sector_board_objective_lines_for_pinned_target_cell(self) -> None:
+        cells = _build_sector_board_cells(
+            max_t=23,
+            timestep=8,
+            t_star=18,
+            start_t=7,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={8: 1},
+            pressure_levels={8: 6},
+            focus_timesteps=[8],
+            cols=8,
+            rows=6,
+        )
+        cell = next(cell for cell in cells if cell.start_t <= 18 <= cell.end_t)
+        lines = _sector_board_objective_lines(
+            hovered_cell=cell,
+            live_cell_name="B2",
+            timestep=8,
+            t_star=18,
+            window_start=16,
+            window_end=20,
+            pinned=True,
+        )
+        self.assertIn("pinned", lines[1])
+
     def test_sector_board_hud_sections(self) -> None:
         cell = _build_sector_board_cells(
             max_t=23,
@@ -871,6 +918,39 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("Queued edits: 2", sections[3][1][0])
         self.assertIn("Live sector: B2", sections[3][1][1])
         self.assertIn("F0=t8", sections[3][1][2])
+
+    def test_sector_board_hud_sections_with_pinned_cell(self) -> None:
+        cell = _build_sector_board_cells(
+            max_t=23,
+            timestep=8,
+            t_star=18,
+            start_t=7,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={8: 1},
+            pressure_levels={8: 6},
+            focus_timesteps=[8],
+            cols=8,
+            rows=6,
+        )[8]
+        sections = _sector_board_hud_sections(
+            hovered_cell=cell,
+            pressure_levels={8: 6},
+            max_t=23,
+            timestep=8,
+            t_star=18,
+            start_t=7,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            live_cell_name="B2",
+            pending_count=2,
+            command_focus_timesteps=[8],
+            pinned=True,
+        )
+        self.assertEqual(sections[2][0], "Pinned intel")
+        self.assertIn("Pinned", sections[2][1][0])
 
     def test_sector_board_cell_name(self) -> None:
         self.assertEqual(_sector_board_cell_name(row=0, col=0), "A1")

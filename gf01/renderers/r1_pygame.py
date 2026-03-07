@@ -156,6 +156,8 @@ class _R1PygameSession:
         self._command_response_trail = _CommandResponseTrailModel()
         self._command_focus_timesteps: list[int] = []
         self._hovered_sector_range: tuple[int, int] | None = None
+        self._sector_board_hitboxes: list[tuple[int, int, int, int, _SectorBoardCell]] = []
+        self._pinned_sector_coords: tuple[int, int] | None = None
         self._show_help_overlay = True
         self._show_observation_inspector = False
 
@@ -284,8 +286,11 @@ class _R1PygameSession:
         x: int,
         y: int,
         hovered_cell: _SectorBoardCell | None,
+        pinned: bool,
         pressure_levels: Mapping[int, int],
         max_t: int,
+        timestep: int,
+        t_star: int,
         start_t: int,
         end_t: int,
         window_start: int,
@@ -310,6 +315,7 @@ class _R1PygameSession:
             pending_count=pending_count,
             command_focus_timestep=command_focus_timestep,
             command_focus_timesteps=command_focus_timesteps,
+            pinned=pinned,
         )
         card_positions = (
             (hud_x, y + SECTOR_BOARD_CARD_ROW_1_Y),
@@ -527,6 +533,7 @@ class _R1PygameSession:
         gap = 4
         board_x = x + 36
         board_y = y + 52
+        hitboxes: list[tuple[int, int, int, int, _SectorBoardCell]] = []
         for col_idx in range(SECTOR_BOARD_COLS):
             col_label = _sector_board_col_label(col_idx)
             self._draw_text(
@@ -538,12 +545,16 @@ class _R1PygameSession:
             )
         hovered_cell: _SectorBoardCell | None = None
         live_cell: _SectorBoardCell | None = None
+        pinned_cell: _SectorBoardCell | None = None
         for cell in cells:
             cx = board_x + cell.col * (cell_size + gap)
             cy = board_y + cell.row * (cell_size + gap)
+            hitboxes.append((cx, cy, cell_size, cell_size, cell))
             is_live_cell = _range_contains_t((cell.start_t, cell.end_t), timestep)
             if is_live_cell:
                 live_cell = cell
+            if self._pinned_sector_coords == (cell.row, cell.col):
+                pinned_cell = cell
             if cell.col == 0:
                 self._draw_text(
                     str(cell.row + 1),
@@ -576,6 +587,8 @@ class _R1PygameSession:
             if mouse_pos is not None and rect.collidepoint(mouse_pos):
                 hovered_cell = cell
                 border = (230, 220, 162)
+            if self._pinned_sector_coords == (cell.row, cell.col):
+                border = (205, 154, 228)
             self._draw_rect(
                 cx,
                 cy,
@@ -601,10 +614,12 @@ class _R1PygameSession:
                     pending_count=pending_count,
                 )
 
+        self._sector_board_hitboxes = hitboxes
+        active_cell = pinned_cell if pinned_cell is not None else hovered_cell
         self._hovered_sector_range = (
             None
-            if hovered_cell is None
-            else (int(hovered_cell.start_t), int(hovered_cell.end_t))
+            if active_cell is None
+            else (int(active_cell.start_t), int(active_cell.end_t))
         )
         live_cell_name = (
             None
@@ -614,9 +629,12 @@ class _R1PygameSession:
         self._draw_sector_board_hud(
             x=x,
             y=y,
-            hovered_cell=hovered_cell,
+            hovered_cell=active_cell,
+            pinned=pinned_cell is not None,
             pressure_levels=pressure_levels,
             max_t=max_t,
+            timestep=timestep,
+            t_star=t_star,
             start_t=start_t,
             end_t=end_t,
             window_start=window_start,
@@ -894,6 +912,8 @@ class _R1PygameSession:
             self._command_response_trail.reset()
             self._command_focus_timesteps = []
             self._hovered_sector_range = None
+            self._sector_board_hitboxes = []
+            self._pinned_sector_coords = None
             self._show_help_overlay = True
             self._show_observation_inspector = False
         previous_y_t = self._previous_observed_y_t
@@ -1008,6 +1028,7 @@ class _R1PygameSession:
                         _cycle_pending_bit(pending, visible_aps[index])
                 if event.type == self.pg.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = event.pos
+                    consumed = False
                     for button in current_buttons:
                         if not button.contains(mx, my):
                             continue
@@ -1015,6 +1036,18 @@ class _R1PygameSession:
                             pending.pop(button.ap, None)
                         else:
                             pending[button.ap] = button.value
+                        consumed = True
+                        break
+                    if consumed:
+                        continue
+                    for x0, y0, w0, h0, cell in self._sector_board_hitboxes:
+                        if not (x0 <= mx <= x0 + w0 and y0 <= my <= y0 + h0):
+                            continue
+                        coords = (cell.row, cell.col)
+                        if self._pinned_sector_coords == coords:
+                            self._pinned_sector_coords = None
+                        else:
+                            self._pinned_sector_coords = coords
                         break
 
             self.screen.fill((18, 24, 34))

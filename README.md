@@ -116,6 +116,9 @@ Visual renderer notes (both backends):
   `N/T/B` markers for now/target/both).
 - In `pygame` mode, hover a sector-board cell to inspect the represented
   timestep bucket (`t` range, pressure token, edit token, and marker).
+- In `pygame` mode, click a sector-board cell to pin its intel card and keep
+  that mission/timeline comparison visible while you move back to the command
+  controls.
 - In `pygame` mode, the `Mission window` card now explains whether the hovered
   sector contains the live turn, the target timestep, overlaps the scoring
   window, or sits outside it.
