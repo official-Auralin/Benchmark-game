@@ -122,6 +122,9 @@ Visual renderer notes (both backends):
 - In `pygame` mode, the left-side command area is now a `Command console` that
   tells you which live sector the next commit will affect and whether any
   pinned sector is only reference intel or matches the live edit target.
+- In `pygame` mode, queued edits now appear as a `Queued loadout` strip inside
+  the command console so pending actions read like a planned loadout rather
+  than only as raw row toggles.
 - In `pygame` mode, the `Mission window` card now explains whether the hovered
   sector contains the live turn, the target timestep, overlaps the scoring
   window, or sits outside it.

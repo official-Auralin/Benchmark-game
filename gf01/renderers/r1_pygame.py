@@ -73,6 +73,7 @@ from .r1_pygame_helpers import (
     _objective_window_pressure_summary,
     _observation_inspector_lines,
     _onboarding_strip_lines,
+    _pending_loadout_tokens,
     _paginate_input_aps,
     _place_minimap_bracket,
     _pressure_level_from_observation,
@@ -131,10 +132,15 @@ COMMAND_CONSOLE_W = 580
 COMMAND_CONSOLE_TITLE_Y = 42
 COMMAND_CONSOLE_INFO_1_Y = 20
 COMMAND_CONSOLE_INFO_2_Y = 2
-COMMAND_CONSOLE_PAGE_Y = 20
-COMMAND_CONSOLE_GROUPS_Y = 40
-COMMAND_CONSOLE_ROWS_Y = 48
-COMMAND_CONSOLE_MIN_H = 148
+COMMAND_CONSOLE_LOADOUT_LABEL_Y = 38
+COMMAND_CONSOLE_LOADOUT_Y = 56
+COMMAND_CONSOLE_PAGE_Y = 84
+COMMAND_CONSOLE_GROUPS_Y = 104
+COMMAND_CONSOLE_ROWS_Y = 112
+COMMAND_CONSOLE_MIN_H = 196
+COMMAND_CONSOLE_LOADOUT_CHIP_W = 92
+COMMAND_CONSOLE_LOADOUT_CHIP_H = 22
+COMMAND_CONSOLE_LOADOUT_CHIP_GAP = 8
 
 class _R1PygameSession:
     def __init__(self) -> None:
@@ -293,6 +299,36 @@ class _R1PygameSession:
             small=True,
             color=(18, 24, 34),
         )
+
+    def _draw_loadout_chips(
+        self,
+        *,
+        x: int,
+        y: int,
+        pending: Mapping[str, int],
+    ) -> None:
+        for idx, token in enumerate(_pending_loadout_tokens(pending)):
+            chip_x = x + idx * (
+                COMMAND_CONSOLE_LOADOUT_CHIP_W + COMMAND_CONSOLE_LOADOUT_CHIP_GAP
+            )
+            accent = (126, 196, 134) if token != "empty" and not token.startswith("+") else (115, 136, 168)
+            fill = (34, 52, 66) if token != "empty" else (40, 48, 64)
+            self._draw_rect(
+                chip_x,
+                y,
+                COMMAND_CONSOLE_LOADOUT_CHIP_W,
+                COMMAND_CONSOLE_LOADOUT_CHIP_H,
+                fill=fill,
+                border=accent,
+                border_width=1,
+            )
+            self._draw_text(
+                _truncate_ui_text(token, max_len=12),
+                chip_x + 8,
+                y + 4,
+                small=True,
+                color=(220, 230, 245),
+            )
 
     def _draw_sector_board_hud(
         self,
@@ -885,6 +921,18 @@ class _R1PygameSession:
             panel_y + COMMAND_CONSOLE_INFO_2_Y,
             small=True,
             color=(176, 191, 216),
+        )
+        self._draw_text(
+            "Queued loadout",
+            24,
+            panel_y + COMMAND_CONSOLE_LOADOUT_LABEL_Y,
+            small=True,
+            color=(198, 212, 234),
+        )
+        self._draw_loadout_chips(
+            x=24,
+            y=panel_y + COMMAND_CONSOLE_LOADOUT_Y,
+            pending=pending,
         )
         group_label = "ALL" if group_filter is None else group_filter
         collapse_label = "ON" if collapse_rows else "OFF"
