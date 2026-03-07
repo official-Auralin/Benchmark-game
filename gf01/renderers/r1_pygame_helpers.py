@@ -597,11 +597,49 @@ def _sector_board_command_lines(
     return lines
 
 
+def _sector_board_objective_lines(
+    *,
+    hovered_cell: _SectorBoardCell | None,
+    live_cell_name: str | None,
+    timestep: int,
+    t_star: int,
+    window_start: int,
+    window_end: int,
+) -> list[str]:
+    header = f"window t={window_start}..{window_end} | target t*={t_star}"
+    if hovered_cell is None:
+        live_state = (
+            "inside window"
+            if int(window_start) <= int(timestep) <= int(window_end)
+            else "outside window"
+        )
+        if live_cell_name:
+            detail = f"live {live_cell_name} holds now t={int(timestep)} ({live_state})"
+        else:
+            detail = f"now t={int(timestep)} is {live_state}"
+        return [header, detail]
+    cell_name = _sector_board_cell_name(row=hovered_cell.row, col=hovered_cell.col)
+    if int(hovered_cell.start_t) <= int(timestep) <= int(hovered_cell.end_t):
+        if int(hovered_cell.start_t) <= int(t_star) <= int(hovered_cell.end_t):
+            detail = f"hover {cell_name} contains now t={int(timestep)} and target t*"
+        else:
+            detail = f"hover {cell_name} contains now t={int(timestep)}"
+    elif int(hovered_cell.start_t) <= int(t_star) <= int(hovered_cell.end_t):
+        detail = f"hover {cell_name} contains target t*={int(t_star)}"
+    elif hovered_cell.in_objective_window:
+        detail = f"hover {cell_name} overlaps the mission window"
+    else:
+        detail = f"hover {cell_name} is outside the mission window"
+    return [header, detail]
+
+
 def _sector_board_hud_sections(
     *,
     hovered_cell: _SectorBoardCell | None,
     pressure_levels: Mapping[int, int],
     max_t: int,
+    timestep: int,
+    t_star: int,
     start_t: int,
     end_t: int,
     window_start: int,
@@ -618,10 +656,14 @@ def _sector_board_hud_sections(
         ("Hot sectors", [hot_summary]),
         (
             "Mission window",
-            [
-                f"window t={window_start}..{window_end}",
-                f"view t={start_t}..{end_t} | horizon {max_t + 1}",
-            ],
+            _sector_board_objective_lines(
+                hovered_cell=hovered_cell,
+                live_cell_name=live_cell_name,
+                timestep=timestep,
+                t_star=t_star,
+                window_start=window_start,
+                window_end=window_end,
+            ),
         ),
         ("Hover intel", _sector_board_detail_lines(hovered_cell)),
         (

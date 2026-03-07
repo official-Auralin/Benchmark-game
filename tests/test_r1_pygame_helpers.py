@@ -53,6 +53,7 @@ from gf01.renderers.r1_pygame_helpers import (
     _sector_board_hover_summary,
     _sector_board_hud_sections,
     _sector_board_legend_lines,
+    _sector_board_objective_lines,
     _sector_board_pending_badge_text,
     _build_timeline_minimap,
     _range_contains_t,
@@ -791,6 +792,45 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(lines[1], "Live sector: B2")
         self.assertIn("Trail: F0=t8 | F1=t4", lines[2])
 
+    def test_sector_board_objective_lines_without_hover_cell(self) -> None:
+        lines = _sector_board_objective_lines(
+            hovered_cell=None,
+            live_cell_name="B2",
+            timestep=8,
+            t_star=18,
+            window_start=16,
+            window_end=20,
+        )
+        self.assertEqual(lines[0], "window t=16..20 | target t*=18")
+        self.assertEqual(lines[1], "live B2 holds now t=8 (outside window)")
+
+    def test_sector_board_objective_lines_for_hovered_target_cell(self) -> None:
+        cells = _build_sector_board_cells(
+            max_t=23,
+            timestep=8,
+            t_star=18,
+            start_t=7,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={8: 1},
+            pressure_levels={8: 6},
+            focus_timesteps=[8],
+            cols=8,
+            rows=6,
+        )
+        cell = next(cell for cell in cells if cell.start_t <= 18 <= cell.end_t)
+        lines = _sector_board_objective_lines(
+            hovered_cell=cell,
+            live_cell_name="B2",
+            timestep=8,
+            t_star=18,
+            window_start=16,
+            window_end=20,
+        )
+        self.assertEqual(lines[0], "window t=16..20 | target t*=18")
+        self.assertIn("contains target t*=18", lines[1])
+
     def test_sector_board_hud_sections(self) -> None:
         cell = _build_sector_board_cells(
             max_t=23,
@@ -810,6 +850,8 @@ class TestR1PygameHelpers(unittest.TestCase):
             hovered_cell=cell,
             pressure_levels={8: 6},
             max_t=23,
+            timestep=8,
+            t_star=18,
             start_t=7,
             end_t=10,
             window_start=16,
@@ -823,7 +865,8 @@ class TestR1PygameHelpers(unittest.TestCase):
             ["Hot sectors", "Mission window", "Hover intel", "Command trail"],
         )
         self.assertIn("t=8:P6", sections[0][1][0])
-        self.assertIn("window t=16..20", sections[1][1][0])
+        self.assertIn("window t=16..20 | target t*=18", sections[1][1][0])
+        self.assertIn("outside the mission window", sections[1][1][1])
         self.assertIn("Cell", sections[2][1][0])
         self.assertIn("Queued edits: 2", sections[3][1][0])
         self.assertIn("Live sector: B2", sections[3][1][1])

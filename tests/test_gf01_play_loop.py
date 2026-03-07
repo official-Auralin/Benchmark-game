@@ -329,7 +329,7 @@ class TestPlayableLoop(unittest.TestCase):
         self.assertEqual(payload.get("status"), "error")
         self.assertEqual(payload.get("error_type"), "episode_aborted")
 
-    def test_choose_action_pygame_renders_first_frame_under_dummy_sdl(self) -> None:
+    def test_choose_action_pygame_smoke_under_dummy_sdl(self) -> None:
         with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
             module = importlib.import_module("gf01.renderers.r1_pygame")
             module._SESSION = None

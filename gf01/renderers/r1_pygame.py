@@ -300,6 +300,8 @@ class _R1PygameSession:
             hovered_cell=hovered_cell,
             pressure_levels=pressure_levels,
             max_t=max_t,
+            timestep=timestep,
+            t_star=t_star,
             start_t=start_t,
             end_t=end_t,
             window_start=window_start,
