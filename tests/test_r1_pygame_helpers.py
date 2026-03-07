@@ -44,6 +44,7 @@ from gf01.renderers.r1_pygame_helpers import (
     _summarize_pending_interventions,
     _summarize_visible_ap_groups,
     _build_sector_board_cells,
+    _command_console_lines,
     _sector_board_cell_glyph,
     _sector_board_col_label,
     _sector_board_command_lines,
@@ -811,6 +812,35 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(lines[0], "Queued edits: 3")
         self.assertEqual(lines[1], "Live sector: B2")
         self.assertIn("Trail: F0=t8 | F1=t4", lines[2])
+
+    def test_command_console_lines_without_pinned_sector(self) -> None:
+        lines = _command_console_lines(
+            timestep=8,
+            live_sector_name="B2",
+            pinned_sector_name=None,
+            pinned_sector_range=None,
+        )
+        self.assertEqual(lines[0], "Live sector: B2 receives the next commit.")
+        self.assertIn("click a sector to pin", lines[1].lower())
+
+    def test_command_console_lines_with_reference_pinned_sector(self) -> None:
+        lines = _command_console_lines(
+            timestep=8,
+            live_sector_name="B2",
+            pinned_sector_name="F5",
+            pinned_sector_range=(16, 19),
+        )
+        self.assertEqual(lines[0], "Live sector: B2 receives the next commit.")
+        self.assertIn("F5 (t=16..19) is reference only", lines[1])
+
+    def test_command_console_lines_with_live_pinned_sector(self) -> None:
+        lines = _command_console_lines(
+            timestep=8,
+            live_sector_name="B2",
+            pinned_sector_name="B2",
+            pinned_sector_range=(8, 8),
+        )
+        self.assertIn("matches the live sector", lines[1])
 
     def test_sector_board_objective_lines_without_hover_cell(self) -> None:
         lines = _sector_board_objective_lines(

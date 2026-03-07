@@ -58,6 +58,7 @@ from .r1_pygame_helpers import (
     _canonical_exposure_payload,
     _clamp_page_size,
     _clamp_timeline_span,
+    _command_console_lines,
     _control_visible_pool,
     _cycle_pending_bit,
     _describe_output_delta,
@@ -124,6 +125,16 @@ SECTOR_BOARD_HUD_CARD_ACCENTS = (
     (98, 148, 188),
     (126, 196, 134),
 )
+COMMAND_CONSOLE_X = 16
+COMMAND_CONSOLE_Y_OFFSET = 56
+COMMAND_CONSOLE_W = 580
+COMMAND_CONSOLE_TITLE_Y = 42
+COMMAND_CONSOLE_INFO_1_Y = 20
+COMMAND_CONSOLE_INFO_2_Y = 2
+COMMAND_CONSOLE_PAGE_Y = 20
+COMMAND_CONSOLE_GROUPS_Y = 40
+COMMAND_CONSOLE_ROWS_Y = 48
+COMMAND_CONSOLE_MIN_H = 148
 
 class _R1PygameSession:
     def __init__(self) -> None:
@@ -158,6 +169,9 @@ class _R1PygameSession:
         self._hovered_sector_range: tuple[int, int] | None = None
         self._sector_board_hitboxes: list[tuple[int, int, int, int, _SectorBoardCell]] = []
         self._pinned_sector_coords: tuple[int, int] | None = None
+        self._live_sector_name: str | None = None
+        self._pinned_sector_name: str | None = None
+        self._pinned_sector_range: tuple[int, int] | None = None
         self._show_help_overlay = True
         self._show_observation_inspector = False
 
@@ -626,6 +640,17 @@ class _R1PygameSession:
             if live_cell is None
             else _sector_board_cell_name(row=live_cell.row, col=live_cell.col)
         )
+        self._live_sector_name = live_cell_name
+        self._pinned_sector_name = (
+            None
+            if pinned_cell is None
+            else _sector_board_cell_name(row=pinned_cell.row, col=pinned_cell.col)
+        )
+        self._pinned_sector_range = (
+            None
+            if pinned_cell is None
+            else (int(pinned_cell.start_t), int(pinned_cell.end_t))
+        )
         self._draw_sector_board_hud(
             x=x,
             y=y,
@@ -809,6 +834,7 @@ class _R1PygameSession:
     def _draw_controls(
         self,
         *,
+        timestep: int,
         input_aps: list[str],
         all_input_aps: list[str],
         pending: dict[str, int],
@@ -819,11 +845,46 @@ class _R1PygameSession:
         collapse_rows: bool,
     ) -> tuple[list[_Button], int, int, int]:
         buttons: list[_Button] = []
-        self._draw_text("Set interventions for current timestep:", 24, y_start - 26)
         visible_aps, page, total_pages = _paginate_input_aps(
             input_aps,
             page=page,
             page_size=page_size,
+        )
+        panel_h = max(
+            COMMAND_CONSOLE_MIN_H,
+            COMMAND_CONSOLE_ROWS_Y + 32 + len(visible_aps) * 40,
+        )
+        panel_y = y_start - COMMAND_CONSOLE_Y_OFFSET
+        accent = (205, 154, 228) if self._pinned_sector_name else (102, 124, 156)
+        self._draw_rect(
+            COMMAND_CONSOLE_X,
+            panel_y,
+            COMMAND_CONSOLE_W,
+            panel_h,
+            fill=(24, 34, 50),
+            border=accent,
+            border_width=2,
+        )
+        self._draw_text("Command console", 24, panel_y + COMMAND_CONSOLE_TITLE_Y)
+        console_lines = _command_console_lines(
+            timestep=timestep,
+            live_sector_name=self._live_sector_name,
+            pinned_sector_name=self._pinned_sector_name,
+            pinned_sector_range=self._pinned_sector_range,
+        )
+        self._draw_text(
+            console_lines[0],
+            24,
+            panel_y + COMMAND_CONSOLE_INFO_1_Y,
+            small=True,
+            color=(198, 212, 234),
+        )
+        self._draw_text(
+            console_lines[1],
+            24,
+            panel_y + COMMAND_CONSOLE_INFO_2_Y,
+            small=True,
+            color=(176, 191, 216),
         )
         group_label = "ALL" if group_filter is None else group_filter
         collapse_label = "ON" if collapse_rows else "OFF"
@@ -832,13 +893,13 @@ class _R1PygameSession:
             f"group={group_label} collapse={collapse_label} "
             "(Left/Right, +/-, G group, C collapse)",
             24,
-            y_start - 4,
+            panel_y + COMMAND_CONSOLE_PAGE_Y,
             small=True,
         )
         self._draw_text(
             _summarize_visible_ap_groups(visible_aps),
             24,
-            y_start + 16,
+            panel_y + COMMAND_CONSOLE_GROUPS_Y,
             small=True,
             color=(176, 191, 216),
         )
@@ -846,7 +907,7 @@ class _R1PygameSession:
             self._draw_text(
                 "Collapsed map rows:",
                 420,
-                y_start - 4,
+                panel_y + COMMAND_CONSOLE_PAGE_Y,
                 small=True,
                 color=(176, 191, 216),
             )
@@ -854,7 +915,7 @@ class _R1PygameSession:
                 self._draw_text(
                     line,
                     420,
-                    y_start + 16 + idx * 18,
+                    panel_y + COMMAND_CONSOLE_GROUPS_Y + idx * 18,
                     small=True,
                     color=(176, 191, 216),
                 )
@@ -862,13 +923,13 @@ class _R1PygameSession:
             self._draw_text(
                 "No AP rows visible (press G to expand one group).",
                 24,
-                y_start + 52,
+                panel_y + COMMAND_CONSOLE_ROWS_Y,
                 small=True,
                 color=(176, 191, 216),
             )
             return buttons, page, total_pages, 0
         for idx, ap in enumerate(visible_aps):
-            y = y_start + 24 + idx * 40
+            y = panel_y + COMMAND_CONSOLE_ROWS_Y + idx * 40
             self._draw_text(ap, 24, y + 8)
 
             for choice_idx, bit in enumerate((0, 1)):
@@ -914,6 +975,9 @@ class _R1PygameSession:
             self._hovered_sector_range = None
             self._sector_board_hitboxes = []
             self._pinned_sector_coords = None
+            self._live_sector_name = None
+            self._pinned_sector_name = None
+            self._pinned_sector_range = None
             self._show_help_overlay = True
             self._show_observation_inspector = False
         previous_y_t = self._previous_observed_y_t
@@ -1105,6 +1169,7 @@ class _R1PygameSession:
                 linked_range=self._hovered_sector_range,
             )
             current_buttons, page, _, _ = self._draw_controls(
+                timestep=int(timestep),
                 input_aps=visible_pool,
                 all_input_aps=input_aps_all,
                 pending=pending,
