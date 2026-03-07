@@ -632,6 +632,21 @@ def _command_console_lines(
     return lines
 
 
+def _pending_loadout_tokens(
+    pending: Mapping[str, int],
+    *,
+    max_items: int = 4,
+) -> list[str]:
+    if not pending:
+        return ["empty"]
+    items = [f"{ap}={int(value)}" for ap, value in sorted(pending.items())]
+    limit = max(1, int(max_items))
+    if len(items) <= limit:
+        return items
+    remaining = len(items) - limit
+    return items[:limit] + [f"+{remaining} more"]
+
+
 def _sector_board_objective_lines(
     *,
     hovered_cell: _SectorBoardCell | None,

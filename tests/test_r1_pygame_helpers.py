@@ -33,6 +33,7 @@ from gf01.renderers.r1_pygame_helpers import (
     _objective_window_bounds,
     _observation_inspector_lines,
     _paginate_input_aps,
+    _pending_loadout_tokens,
     _pressure_token,
     _pressure_level_from_observation,
     _format_top_pressure_summary,
@@ -841,6 +842,24 @@ class TestR1PygameHelpers(unittest.TestCase):
             pinned_sector_range=(8, 8),
         )
         self.assertIn("matches the live sector", lines[1])
+
+    def test_pending_loadout_tokens_empty(self) -> None:
+        self.assertEqual(_pending_loadout_tokens({}), ["empty"])
+
+    def test_pending_loadout_tokens_sorted(self) -> None:
+        self.assertEqual(
+            _pending_loadout_tokens({"in2": 0, "in0": 1}),
+            ["in0=1", "in2=0"],
+        )
+
+    def test_pending_loadout_tokens_overflow(self) -> None:
+        self.assertEqual(
+            _pending_loadout_tokens(
+                {"in0": 1, "in1": 0, "in2": 1, "in3": 0, "in4": 1},
+                max_items=3,
+            ),
+            ["in0=1", "in1=0", "in2=1", "+2 more"],
+        )
 
     def test_sector_board_objective_lines_without_hover_cell(self) -> None:
         lines = _sector_board_objective_lines(
