@@ -509,16 +509,21 @@ def _sector_board_legend_lines() -> list[str]:
     return [
         "Borders: bright=viewport | amber=now/target | mint=hover link",
         "Focus trail: green=F0 | cyan=F1 | blue=F2",
-        "Glyphs: p=pressure | e=edits | *=both | N/T/B markers",
+        "Glyphs: p=pressure | e=edits | *=both | N/T/B markers | click=pin",
     ]
 
 
-def _sector_board_detail_lines(cell: _SectorBoardCell | None) -> list[str]:
+def _sector_board_detail_lines(
+    cell: _SectorBoardCell | None,
+    *,
+    pinned: bool = False,
+) -> list[str]:
     if cell is None:
         return [
             "Hover a board cell for sector-range details.",
-            "Coords use spreadsheet-style labels such as A1, B3, H6.",
+            "Coords use spreadsheet-style labels such as A1, B3, H6. Click to pin.",
         ]
+    prefix = "Pinned" if pinned else "Cell"
     status_tokens: list[str] = []
     if cell.in_viewport:
         status_tokens.append("viewport")
@@ -534,7 +539,7 @@ def _sector_board_detail_lines(cell: _SectorBoardCell | None) -> list[str]:
         else ", ".join(status_tokens)
     )
     return [
-        f"Cell {_sector_board_cell_name(row=cell.row, col=cell.col)}: "
+        f"{prefix} {_sector_board_cell_name(row=cell.row, col=cell.col)}: "
         f"t={cell.start_t}..{cell.end_t}",
         (
             f"Status {status_part} | Pressure {_pressure_token(cell.pressure_level)} | "
@@ -605,6 +610,7 @@ def _sector_board_objective_lines(
     t_star: int,
     window_start: int,
     window_end: int,
+    pinned: bool = False,
 ) -> list[str]:
     header = f"window t={window_start}..{window_end} | target t*={t_star}"
     if hovered_cell is None:
@@ -618,18 +624,21 @@ def _sector_board_objective_lines(
         else:
             detail = f"now t={int(timestep)} is {live_state}"
         return [header, detail]
+    subject = "pinned" if pinned else "hover"
     cell_name = _sector_board_cell_name(row=hovered_cell.row, col=hovered_cell.col)
     if int(hovered_cell.start_t) <= int(timestep) <= int(hovered_cell.end_t):
         if int(hovered_cell.start_t) <= int(t_star) <= int(hovered_cell.end_t):
-            detail = f"hover {cell_name} contains now t={int(timestep)} and target t*"
+            detail = (
+                f"{subject} {cell_name} contains now t={int(timestep)} and target t*"
+            )
         else:
-            detail = f"hover {cell_name} contains now t={int(timestep)}"
+            detail = f"{subject} {cell_name} contains now t={int(timestep)}"
     elif int(hovered_cell.start_t) <= int(t_star) <= int(hovered_cell.end_t):
-        detail = f"hover {cell_name} contains target t*={int(t_star)}"
+        detail = f"{subject} {cell_name} contains target t*={int(t_star)}"
     elif hovered_cell.in_objective_window:
-        detail = f"hover {cell_name} overlaps the mission window"
+        detail = f"{subject} {cell_name} overlaps the mission window"
     else:
-        detail = f"hover {cell_name} is outside the mission window"
+        detail = f"{subject} {cell_name} is outside the mission window"
     return [header, detail]
 
 
@@ -648,6 +657,7 @@ def _sector_board_hud_sections(
     pending_count: int,
     command_focus_timestep: int | None = None,
     command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
+    pinned: bool = False,
 ) -> list[tuple[str, list[str]]]:
     hot_summary = _format_top_pressure_summary(pressure_levels, max_items=3)
     if hot_summary == "(none yet)":
@@ -663,9 +673,13 @@ def _sector_board_hud_sections(
                 t_star=t_star,
                 window_start=window_start,
                 window_end=window_end,
+                pinned=pinned,
             ),
         ),
-        ("Hover intel", _sector_board_detail_lines(hovered_cell)),
+        (
+            "Pinned intel" if pinned else "Hover intel",
+            _sector_board_detail_lines(hovered_cell, pinned=pinned),
+        ),
         (
             "Command trail",
             _sector_board_command_lines(
