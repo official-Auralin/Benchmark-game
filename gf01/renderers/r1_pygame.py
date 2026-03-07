@@ -63,7 +63,6 @@ from .r1_pygame_helpers import (
     _describe_output_delta,
     _edits_token,
     _effect_status_badge,
-    _format_top_pressure_summary,
     _group_rows_for_controls,
     _grouped_input_aps,
     _help_overlay_lines,
@@ -81,7 +80,7 @@ from .r1_pygame_helpers import (
     _ranges_overlap,
     _sector_board_cell_glyph,
     _sector_board_cell_name,
-    _sector_board_detail_lines,
+    _sector_board_hud_sections,
     _sector_board_legend_lines,
     _sector_bucket_bounds,
     _sector_pressure_fill,
@@ -103,14 +102,23 @@ SECTOR_BOARD_LEGEND_X_OFFSET = 14
 SECTOR_BOARD_LEGEND_Y_OFFSET = 30
 SECTOR_BOARD_LEGEND_LINE_STEP = 18
 SECTOR_BOARD_HUD_X_OFFSET = 220
-SECTOR_BOARD_HUD_Y_HOT = 56
-SECTOR_BOARD_HUD_Y_WINDOW = 78
-SECTOR_BOARD_HUD_Y_HORIZON = 100
-SECTOR_BOARD_HUD_Y_DETAIL = 122
-SECTOR_BOARD_HUD_DETAIL_LINE_STEP = 20
-SECTOR_BOARD_HUD_Y_FOCUS = 162
+SECTOR_BOARD_CARD_ROW_1_Y = 46
+SECTOR_BOARD_CARD_ROW_2_Y = 108
+SECTOR_BOARD_CARD_W = 144
+SECTOR_BOARD_CARD_GAP_X = 10
+SECTOR_BOARD_CARD_LINE_X = 10
+SECTOR_BOARD_CARD_TITLE_Y = 8
+SECTOR_BOARD_CARD_LINE_Y = 24
+SECTOR_BOARD_CARD_LINE_STEP = 14
+SECTOR_BOARD_CARD_FILL = (28, 38, 54)
 SECTOR_BOARD_HUD_PRIMARY_COLOR = (198, 212, 234)
 SECTOR_BOARD_HUD_SECONDARY_COLOR = (176, 191, 216)
+SECTOR_BOARD_HUD_CARD_ACCENTS = (
+    (168, 114, 76),
+    (142, 132, 94),
+    (98, 148, 188),
+    (126, 196, 134),
+)
 
 class _R1PygameSession:
     def __init__(self) -> None:
@@ -203,6 +211,41 @@ class _R1PygameSession:
                 color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
             )
 
+    def _draw_sector_info_card(
+        self,
+        *,
+        x: int,
+        y: int,
+        title: str,
+        lines: list[str],
+        accent: tuple[int, int, int],
+    ) -> None:
+        card_h = 26 + len(lines) * SECTOR_BOARD_CARD_LINE_STEP
+        self._draw_rect(
+            x,
+            y,
+            SECTOR_BOARD_CARD_W,
+            card_h,
+            fill=SECTOR_BOARD_CARD_FILL,
+            border=accent,
+            border_width=2,
+        )
+        self._draw_text(
+            title,
+            x + SECTOR_BOARD_CARD_LINE_X,
+            y + SECTOR_BOARD_CARD_TITLE_Y,
+            small=True,
+            color=SECTOR_BOARD_HUD_PRIMARY_COLOR,
+        )
+        for idx, line in enumerate(lines):
+            self._draw_text(
+                _truncate_ui_text(line, max_len=18),
+                x + SECTOR_BOARD_CARD_LINE_X,
+                y + SECTOR_BOARD_CARD_LINE_Y + idx * SECTOR_BOARD_CARD_LINE_STEP,
+                small=True,
+                color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
+            )
+
     def _draw_sector_board_hud(
         self,
         *,
@@ -219,64 +262,33 @@ class _R1PygameSession:
         command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
     ) -> None:
         hud_x = x + SECTOR_BOARD_HUD_X_OFFSET
-        self._draw_text(
-            _truncate_ui_text(
-                "Hot sectors: " + _format_top_pressure_summary(pressure_levels, max_items=4),
-                max_len=66,
-            ),
-            hud_x,
-            y + SECTOR_BOARD_HUD_Y_HOT,
-            small=True,
-            color=SECTOR_BOARD_HUD_PRIMARY_COLOR,
+        sections = _sector_board_hud_sections(
+            hovered_cell=hovered_cell,
+            pressure_levels=pressure_levels,
+            max_t=max_t,
+            start_t=start_t,
+            end_t=end_t,
+            window_start=window_start,
+            window_end=window_end,
+            command_focus_timestep=command_focus_timestep,
+            command_focus_timesteps=command_focus_timesteps,
         )
-        self._draw_text(
-            f"window t={window_start}..{window_end} | viewport t={start_t}..{end_t}",
-            hud_x,
-            y + SECTOR_BOARD_HUD_Y_WINDOW,
-            small=True,
-            color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
+        card_positions = (
+            (hud_x, y + SECTOR_BOARD_CARD_ROW_1_Y),
+            (hud_x + SECTOR_BOARD_CARD_W + SECTOR_BOARD_CARD_GAP_X, y + SECTOR_BOARD_CARD_ROW_1_Y),
+            (hud_x, y + SECTOR_BOARD_CARD_ROW_2_Y),
+            (hud_x + SECTOR_BOARD_CARD_W + SECTOR_BOARD_CARD_GAP_X, y + SECTOR_BOARD_CARD_ROW_2_Y),
         )
-        self._draw_text(
-            f"horizon sectors: {max_t + 1} sampled into "
-            f"{SECTOR_BOARD_ROWS}x{SECTOR_BOARD_COLS}",
-            hud_x,
-            y + SECTOR_BOARD_HUD_Y_HORIZON,
-            small=True,
-            color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
-        )
-        detail_lines = _sector_board_detail_lines(hovered_cell)
-        for idx, line in enumerate(detail_lines):
-            self._draw_text(
-                _truncate_ui_text(line, max_len=66),
-                hud_x,
-                y + SECTOR_BOARD_HUD_Y_DETAIL + idx * SECTOR_BOARD_HUD_DETAIL_LINE_STEP,
-                small=True,
-                color=(
-                    SECTOR_BOARD_HUD_PRIMARY_COLOR
-                    if idx == 0
-                    else SECTOR_BOARD_HUD_SECONDARY_COLOR
-                ),
+        for idx, ((title, lines), (card_x, card_y)) in enumerate(
+            zip(sections, card_positions)
+        ):
+            self._draw_sector_info_card(
+                x=card_x,
+                y=card_y,
+                title=title,
+                lines=lines,
+                accent=SECTOR_BOARD_HUD_CARD_ACCENTS[idx],
             )
-        trail_tokens: list[str] = []
-        if command_focus_timesteps is not None:
-            for age, t_focus in enumerate(command_focus_timesteps):
-                if age >= 3:
-                    break
-                trail_tokens.append(f"F{age}=t{int(t_focus)}")
-        elif command_focus_timestep is not None:
-            trail_tokens.append(f"F0=t{int(command_focus_timestep)}")
-        focus_label = (
-            "command focus trail: none yet"
-            if not trail_tokens
-            else "command focus trail: " + " | ".join(trail_tokens)
-        )
-        self._draw_text(
-            focus_label,
-            hud_x,
-            y + SECTOR_BOARD_HUD_Y_FOCUS,
-            small=True,
-            color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
-        )
 
     def _draw_timeline(
         self,

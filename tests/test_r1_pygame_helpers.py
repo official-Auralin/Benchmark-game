@@ -48,7 +48,9 @@ from gf01.renderers.r1_pygame_helpers import (
     _sector_board_col_label,
     _sector_board_cell_name,
     _sector_board_detail_lines,
+    _sector_board_focus_label,
     _sector_board_hover_summary,
+    _sector_board_hud_sections,
     _sector_board_legend_lines,
     _build_timeline_minimap,
     _range_contains_t,
@@ -759,6 +761,52 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertIn("Status", lines[1])
         self.assertIn("outside viewport/window", lines[1])
         self.assertIn("no marker or focus", lines[1])
+
+    def test_sector_board_focus_label_without_trail(self) -> None:
+        self.assertEqual(
+            _sector_board_focus_label(),
+            "No committed sector trail yet.",
+        )
+
+    def test_sector_board_focus_label_with_trail(self) -> None:
+        self.assertEqual(
+            _sector_board_focus_label(command_focus_timesteps=[9, 3, 20]),
+            "F0=t9 | F1=t3 | F2=t20",
+        )
+
+    def test_sector_board_hud_sections(self) -> None:
+        cell = _build_sector_board_cells(
+            max_t=23,
+            timestep=8,
+            t_star=18,
+            start_t=7,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            history_counts={8: 1},
+            pressure_levels={8: 6},
+            focus_timesteps=[8],
+            cols=8,
+            rows=6,
+        )[8]
+        sections = _sector_board_hud_sections(
+            hovered_cell=cell,
+            pressure_levels={8: 6},
+            max_t=23,
+            start_t=7,
+            end_t=10,
+            window_start=16,
+            window_end=20,
+            command_focus_timesteps=[8],
+        )
+        self.assertEqual(
+            [title for title, _lines in sections],
+            ["Hot sectors", "Mission window", "Hover intel", "Command trail"],
+        )
+        self.assertIn("t=8:P6", sections[0][1][0])
+        self.assertIn("window t=16..20", sections[1][1][0])
+        self.assertIn("Cell", sections[2][1][0])
+        self.assertIn("F0=t8", sections[3][1][0])
 
     def test_sector_board_cell_name(self) -> None:
         self.assertEqual(_sector_board_cell_name(row=0, col=0), "A1")
