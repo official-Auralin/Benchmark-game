@@ -46,6 +46,7 @@ from gf01.renderers.r1_pygame_helpers import (
     _summarize_visible_ap_groups,
     _build_sector_board_cells,
     _command_console_lines,
+    _command_row_status,
     _command_console_stage_status,
     _command_console_sector_tokens,
     _pending_loadout_entries,
@@ -891,6 +892,39 @@ class TestR1PygameHelpers(unittest.TestCase):
         )
         self.assertEqual(status[0], "TRACKING")
         self.assertIn("holds the mission target", status[1])
+
+    def test_command_row_status_target(self) -> None:
+        status = _command_row_status(
+            ap="in0",
+            pending={"in0": 1},
+            live_sector_name="E3",
+            target_sector_name="E3",
+            pinned_sector_name=None,
+        )
+        self.assertEqual(status[0], "TARGET")
+        self.assertIn("mission target", status[1])
+
+    def test_command_row_status_armed(self) -> None:
+        status = _command_row_status(
+            ap="in0",
+            pending={"in0": 1},
+            live_sector_name="B2",
+            target_sector_name="E3",
+            pinned_sector_name="B2",
+        )
+        self.assertEqual(status[0], "ARMED")
+        self.assertIn("pinned live sector B2", status[1])
+
+    def test_command_row_status_ready_with_existing_queue(self) -> None:
+        status = _command_row_status(
+            ap="in1",
+            pending={"in0": 1},
+            live_sector_name="B2",
+            target_sector_name="E3",
+            pinned_sector_name=None,
+        )
+        self.assertEqual(status[0], "READY")
+        self.assertIn("queued loadout", status[1])
 
     def test_pending_loadout_tokens_empty(self) -> None:
         self.assertEqual(_pending_loadout_tokens({}), ["empty"])
