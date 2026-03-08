@@ -10,8 +10,8 @@ versioned JSON/JSONL artifacts, and the formal benchmark semantics in
 - Stable command families: generation/evaluation/reporting, validation and
   migration, release/governance checks, q033 workflows, pilot workflows,
   playable episodes, and P0 gates.
-- This refactor does not change command names, flags, exit codes, or machine
-  output shapes.
+- This curation pass does not change command names, flags, exit codes, or
+  machine output shapes.
 
 ## Artifact Schemas
 
@@ -37,6 +37,7 @@ with code, tests, and documentation.
 ## Invariants
 
 - Generation is deterministic for fixed inputs.
+- Track separation remains strict across `EVAL-CB`, `EVAL-TA`, and `EVAL-OC`.
 - Strict validation remains the guard for official or release-grade artifacts.
 - Renderer, adaptation, tool-allowlist, split, rotation, and baseline-panel
   policies remain machine-checkable and versioned.
@@ -54,7 +55,10 @@ The public mirror is synced from an explicit allowlist and currently includes:
 - `spec/Spec.pdf`
 - `spec/overview.md`
 - `spec/contracts.md`
+- `spec/environment.md`
+- `spec/parity.md`
 - `spec/acceptance-tests.md`
+- `spec/plan.md`
 - `.github/workflows/gf01-gate.yml`
 - `gf01/`
 - `tests/`

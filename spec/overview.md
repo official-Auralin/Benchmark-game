@@ -5,6 +5,14 @@ temporal-causality tasks. It provides deterministic instance generation,
 play/evaluation workflows, machine-checkable scoring artifacts, and release
 governance checks so benchmark results can be reproduced and audited.
 
+The operational spec is split across:
+
+- `spec/contracts.md`
+- `spec/environment.md`
+- `spec/parity.md`
+- `spec/acceptance-tests.md`
+- `spec/plan.md`
+
 ## Users
 
 - Benchmark maintainers publishing validated GF-01 releases.

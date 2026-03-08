@@ -46,6 +46,7 @@ from gf01.renderers.r1_pygame_helpers import (
     _summarize_visible_ap_groups,
     _build_sector_board_cells,
     _command_console_lines,
+    _command_console_stage_status,
     _command_console_sector_tokens,
     _sector_board_cell_glyph,
     _sector_board_col_label,
@@ -870,6 +871,25 @@ class TestR1PygameHelpers(unittest.TestCase):
             ),
             ["LIVE B2", "TARGET E3", "PIN F5"],
         )
+
+    def test_command_console_stage_status_on_target(self) -> None:
+        self.assertEqual(
+            _command_console_stage_status(
+                live_sector_name="E3",
+                target_sector_name="E3",
+                pinned_sector_name=None,
+            )[0],
+            "ON TARGET",
+        )
+
+    def test_command_console_stage_status_tracking_target(self) -> None:
+        status = _command_console_stage_status(
+            live_sector_name="B2",
+            target_sector_name="E3",
+            pinned_sector_name="E3",
+        )
+        self.assertEqual(status[0], "TRACKING")
+        self.assertIn("holds the mission target", status[1])
 
     def test_pending_loadout_tokens_empty(self) -> None:
         self.assertEqual(_pending_loadout_tokens({}), ["empty"])

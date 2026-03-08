@@ -2,56 +2,79 @@
 
 ## Setup
 
-- Python 3.10+ is required.
-- Install public-scope dependencies with `python3 -m pip install -r requirements.txt`.
-- `requirements.txt` is intentionally limited to dependencies needed by files
-  that are mirrored to the public repo. Do not add local-only, private-only, or
-  non-mirrored tooling there.
+- Python `3.10+` is required.
+- Install public-scope dependencies with:
+  `python3 -m pip install -r requirements.txt`
+- `requirements.txt` is intentionally limited to dependencies needed by the
+  mirrored/public files. Do not add local-only, private-only, or non-mirrored
+  tooling there.
+
+## Canonical Doc Map
+
+- `docs/INDEX.md`: first stop for contributors and agents.
+- `spec/tex_files/Spec.tex`: formal normative spec authority.
+- `spec/contracts.md`: public contract and version-policy page.
+- `spec/environment.md`: environment model and semantics.
+- `spec/parity.md`: human-versus-agent information parity.
+- `spec/plan.md`: only active long-lived plan.
+- `docs/benchmarking.md`: reproducibility and evaluation protocol.
+- `docs/ARCHITECTURE.md`: code boundaries and extension points.
+- `docs/STYLE.md`: documentation hygiene rules.
 
 ## Common Commands
 
-- Full tests: `python3 -m unittest discover -s tests -p 'test_*.py' -v`
-- Baseline checks: `python3 -m gf01 checks --seed 3000`
-- Faster gate run: `python3 -m gf01 gate --fixture-root tests/fixtures/official_example --seed-profile 4200 --unittest-shards 2`
-- Build the formal spec PDF: `python3 scripts/build_spec.py`
+- Full tests:
+  `python3 -m unittest discover -s tests -p 'test_*.py' -v`
+- Baseline checks:
+  `python3 -m gf01 checks --seed 3000`
+- Faster gate-equivalent run:
+  `python3 -m gf01 gate --fixture-root tests/fixtures/official_example --seed-profile 4200 --unittest-shards 2`
+- Build the formal spec PDF:
+  `python3 scripts/build_spec.py`
 
 ## Workflow Rules
 
-- Treat `spec/tex_files/Spec.tex` as the formal spec authority.
-- Treat `spec/` markdown pages as the compact implementation steering context.
 - Prefer small, local refactors that preserve existing public behavior.
+- Update the spec before or alongside any behavior change.
 - Add or update characterization tests before large structural changes.
-
-## Refactor Checklist
-
-- Confirm the public contract in `spec/contracts.md` before editing code.
-- Prefer changes that stay within one command module and one core module.
-- If a small feature would touch more than two code modules, treat that as a
-  design smell and extract a boundary first.
-- Keep parser wiring in `gf01.cli_registry`, command entrypoints in
-  `gf01.commands.*`, and benchmark logic in core modules such as `gf01.io`,
-  `gf01.generator`, `gf01.play`, and `gf01.q033`.
-- Keep deterministic renderer helpers in `gf01.renderers.r1_pygame_helpers`
-  and session/UI flow in `gf01.renderers.r1_pygame`.
-- Run targeted tests for the affected command family before the full suite.
-- Re-run `python3 -m gf01 checks --seed 3000` after command-wiring or policy
-  changes.
+- Do not create new active plan documents when `spec/plan.md` can be updated.
+- Treat `research_pack/` as an evidence library, not the default contributor
+  navigation surface.
 
 ## Change Locality Target
 
-- Baseline before this refactor: small CLI or policy changes commonly touched
-  `3-4` code modules.
-- Target after this refactor: most small command or policy changes should touch
-  no more than `2` code modules, plus the matching spec/test updates.
+- Baseline before the CLI refactor: small CLI or policy changes commonly
+  touched `3-4` code modules.
+- Current target: most small command or policy changes should touch no more
+  than `2` code modules, plus the matching spec/test updates.
+
+## Documentation Policy
+
+- Extend a canonical doc before adding a new top-level doc.
+- Keep one source of truth per topic. Use `docs/STYLE.md` if unsure where a
+  change belongs.
+- If a document is no longer needed for active development or paper
+  defensibility, archive it instead of keeping it in-tree.
+
+## Archive Procedure
+
+- Move non-critical historical material to a dated batch under
+  `../archive/Research/`.
+- Organize the archive by purpose, not by one flat list of files.
+- Add a short entry to `docs/ARCHIVE_LOG.md` whenever a new archive batch is
+  created.
 
 ## Docs Freshness Checklist
 
 - If you changed CLI flags or behavior, update `README.md` and `spec/contracts.md`.
 - If you changed schema or policy identifiers, update `spec/contracts.md` and
   relevant tests.
+- If you changed environment semantics, update `spec/environment.md` and the
+  formal spec if needed.
+- If you changed parity or renderer behavior, update `spec/parity.md`.
 - If you changed architecture or module boundaries, update
   `docs/ARCHITECTURE.md`.
-- If you changed benchmark behavior, update `spec/acceptance-tests.md` and the
-  formal spec if needed.
+- If you changed benchmarking protocol or retained artifact policy, update
+  `docs/benchmarking.md`.
 - If you changed mirrored dependency needs, update `requirements.txt`, but only
   for dependencies required by mirrored/public files.

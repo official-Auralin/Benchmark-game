@@ -15,11 +15,20 @@ except ImportError:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_REQUIRED_PATHS = (
+    ROOT / "docs" / "INDEX.md",
     ROOT / "docs" / "ARCHITECTURE.md",
     ROOT / "docs" / "CONTRIBUTING.md",
+    ROOT / "docs" / "STYLE.md",
+    ROOT / "docs" / "benchmarking.md",
+    ROOT / "docs" / "research-notes.md",
+    ROOT / "docs" / "PUBLIC_MIRROR.md",
+    ROOT / "docs" / "ARCHIVE_LOG.md",
     ROOT / "spec" / "overview.md",
     ROOT / "spec" / "contracts.md",
+    ROOT / "spec" / "environment.md",
+    ROOT / "spec" / "parity.md",
     ROOT / "spec" / "acceptance-tests.md",
+    ROOT / "spec" / "plan.md",
     ROOT / "spec" / "Spec.pdf",
     ROOT / "requirements.txt",
 )

@@ -19,6 +19,8 @@ through refactors.
   JSON error payload and non-zero exit code.
 - Visual play supports `text` and `pygame` backends without changing canonical
   scoring semantics.
+- Human-facing affordances remain parity-safe with the canonical observation
+  contract in `spec/parity.md`.
 
 ## Governance And Release
 
@@ -33,3 +35,11 @@ through refactors.
 - Pilot freeze/campaign/analyze workflows preserve current artifact contracts.
 - P0 template, session, feedback, gate, and init commands preserve their
   machine-checkable summaries and failure modes.
+
+## Documentation And Mirror Integrity
+
+- The canonical docs listed in `docs/INDEX.md` remain present and internally
+  consistent.
+- Public mirror sync continues to copy only the explicit allowlist, including
+  the operational spec pages needed to understand the benchmark without the
+  private research pack.
