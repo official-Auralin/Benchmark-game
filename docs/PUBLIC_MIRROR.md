@@ -65,6 +65,10 @@ git push
   private artifact directories by accident.
 - Keep `requirements.txt` limited to dependencies needed by mirrored/public
   files.
+- Treat local duplicate artifacts such as `foo 2.py`, `bar 2.md`, or
+  `commands 2/` as hygiene failures. They are not part of the mirror workflow,
+  should not be ignored, and should be deleted after confirming they add no new
+  information.
 - Keep the GitHub branch protection rule requiring both
   `GF01 Gate / gate` and `GF01 Gate / release-candidate` on the mirror
   `main` branch.

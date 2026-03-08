@@ -11,6 +11,7 @@ skipped after scope validation.
 from __future__ import annotations
 
 import importlib.util
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +27,7 @@ SYNC_SCRIPT_PATH = ROOT / "scripts" / "sync_public_repo.py"
 RESEARCH_PACK_PATH = ROOT / "research_pack"
 PUBLIC_REPO_PATH = ROOT / "public_repo"
 IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
+DUPLICATE_ARTIFACT_RE = re.compile(r".* 2(?:\.[^.]+)?$")
 
 
 def _load_sync_module():
@@ -40,6 +42,16 @@ def _load_sync_module():
     return module
 
 
+def _duplicate_artifact_paths(search_root: Path) -> list[Path]:
+    duplicates: list[Path] = []
+    for path in search_root.rglob("*"):
+        if ".git" in path.parts:
+            continue
+        if DUPLICATE_ARTIFACT_RE.fullmatch(path.name):
+            duplicates.append(path)
+    return sorted(duplicates)
+
+
 class TestSyncPublicRepoPolicy(unittest.TestCase):
     def test_sync_script_presence_by_repo_scope(self) -> None:
         if IS_PUBLIC_MIRROR:
@@ -51,6 +63,16 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
         self.assertTrue(
             SYNC_SCRIPT_PATH.exists(),
             msg=f"missing sync script in source repo: {SYNC_SCRIPT_PATH}",
+        )
+
+    def test_no_duplicate_artifacts_in_repo_scope(self) -> None:
+        duplicates = _duplicate_artifact_paths(ROOT)
+        self.assertFalse(
+            duplicates,
+            msg=(
+                "duplicate '* 2' artifacts must not exist in the active repo tree: "
+                + ", ".join(str(path.relative_to(ROOT)) for path in duplicates[:20])
+            ),
         )
 
     @unittest.skipUnless(
