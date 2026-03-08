@@ -59,6 +59,7 @@ from .r1_pygame_helpers import (
     _clamp_page_size,
     _clamp_timeline_span,
     _command_console_lines,
+    _command_row_status,
     _command_console_stage_status,
     _command_console_sector_tokens,
     _control_visible_pool,
@@ -75,7 +76,7 @@ from .r1_pygame_helpers import (
     _objective_window_pressure_summary,
     _observation_inspector_lines,
     _onboarding_strip_lines,
-    _pending_loadout_tokens,
+    _pending_loadout_entries,
     _paginate_input_aps,
     _place_minimap_bracket,
     _pressure_level_from_observation,
@@ -152,6 +153,11 @@ COMMAND_CONSOLE_STAGE_BADGE_X = 186
 COMMAND_CONSOLE_STAGE_BADGE_Y = 40
 COMMAND_CONSOLE_STAGE_BADGE_W = 120
 COMMAND_CONSOLE_STAGE_BADGE_H = 22
+COMMAND_CONSOLE_ROW_BADGE_X = 98
+COMMAND_CONSOLE_ROW_BADGE_W = 86
+COMMAND_CONSOLE_ROW_BADGE_H = 20
+COMMAND_CONSOLE_ROW_CARD_W = 376
+COMMAND_CONSOLE_ROW_CARD_H = 32
 
 class _R1PygameSession:
     def __init__(self) -> None:
@@ -185,6 +191,7 @@ class _R1PygameSession:
         self._command_focus_timesteps: list[int] = []
         self._hovered_sector_range: tuple[int, int] | None = None
         self._sector_board_hitboxes: list[tuple[int, int, int, int, _SectorBoardCell]] = []
+        self._loadout_chip_hitboxes: list[tuple[int, int, int, int, str]] = []
         self._pinned_sector_coords: tuple[int, int] | None = None
         self._live_sector_name: str | None = None
         self._target_sector_name: str | None = None
@@ -319,7 +326,8 @@ class _R1PygameSession:
         y: int,
         pending: Mapping[str, int],
     ) -> None:
-        for idx, token in enumerate(_pending_loadout_tokens(pending)):
+        self._loadout_chip_hitboxes = []
+        for idx, (token, ap_name) in enumerate(_pending_loadout_entries(pending)):
             chip_x = x + idx * (
                 COMMAND_CONSOLE_LOADOUT_CHIP_W + COMMAND_CONSOLE_LOADOUT_CHIP_GAP
             )
@@ -341,6 +349,16 @@ class _R1PygameSession:
                 small=True,
                 color=(220, 230, 245),
             )
+            if ap_name is not None:
+                self._loadout_chip_hitboxes.append(
+                    (
+                        chip_x,
+                        y,
+                        COMMAND_CONSOLE_LOADOUT_CHIP_W,
+                        COMMAND_CONSOLE_LOADOUT_CHIP_H,
+                        ap_name,
+                    )
+                )
 
     def _draw_console_sector_chips(
         self,
@@ -1094,7 +1112,49 @@ class _R1PygameSession:
             return buttons, page, total_pages, 0
         for idx, ap in enumerate(visible_aps):
             y = panel_y + COMMAND_CONSOLE_ROWS_Y + idx * 40
-            self._draw_text(ap, 24, y + 8)
+            row_status, _row_detail = _command_row_status(
+                ap=ap,
+                pending=pending,
+                live_sector_name=self._live_sector_name,
+                target_sector_name=self._target_sector_name,
+                pinned_sector_name=self._pinned_sector_name,
+            )
+            row_palette = {
+                "TARGET": ((80, 66, 34), (212, 188, 122)),
+                "ARMED": ((34, 60, 48), (126, 196, 134)),
+                "QUEUED": ((42, 58, 86), (130, 168, 220)),
+                "READY": ((30, 42, 58), (96, 118, 150)),
+                "IDLE": ((24, 30, 42), (72, 88, 110)),
+            }
+            card_fill, card_border = row_palette.get(
+                row_status, ((30, 42, 58), (96, 118, 150))
+            )
+            self._draw_rect(
+                16,
+                y - 2,
+                COMMAND_CONSOLE_ROW_CARD_W,
+                COMMAND_CONSOLE_ROW_CARD_H,
+                fill=card_fill,
+                border=card_border,
+                border_width=1,
+            )
+            self._draw_text(ap, 28, y + 6)
+            self._draw_rect(
+                COMMAND_CONSOLE_ROW_BADGE_X,
+                y + 3,
+                COMMAND_CONSOLE_ROW_BADGE_W,
+                COMMAND_CONSOLE_ROW_BADGE_H,
+                fill=(22, 28, 40),
+                border=card_border,
+                border_width=1,
+            )
+            self._draw_text(
+                row_status,
+                COMMAND_CONSOLE_ROW_BADGE_X + 10,
+                y + 5,
+                small=True,
+                color=(220, 230, 245),
+            )
 
             for choice_idx, bit in enumerate((0, 1)):
                 x = 220 + choice_idx * 70
@@ -1138,6 +1198,7 @@ class _R1PygameSession:
             self._command_focus_timesteps = []
             self._hovered_sector_range = None
             self._sector_board_hitboxes = []
+            self._loadout_chip_hitboxes = []
             self._pinned_sector_coords = None
             self._live_sector_name = None
             self._target_sector_name = None
@@ -1265,6 +1326,14 @@ class _R1PygameSession:
                             pending.pop(button.ap, None)
                         else:
                             pending[button.ap] = button.value
+                        consumed = True
+                        break
+                    if consumed:
+                        continue
+                    for x0, y0, w0, h0, ap_name in self._loadout_chip_hitboxes:
+                        if not (x0 <= mx <= x0 + w0 and y0 <= my <= y0 + h0):
+                            continue
+                        pending.pop(ap_name, None)
                         consumed = True
                         break
                     if consumed:

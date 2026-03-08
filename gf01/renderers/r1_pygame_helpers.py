@@ -680,14 +680,62 @@ def _pending_loadout_tokens(
     *,
     max_items: int = 4,
 ) -> list[str]:
+    return [token for token, _ap in _pending_loadout_entries(pending, max_items=max_items)]
+
+
+def _pending_loadout_entries(
+    pending: Mapping[str, int],
+    *,
+    max_items: int = 4,
+) -> list[tuple[str, str | None]]:
     if not pending:
-        return ["empty"]
-    items = [f"{ap}={int(value)}" for ap, value in sorted(pending.items())]
+        return [("empty", None)]
+    items = [
+        (f"{ap}={int(value)}", str(ap)) for ap, value in sorted(pending.items())
+    ]
     limit = max(1, int(max_items))
     if len(items) <= limit:
         return items
     remaining = len(items) - limit
-    return items[:limit] + [f"+{remaining} more"]
+    return items[:limit] + [(f"+{remaining} more", None)]
+
+
+def _command_row_status(
+    *,
+    ap: str,
+    pending: Mapping[str, int],
+    live_sector_name: str | None,
+    target_sector_name: str | None,
+    pinned_sector_name: str | None,
+) -> tuple[str, str]:
+    ap_name = str(ap)
+    if ap_name in pending:
+        if (
+            live_sector_name
+            and target_sector_name
+            and live_sector_name == target_sector_name
+        ):
+            return (
+                "TARGET",
+                f"{ap_name} is queued and the live sector is the mission target.",
+            )
+        if (
+            pinned_sector_name
+            and live_sector_name
+            and pinned_sector_name == live_sector_name
+        ):
+            return (
+                "ARMED",
+                f"{ap_name} is queued for the pinned live sector {live_sector_name}.",
+            )
+        if live_sector_name:
+            return ("QUEUED", f"{ap_name} is queued for live sector {live_sector_name}.")
+        return ("QUEUED", f"{ap_name} is queued for the next commit.")
+    if pending:
+        return ("READY", f"{ap_name} is idle but can replace part of the queued loadout.")
+    if live_sector_name:
+        return ("READY", f"{ap_name} is idle; live sector {live_sector_name} receives the next commit.")
+    return ("IDLE", f"{ap_name} is idle until you stage a loadout.")
 
 
 def _sector_board_objective_lines(

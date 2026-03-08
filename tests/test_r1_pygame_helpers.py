@@ -46,8 +46,10 @@ from gf01.renderers.r1_pygame_helpers import (
     _summarize_visible_ap_groups,
     _build_sector_board_cells,
     _command_console_lines,
+    _command_row_status,
     _command_console_stage_status,
     _command_console_sector_tokens,
+    _pending_loadout_entries,
     _sector_board_cell_glyph,
     _sector_board_col_label,
     _sector_board_command_lines,
@@ -891,6 +893,39 @@ class TestR1PygameHelpers(unittest.TestCase):
         self.assertEqual(status[0], "TRACKING")
         self.assertIn("holds the mission target", status[1])
 
+    def test_command_row_status_target(self) -> None:
+        status = _command_row_status(
+            ap="in0",
+            pending={"in0": 1},
+            live_sector_name="E3",
+            target_sector_name="E3",
+            pinned_sector_name=None,
+        )
+        self.assertEqual(status[0], "TARGET")
+        self.assertIn("mission target", status[1])
+
+    def test_command_row_status_armed(self) -> None:
+        status = _command_row_status(
+            ap="in0",
+            pending={"in0": 1},
+            live_sector_name="B2",
+            target_sector_name="E3",
+            pinned_sector_name="B2",
+        )
+        self.assertEqual(status[0], "ARMED")
+        self.assertIn("pinned live sector B2", status[1])
+
+    def test_command_row_status_ready_with_existing_queue(self) -> None:
+        status = _command_row_status(
+            ap="in1",
+            pending={"in0": 1},
+            live_sector_name="B2",
+            target_sector_name="E3",
+            pinned_sector_name=None,
+        )
+        self.assertEqual(status[0], "READY")
+        self.assertIn("queued loadout", status[1])
+
     def test_pending_loadout_tokens_empty(self) -> None:
         self.assertEqual(_pending_loadout_tokens({}), ["empty"])
 
@@ -907,6 +942,21 @@ class TestR1PygameHelpers(unittest.TestCase):
                 max_items=3,
             ),
             ["in0=1", "in1=0", "in2=1", "+2 more"],
+        )
+
+    def test_pending_loadout_entries_include_ap_keys_for_click_targets(self) -> None:
+        self.assertEqual(
+            _pending_loadout_entries({"in2": 0, "in0": 1}),
+            [("in0=1", "in0"), ("in2=0", "in2")],
+        )
+
+    def test_pending_loadout_entries_overflow_has_noninteractive_summary_chip(self) -> None:
+        self.assertEqual(
+            _pending_loadout_entries(
+                {"in0": 1, "in1": 0, "in2": 1, "in3": 0, "in4": 1},
+                max_items=3,
+            ),
+            [("in0=1", "in0"), ("in1=0", "in1"), ("in2=1", "in2"), ("+2 more", None)],
         )
 
     def test_sector_board_objective_lines_without_hover_cell(self) -> None:
