@@ -227,6 +227,12 @@ class TestPlayableLoop(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertEqual(payload.get("error_type"), "renderer_backend_policy_violation")
 
+    def test_play_parser_rejects_removed_r2_backend(self) -> None:
+        parser = build_parser()
+        with self.assertRaises(SystemExit) as ctx:
+            parser.parse_args(["play", "--visual-backend", "r2"])
+        self.assertEqual(ctx.exception.code, 2)
+
     def test_play_allows_visual_track_with_pygame_backend_for_noninteractive_agent(self) -> None:
         proc = _run_cli(
             [
@@ -351,6 +357,170 @@ class TestPlayableLoop(unittest.TestCase):
                 session.pg.quit()
                 module._SESSION = None
         self.assertIsNone(action)
+
+    def test_choose_action_pygame_escape_returns_skip_action(self) -> None:
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
+            module = importlib.import_module("gf01.renderers.r1_pygame")
+            module._SESSION = None
+            try:
+                session = module._session()
+            except RuntimeError as exc:
+                if "pygame is not installed" in str(exc):
+                    self.skipTest(str(exc))
+                raise
+            try:
+                session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_ESCAPE))
+                action = module.choose_action_pygame(
+                    last_obs=None,
+                    timestep=1,
+                    instance=_toy_instance("normal"),
+                    objective_text=_objective_text(_toy_instance("normal")),
+                )
+            finally:
+                session.pg.quit()
+                module._SESSION = None
+        self.assertEqual(action, {})
+
+    def test_choose_action_pygame_keyboard_stage_and_deploys(self) -> None:
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
+            module = importlib.import_module("gf01.renderers.r1_pygame")
+            module._SESSION = None
+            try:
+                session = module._session()
+            except RuntimeError as exc:
+                if "pygame is not installed" in str(exc):
+                    self.skipTest(str(exc))
+                raise
+            try:
+                session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_1))
+                session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_RETURN))
+                action = module.choose_action_pygame(
+                    last_obs=None,
+                    timestep=1,
+                    instance=_toy_instance("normal"),
+                    objective_text=_objective_text(_toy_instance("normal")),
+                )
+            finally:
+                session.pg.quit()
+                module._SESSION = None
+        self.assertEqual(action, {"in0": 1})
+
+    def test_choose_action_pygame_card_click_stages_and_deploys(self) -> None:
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
+            module = importlib.import_module("gf01.renderers.r1_pygame")
+            module._SESSION = None
+            try:
+                session = module._session()
+            except RuntimeError as exc:
+                if "pygame is not installed" in str(exc):
+                    self.skipTest(str(exc))
+                raise
+            try:
+                card_x = module.CARD_AREA_X + 20
+                card_y = module.CARD_Y + module.CARD_H - 18
+                events = [
+                    [],
+                    [
+                        session.pg.event.Event(
+                            session.pg.MOUSEBUTTONDOWN,
+                            button=1,
+                            pos=(card_x, card_y),
+                        ),
+                        session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_RETURN),
+                    ],
+                ]
+                with patch.object(session.pg.mouse, "get_pos", return_value=(card_x, card_y)):
+                    with patch.object(session.pg.event, "get", side_effect=events):
+                        action = module.choose_action_pygame(
+                            last_obs=None,
+                            timestep=1,
+                            instance=_toy_instance("normal"),
+                            objective_text=_objective_text(_toy_instance("normal")),
+                        )
+            finally:
+                session.pg.quit()
+                module._SESSION = None
+        self.assertEqual(action, {"in0": 1})
+
+    def test_choose_action_pygame_tile_click_stages_and_deploys(self) -> None:
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
+            module = importlib.import_module("gf01.renderers.r1_pygame")
+            module._SESSION = None
+            try:
+                session = module._session()
+            except RuntimeError as exc:
+                if "pygame is not installed" in str(exc):
+                    self.skipTest(str(exc))
+                raise
+            try:
+                instance = _toy_instance("normal")
+                iso_width = (module.GRID_COLS + module.GRID_ROWS - 1) * (module.TILE_W // 2)
+                iso_height = (
+                    (module.GRID_COLS + module.GRID_ROWS - 1) * (module.TILE_H // 2)
+                    + module.ISO_DEPTH
+                )
+                origin_x = (
+                    module.MAP_X
+                    + (module.MAP_W - iso_width) // 2
+                    + module.GRID_ROWS * (module.TILE_W // 2)
+                )
+                origin_y = module.MAP_Y + (module.MAP_H - iso_height) // 2
+                tiles = module.build_grid(
+                    instance,
+                    timestep=1,
+                    origin_x=origin_x,
+                    origin_y=origin_y,
+                )
+                tile = next(t for t in tiles if t.defense_ap == "in0")
+                tile_pos = (tile.iso_x + module.TILE_W // 2, tile.iso_y + module.TILE_H // 2)
+                events = [
+                    [],
+                    [
+                        session.pg.event.Event(
+                            session.pg.MOUSEBUTTONDOWN,
+                            button=1,
+                            pos=tile_pos,
+                        ),
+                        session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_RETURN),
+                    ],
+                ]
+                with patch.object(session.pg.mouse, "get_pos", return_value=tile_pos):
+                    with patch.object(session.pg.event, "get", side_effect=events):
+                        action = module.choose_action_pygame(
+                            last_obs=None,
+                            timestep=1,
+                            instance=instance,
+                            objective_text=_objective_text(instance),
+                        )
+            finally:
+                session.pg.quit()
+                module._SESSION = None
+        self.assertEqual(action, {"in0": 1})
+
+    def test_choose_action_pygame_recall_clears_pending_before_deploy(self) -> None:
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
+            module = importlib.import_module("gf01.renderers.r1_pygame")
+            module._SESSION = None
+            try:
+                session = module._session()
+            except RuntimeError as exc:
+                if "pygame is not installed" in str(exc):
+                    self.skipTest(str(exc))
+                raise
+            try:
+                session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_1))
+                session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_BACKSPACE))
+                session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_RETURN))
+                action = module.choose_action_pygame(
+                    last_obs=None,
+                    timestep=1,
+                    instance=_toy_instance("normal"),
+                    objective_text=_objective_text(_toy_instance("normal")),
+                )
+            finally:
+                session.pg.quit()
+                module._SESSION = None
+        self.assertEqual(action, {})
 
 
 if __name__ == "__main__":

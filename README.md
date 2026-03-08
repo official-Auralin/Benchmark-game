@@ -48,11 +48,10 @@ python3 -m gf01 play --seed 1337 --renderer-track visual --visual-backend pygame
 python3 -m gf01 play --seed 1337 --agent greedy --renderer-track json
 ```
 
-The `pygame` path is a map-first visual layer. It may add readability cues such
-as `LIVE`, `TARGET`, and `PIN` sector tags or staging-status badges, but it
-must not change the canonical observation contract or scoring behavior. Queued
-loadout chips are interactive removal controls there, and AP rows now render
-as tactical slots with `READY`/`QUEUED`/`ARMED`/`TARGET` status badges.
+The `pygame` path is the canonical `GF-01-R1` tower-defense graphical window.
+It may add readability cues such as defense cards, wave timelines, staged
+deployment highlights, and causal feedback overlays, but it must not change the
+canonical observation contract or scoring behavior.
 
 Run the standard validation baseline:
 

@@ -1,165 +1,220 @@
-"""
-Optional pygame backend for map-first GF-01-R1 human interaction.
+"""Tower-defense themed pygame renderer for canonical GF-01-R1 human play.
 
-This backend provides a minimal graphical control surface for one timestep at a
-time. It renders an observation-safe timeline/grid view, lets the player set
-per-AP values for the current timestep, and returns a machine-checkable action
-dictionary compatible with the existing episode loop.
+Presents the benchmark as a tower-defense game.  Formal concepts (APs,
+certificates, automata) are fully abstracted behind game vocabulary.
+The renderer consumes only the canonical observation O(s) and static mission
+metadata, preserving parity with the text visual path and the JSON renderer.
 """
-# -*- coding: utf-8 -*-
-#!/usr/bin/env python3
-
 from __future__ import annotations
 
-__author__ = "Bobby Veihman"
-__copyright__ = "Academic Commons"
-__license__ = "License Name"
-__version__ = "1.0.0"
-__maintainer__ = "Bobby Veihman"
-__email__ = "bv2340@columbia.edu"
-__status__ = "Development"
-
 import json
-from dataclasses import dataclass
-from collections import OrderedDict, defaultdict
+import math
+import time
+from collections import OrderedDict
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from ..semantics import history_counts_by_t, timeline_marker_for_t
+from ..semantics import history_counts_by_t, iter_history_atoms
+from .r1_theme import (
+    COLOR_ACCENT_C,
+    COLOR_ACCENT_G,
+    COLOR_ACCENT_P,
+    COLOR_ACCENT_R,
+    COLOR_ACCENT_Y,
+    COLOR_BG,
+    COLOR_BORDER,
+    COLOR_BORDER_HI,
+    COLOR_CMD_PTS,
+    COLOR_DEPLOY_BTN,
+    COLOR_ENERGY,
+    COLOR_FLASH_G,
+    COLOR_FLASH_R,
+    COLOR_HISTORY_OFF,
+    COLOR_HISTORY_ON,
+    COLOR_PANEL,
+    COLOR_PANEL_LITE,
+    COLOR_SKIP_BTN,
+    COLOR_STAGED_OFF,
+    COLOR_STAGED_ON,
+    COLOR_TEXT,
+    COLOR_TEXT_BRIGHT,
+    COLOR_TEXT_DIM,
+    COLOR_UNDO_BTN,
+    critical_wave_label,
+    cmd_points_label,
+    defense_color,
+    defense_name,
+    effect_status_display,
+    objective_text_themed,
+    threat_name,
+    victory_text,
+    wave_label,
+)
+from .r1_grid import (
+    GRID_COLS,
+    GRID_ROWS,
+    TILE_H,
+    TILE_W,
+    TileData,
+    build_grid,
+    tile_at_screen_pos,
+    wave_timeline_data,
+)
 
 if TYPE_CHECKING:
     from ..models import GF01Instance
 
+_SESSION: "_R1Session | None" = None
 
-from .r1_pygame_helpers import (
-    COMMAND_RESPONSE_LINE_MAX_LEN,
-    COMMAND_RESPONSE_MAX_ENTRIES,
-    COMMAND_RESPONSE_MAX_VISIBLE,
-    SECTOR_BOARD_COLS,
-    SECTOR_BOARD_ROWS,
-    SECTOR_PRESSURE_BANDS,
-    SECTOR_PRESSURE_HISTORY_MAX,
-    TIMELINE_MINIMAP_CHARS,
-    UI_TEXT_MIN_TRUNCATE_LEN,
-    _Button,
-    _CommandResponseTrailModel,
-    _SectorBoardCell,
-    _SectorPressureHistoryModel,
-    _WaveStripModel,
-    _ap_group_key,
-    _apply_group_filter,
-    _build_sector_board_cells,
-    _build_timeline_minimap,
-    _bucket_index_for_t,
-    _bucket_marker,
-    _bucketize_history_counts,
-    _bucketize_pressure_levels,
-    _canonical_exposure_payload,
-    _clamp_page_size,
-    _clamp_timeline_span,
-    _command_console_lines,
-    _command_row_status,
-    _command_console_stage_status,
-    _command_console_sector_tokens,
-    _control_visible_pool,
-    _cycle_pending_bit,
-    _describe_output_delta,
-    _edits_token,
-    _effect_status_badge,
-    _format_top_pressure_summary,
-    _group_rows_for_controls,
-    _grouped_input_aps,
-    _help_overlay_lines,
-    _normalize_binary_map,
-    _objective_window_bounds,
-    _objective_window_pressure_summary,
-    _observation_inspector_lines,
-    _onboarding_strip_lines,
-    _pending_loadout_entries,
-    _paginate_input_aps,
-    _place_minimap_bracket,
-    _pressure_level_from_observation,
-    _pressure_token,
-    _range_contains_t,
-    _sector_board_pending_badge_text,
-    _sector_board_col_label,
-    _ranges_overlap,
-    _sector_board_cell_glyph,
-    _sector_board_cell_name,
-    _sector_board_hud_sections,
-    _sector_board_legend_lines,
-    _sector_bucket_bounds,
-    _sector_pressure_fill,
-    _summarize_committed_action,
-    _summarize_observed_outputs,
-    _summarize_pending_interventions,
-    _summarize_visible_ap_groups,
-    _timeline_mark,
-    _timeline_window_bounds,
-    _top_pressure_sectors,
-    _truncate_ui_text,
-    _wave_pressure_strip_state,
+SCREEN_W = 1280
+SCREEN_H = 800
+
+TOP_BAR_H = 56
+SIDEBAR_W = 290
+SIDEBAR_X = SCREEN_W - SIDEBAR_W
+BOTTOM_H = 150
+MAP_X = 16
+MAP_Y = TOP_BAR_H + 12
+MAP_W = SIDEBAR_X - 32
+MAP_H = SCREEN_H - TOP_BAR_H - BOTTOM_H - 24
+
+CARD_W = 148
+CARD_H = 105
+CARD_GAP = 10
+CARD_Y = SCREEN_H - BOTTOM_H + 10
+CARD_AREA_X = 16
+
+BTN_W = 138
+BTN_H = 38
+BTN_GAP = 8
+BTN_AREA_X = SIDEBAR_X + 10
+
+TIMELINE_CELL = 30
+TIMELINE_GAP = 3
+TIMELINE_Y_OFFSET = 420
+
+PRESSURE_BANDS = 10
+PRESSURE_MAX_HISTORY = 256
+ISO_DEPTH = 14
+SPRITE_SIZE = 36
+CANONICAL_OBS_KEYS = (
+    "t",
+    "y_t",
+    "effect_status_t",
+    "budget_t_remaining",
+    "budget_a_remaining",
+    "history_atoms",
+    "mode",
+    "t_star",
 )
 
 
-_SESSION: "_R1PygameSession | None" = None
+@dataclass(frozen=True)
+class _HitRect:
+    x: int
+    y: int
+    w: int
+    h: int
+    tag: str
+    payload: str
 
-SECTOR_BOARD_LEGEND_X_OFFSET = 14
-SECTOR_BOARD_LEGEND_Y_OFFSET = 30
-SECTOR_BOARD_LEGEND_LINE_STEP = 18
-SECTOR_BOARD_HUD_X_OFFSET = 220
-SECTOR_BOARD_CARD_ROW_1_Y = 46
-SECTOR_BOARD_CARD_ROW_2_Y = 108
-SECTOR_BOARD_CARD_W = 144
-SECTOR_BOARD_CARD_GAP_X = 10
-SECTOR_BOARD_CARD_LINE_X = 10
-SECTOR_BOARD_CARD_TITLE_Y = 8
-SECTOR_BOARD_CARD_LINE_Y = 24
-SECTOR_BOARD_CARD_LINE_STEP = 14
-SECTOR_BOARD_CARD_FILL = (28, 38, 54)
-SECTOR_BOARD_PENDING_BADGE_SIZE = 14
-SECTOR_BOARD_PENDING_BADGE_OFFSET_X = 4
-SECTOR_BOARD_PENDING_BADGE_OFFSET_Y = 2
-SECTOR_BOARD_HUD_PRIMARY_COLOR = (198, 212, 234)
-SECTOR_BOARD_HUD_SECONDARY_COLOR = (176, 191, 216)
-SECTOR_BOARD_HUD_CARD_ACCENTS = (
-    (168, 114, 76),
-    (142, 132, 94),
-    (98, 148, 188),
-    (126, 196, 134),
-)
-COMMAND_CONSOLE_X = 16
-COMMAND_CONSOLE_Y_OFFSET = 56
-COMMAND_CONSOLE_W = 580
-COMMAND_CONSOLE_TITLE_Y = 42
-COMMAND_CONSOLE_INFO_1_Y = 20
-COMMAND_CONSOLE_INFO_2_Y = 2
-COMMAND_CONSOLE_LOADOUT_LABEL_Y = 38
-COMMAND_CONSOLE_LOADOUT_Y = 56
-COMMAND_CONSOLE_PAGE_Y = 84
-COMMAND_CONSOLE_GROUPS_Y = 104
-COMMAND_CONSOLE_ROWS_Y = 112
-COMMAND_CONSOLE_MIN_H = 196
-COMMAND_CONSOLE_LOADOUT_CHIP_W = 92
-COMMAND_CONSOLE_LOADOUT_CHIP_H = 22
-COMMAND_CONSOLE_LOADOUT_CHIP_GAP = 8
-COMMAND_CONSOLE_SECTOR_CHIP_W = 98
-COMMAND_CONSOLE_SECTOR_CHIP_H = 20
-COMMAND_CONSOLE_SECTOR_CHIP_GAP = 8
-COMMAND_CONSOLE_SECTOR_CHIP_X = 286
-COMMAND_CONSOLE_SECTOR_CHIP_Y = 16
-COMMAND_CONSOLE_STAGE_BADGE_X = 186
-COMMAND_CONSOLE_STAGE_BADGE_Y = 40
-COMMAND_CONSOLE_STAGE_BADGE_W = 120
-COMMAND_CONSOLE_STAGE_BADGE_H = 22
-COMMAND_CONSOLE_ROW_BADGE_X = 98
-COMMAND_CONSOLE_ROW_BADGE_W = 86
-COMMAND_CONSOLE_ROW_BADGE_H = 20
-COMMAND_CONSOLE_ROW_CARD_W = 376
-COMMAND_CONSOLE_ROW_CARD_H = 32
+    def contains(self, px: int, py: int) -> bool:
+        return self.x <= px <= self.x + self.w and self.y <= py <= self.y + self.h
 
-class _R1PygameSession:
+
+@dataclass
+class _DeploymentReport:
+    wave: int = -1
+    actions: list[tuple[str, int]] = field(default_factory=list)
+    deltas: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def clear(self) -> None:
+        self.wave = -1
+        self.actions.clear()
+        self.deltas.clear()
+
+
+class _PressureHistory:
+    def __init__(self) -> None:
+        self._levels: OrderedDict[int, int] = OrderedDict()
+
+    def reset(self) -> None:
+        self._levels = OrderedDict()
+
+    def record(self, timestep: int, y_t: dict[str, int]) -> None:
+        if not y_t:
+            return
+        on = sum(1 for v in y_t.values() if v == 1)
+        ratio = on / max(1, len(y_t))
+        level = max(0, min(PRESSURE_BANDS, int(round(ratio * PRESSURE_BANDS))))
+        t = int(timestep)
+        self._levels.pop(t, None)
+        self._levels[t] = level
+        while len(self._levels) > PRESSURE_MAX_HISTORY:
+            self._levels.popitem(last=False)
+
+    def levels(self) -> Mapping[int, int]:
+        return MappingProxyType(self._levels)
+
+
+def _normalize_binary_map(payload: object) -> dict[str, int]:
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, int] = {}
+    for k, v in payload.items():
+        try:
+            bit = int(v)
+        except (TypeError, ValueError):
+            continue
+        if bit in (0, 1):
+            out[str(k)] = bit
+    return out
+
+
+def _canonical_inspector_payload(
+    *,
+    last_obs: dict[str, object] | None,
+    instance: "GF01Instance",
+) -> dict[str, object]:
+    mission = {
+        "effect_ap": instance.effect_ap,
+        "mode": instance.mode,
+        "t_star": int(instance.t_star),
+        "budget_timestep": int(instance.budget_timestep),
+        "budget_atoms": int(instance.budget_atoms),
+    }
+    if not isinstance(last_obs, dict):
+        return {"mission": mission, "observation": None}
+    observation = {key: last_obs[key] for key in CANONICAL_OBS_KEYS if key in last_obs}
+    return {"mission": mission, "observation": observation or None}
+
+
+def _wrap_json_lines(prefix: str, payload: object, *, width: int = 54) -> list[str]:
+    text = json.dumps(payload, sort_keys=True)
+    if len(text) <= width:
+        return [f"{prefix}{text}"]
+    lines = [f"{prefix}{text[:width]}"]
+    rest = text[width:]
+    while rest:
+        lines.append(rest[:width])
+        rest = rest[width:]
+    return lines
+
+
+def _inspector_lines(payload: dict[str, object]) -> list[str]:
+    lines = ["CANONICAL OBSERVATION"]
+    lines.extend(_wrap_json_lines("mission: ", payload.get("mission", {})))
+    observation = payload.get("observation")
+    if observation is None:
+        lines.append("observation: (none yet)")
+        return lines
+    lines.extend(_wrap_json_lines("observation: ", observation))
+    return lines
+
+
+class _R1Session:
     def __init__(self) -> None:
         try:
             import pygame
@@ -171,1339 +226,1055 @@ class _R1PygameSession:
         self.pg = pygame
         self.pg.init()
         try:
-            self.screen = self.pg.display.set_mode((1200, 760))
-        except Exception as exc:  # pragma: no cover - platform/display specific
+            self.screen = self.pg.display.set_mode((SCREEN_W, SCREEN_H))
+        except Exception as exc:
             raise RuntimeError(
-                "pygame backend could not open a display window; "
+                "pygame backend could not open a display; "
                 "use --visual-backend text in headless environments"
             ) from exc
-        self.pg.display.set_caption("GF-01-R1 Map-First Visual")
+        self.pg.display.set_caption("GF-01-R1  \u2014  Tower Defense")
         self.clock = self.pg.time.Clock()
-        self.font = self.pg.font.SysFont("Courier New", 18)
-        self.font_small = self.pg.font.SysFont("Courier New", 14)
-        self.font_title = self.pg.font.SysFont("Courier New", 24, bold=True)
-        self._previous_observed_y_t: dict[str, int] | None = None
-        self._last_committed_action_summary: str | None = None
-        self._last_committed_t: int | None = None
-        self._wave_strip = _WaveStripModel()
-        self._sector_pressure_history = _SectorPressureHistoryModel()
-        self._command_response_trail = _CommandResponseTrailModel()
-        self._command_focus_timesteps: list[int] = []
-        self._hovered_sector_range: tuple[int, int] | None = None
-        self._sector_board_hitboxes: list[tuple[int, int, int, int, _SectorBoardCell]] = []
-        self._loadout_chip_hitboxes: list[tuple[int, int, int, int, str]] = []
-        self._pinned_sector_coords: tuple[int, int] | None = None
-        self._live_sector_name: str | None = None
-        self._target_sector_name: str | None = None
-        self._pinned_sector_name: str | None = None
-        self._pinned_sector_range: tuple[int, int] | None = None
-        self._show_help_overlay = True
-        self._show_observation_inspector = False
+        self.font = self.pg.font.SysFont("Arial,Helvetica", 17)
+        self.font_sm = self.pg.font.SysFont("Arial,Helvetica", 14)
+        self.font_lg = self.pg.font.SysFont("Arial,Helvetica", 24, bold=True)
+        self.font_badge = self.pg.font.SysFont("Arial,Helvetica", 14, bold=True)
+        self._pressure = _PressureHistory()
+        self._prev_y_t: dict[str, int] | None = None
+        self._prev_history_atoms_count: int = 0
+        self._show_help = True
+        self._show_inspector = False
+        self._report = _DeploymentReport()
+        self._last_committed_action: dict[str, int] | None = None
+        self._flash_start: float = 0.0
+        self._tile_flashes: dict[str, str] = {}
+        self._hovered_card_ap: str | None = None
 
-    def _draw_text(
-        self,
-        text: str,
-        x: int,
-        y: int,
-        *,
-        color: tuple[int, int, int] = (220, 230, 245),
-        small: bool = False,
-        title: bool = False,
+    # -------------------------------------------------------- procedural icons
+    def _draw_defense_sprite(
+        self, x: int, y: int, ap_idx: int, color: tuple[int, int, int],
+        size: int = SPRITE_SIZE,
     ) -> None:
-        font = self.font_title if title else self.font_small if small else self.font
-        surface = font.render(text, True, color)
-        self.screen.blit(surface, (x, y))
+        cx = x + size // 2
+        cy = y + size // 2
+        s = size
+        variant = ap_idx % 8
+        if variant == 0:  # shield dome
+            base_y = cy + s // 4
+            self.pg.draw.ellipse(self.screen, color,
+                                  (x + 2, cy - s // 3, s - 4, s // 2 + 4), 0)
+            darker = tuple(max(0, c - 40) for c in color)
+            self.pg.draw.ellipse(self.screen, darker,
+                                  (x + 2, cy - s // 3, s - 4, s // 2 + 4), 2)
+            self.pg.draw.line(self.screen, darker, (x + 3, base_y), (x + s - 3, base_y), 2)
+            shine = tuple(min(255, c + 80) for c in color)
+            self.pg.draw.arc(self.screen, shine,
+                              (x + s // 4, cy - s // 4, s // 3, s // 4),
+                              0.3, 2.0, 1)
+        elif variant == 1:  # cannon turret
+            mount_h = s // 3
+            self.pg.draw.rect(self.screen, color,
+                               (x + s // 4, cy, s // 2, mount_h))
+            darker = tuple(max(0, c - 30) for c in color)
+            self.pg.draw.rect(self.screen, darker,
+                               (x + s // 4, cy, s // 2, mount_h), 1)
+            barrel_y = cy - 2
+            self.pg.draw.line(self.screen, color,
+                               (cx, barrel_y), (x + s + 2, barrel_y - s // 4), 3)
+            self.pg.draw.circle(self.screen, color, (x + s + 2, barrel_y - s // 4), 3)
+        elif variant == 2:  # barrier wall (brick pattern)
+            bh = max(3, s // 4)
+            for row in range(3):
+                by = y + row * bh + 2
+                offset = (row % 2) * (s // 4)
+                for col_i in range(3):
+                    bx = x + offset + col_i * (s // 3)
+                    bw = s // 3 - 2
+                    if bx + bw > x + s:
+                        bw = x + s - bx - 1
+                    if bw > 0:
+                        shade = tuple(max(0, c - row * 12) for c in color)
+                        self.pg.draw.rect(self.screen, shade, (bx, by, bw, bh - 1))
+                        darker = tuple(max(0, c - 40) for c in color)
+                        self.pg.draw.rect(self.screen, darker, (bx, by, bw, bh - 1), 1)
+        elif variant == 3:  # crystal emitter
+            pts = [(cx, y + 1), (x + s - 3, cy), (cx, y + s - 1), (x + 3, cy)]
+            self.pg.draw.polygon(self.screen, color, pts)
+            darker = tuple(max(0, c - 40) for c in color)
+            self.pg.draw.polygon(self.screen, darker, pts, 2)
+            self.pg.draw.line(self.screen, darker, (cx, y + 1), (cx, y + s - 1), 1)
+            self.pg.draw.line(self.screen, darker, (x + 3, cy), (x + s - 3, cy), 1)
+            shine = tuple(min(255, c + 60) for c in color)
+            self.pg.draw.line(self.screen, shine, (cx - 2, y + 4), (x + 5, cy - 2), 1)
+        elif variant == 4:  # phase gate
+            self.pg.draw.rect(self.screen, color, (x + 2, y + 2, s - 4, s - 4), 2)
+            inner = tuple(min(255, c + 30) for c in color)
+            self.pg.draw.rect(self.screen, inner, (x + 6, y + 6, s - 12, s - 12), 1)
+            self.pg.draw.line(self.screen, color, (cx, y + 2), (cx, y + s - 2), 1)
+            self.pg.draw.line(self.screen, color, (x + 2, cy), (x + s - 2, cy), 1)
+        elif variant == 5:  # arc pylon
+            pts = [(cx, y + 1), (x + s - 3, y + s - 2), (x + 3, y + s - 2)]
+            self.pg.draw.polygon(self.screen, color, pts)
+            darker = tuple(max(0, c - 40) for c in color)
+            self.pg.draw.polygon(self.screen, darker, pts, 2)
+            self.pg.draw.line(self.screen, darker, (cx, y + 4), (cx, y + s - 4), 1)
+            shine = tuple(min(255, c + 60) for c in color)
+            self.pg.draw.circle(self.screen, shine, (cx, y + s // 3), 2)
+        elif variant == 6:  # cryo field
+            self.pg.draw.circle(self.screen, color, (cx, cy), s // 2, 2)
+            inner = tuple(min(255, c + 40) for c in color)
+            self.pg.draw.circle(self.screen, inner, (cx, cy), s // 4)
+            for angle in range(0, 360, 60):
+                rad = math.radians(angle)
+                ex = cx + int(math.cos(rad) * s * 0.4)
+                ey = cy + int(math.sin(rad) * s * 0.4)
+                self.pg.draw.line(self.screen, color, (cx, cy), (ex, ey), 1)
+        else:  # grav anchor
+            self.pg.draw.line(self.screen, color, (cx, y + 2), (cx, y + s - 2), 3)
+            self.pg.draw.circle(self.screen, color, (cx, y + s - 5), 4, 2)
+            self.pg.draw.line(self.screen, color, (x + 4, cy - 2), (x + s - 4, cy - 2), 2)
+            darker = tuple(max(0, c - 30) for c in color)
+            self.pg.draw.circle(self.screen, darker, (cx, y + 4), 3)
 
-    def _record_command_focus(self, timestep: int) -> None:
-        t = int(timestep)
-        if self._command_focus_timesteps and self._command_focus_timesteps[0] == t:
-            return
-        self._command_focus_timesteps.insert(0, t)
-        if len(self._command_focus_timesteps) > 3:
-            self._command_focus_timesteps = self._command_focus_timesteps[:3]
+    # ------------------------------------------------------------------ draw
+    def _text(
+        self, txt: str, x: int, y: int, *,
+        color: tuple[int, int, int] = COLOR_TEXT,
+        font: str = "md",
+    ) -> None:
+        f = self.font_lg if font == "lg" else self.font_sm if font == "sm" else self.font
+        if font == "badge":
+            f = self.font_badge
+        self.screen.blit(f.render(txt, True, color), (x, y))
 
-    def _draw_rect(
-        self,
-        x: int,
-        y: int,
-        w: int,
-        h: int,
-        *,
+    def _rect(
+        self, x: int, y: int, w: int, h: int, *,
         fill: tuple[int, int, int],
-        border: tuple[int, int, int] = (70, 85, 110),
-        border_width: int = 1,
+        border: tuple[int, int, int] = COLOR_BORDER,
+        bw: int = 1,
+        radius: int = 0,
     ) -> None:
-        self.pg.draw.rect(self.screen, fill, self.pg.Rect(x, y, w, h))
-        self.pg.draw.rect(self.screen, border, self.pg.Rect(x, y, w, h), border_width)
+        r = self.pg.Rect(x, y, w, h)
+        self.pg.draw.rect(self.screen, fill, r, border_radius=radius)
+        if bw > 0:
+            self.pg.draw.rect(self.screen, border, r, bw, border_radius=radius)
 
-    def _draw_pressure_band(self, *, x: int, y0: int, cell_w: int, level: int) -> None:
-        self._draw_rect(
-            x + 2,
-            y0 + 2,
-            cell_w - 4,
-            6,
-            fill=_sector_pressure_fill(level),
-            border=(88, 103, 128),
-            border_width=1,
-        )
-
-    def _draw_sector_board_legend(self, *, x: int, y: int) -> None:
-        for idx, line in enumerate(_sector_board_legend_lines()):
-            self._draw_text(
-                line,
-                x + SECTOR_BOARD_LEGEND_X_OFFSET,
-                y + SECTOR_BOARD_LEGEND_Y_OFFSET + idx * SECTOR_BOARD_LEGEND_LINE_STEP,
-                small=True,
-                color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
-            )
-
-    def _draw_sector_info_card(
-        self,
-        *,
-        x: int,
-        y: int,
-        title: str,
-        lines: list[str],
-        accent: tuple[int, int, int],
+    def _bar(
+        self, x: int, y: int, w: int, h: int, *,
+        ratio: float,
+        fg: tuple[int, int, int],
+        bg: tuple[int, int, int] = (32, 38, 52),
     ) -> None:
-        card_h = 26 + len(lines) * SECTOR_BOARD_CARD_LINE_STEP
-        self._draw_rect(
-            x,
-            y,
-            SECTOR_BOARD_CARD_W,
-            card_h,
-            fill=SECTOR_BOARD_CARD_FILL,
-            border=accent,
-            border_width=2,
-        )
-        self._draw_text(
-            title,
-            x + SECTOR_BOARD_CARD_LINE_X,
-            y + SECTOR_BOARD_CARD_TITLE_Y,
-            small=True,
-            color=SECTOR_BOARD_HUD_PRIMARY_COLOR,
-        )
-        for idx, line in enumerate(lines):
-            self._draw_text(
-                _truncate_ui_text(line, max_len=18),
-                x + SECTOR_BOARD_CARD_LINE_X,
-                y + SECTOR_BOARD_CARD_LINE_Y + idx * SECTOR_BOARD_CARD_LINE_STEP,
-                small=True,
-                color=SECTOR_BOARD_HUD_SECONDARY_COLOR,
-            )
+        self._rect(x, y, w, h, fill=bg, bw=0)
+        fill_w = max(0, min(w, int(w * ratio)))
+        if fill_w > 0:
+            self._rect(x, y, fill_w, h, fill=fg, bw=0)
+        self.pg.draw.rect(self.screen, COLOR_BORDER, self.pg.Rect(x, y, w, h), 1)
 
-    def _draw_sector_pending_badge(
-        self,
-        *,
-        x: int,
-        y: int,
-        pending_count: int,
+    # ------------------------------------------------- segmented energy bar
+    def _draw_energy_bar(self, x: int, y: int, total: int, remaining: int) -> None:
+        seg_w = 18
+        seg_h = 14
+        gap = 3
+        for i in range(total):
+            sx = x + i * (seg_w + gap)
+            if i < remaining:
+                self._rect(sx, y, seg_w, seg_h, fill=COLOR_ENERGY,
+                            border=(56, 148, 96), bw=1, radius=2)
+            else:
+                self._rect(sx, y, seg_w, seg_h, fill=(32, 42, 56),
+                            border=COLOR_BORDER, bw=1, radius=2)
+
+    # ------------------------------------------------- iso tile
+    def _draw_iso_tile(
+        self, tile: TileData, *,
+        highlight: bool = False,
+        link_highlight: bool = False,
+        staged_value: int | None = None,
     ) -> None:
-        badge_text = _sector_board_pending_badge_text(pending_count)
-        if not badge_text:
-            return
-        self._draw_rect(
-            x,
-            y,
-            SECTOR_BOARD_PENDING_BADGE_SIZE,
-            SECTOR_BOARD_PENDING_BADGE_SIZE,
-            fill=(171, 108, 187),
-            border=(234, 221, 242),
-            border_width=1,
-        )
-        self._draw_text(
-            badge_text,
-            x + 3,
-            y - 1,
-            small=True,
-            color=(18, 24, 34),
-        )
+        cx = tile.iso_x + TILE_W // 2
+        cy = tile.iso_y + TILE_H // 2
+        top_pts = [
+            (cx, cy - TILE_H // 2),
+            (cx + TILE_W // 2, cy),
+            (cx, cy + TILE_H // 2),
+            (cx - TILE_W // 2, cy),
+        ]
+        color = tile.base_color
+        if highlight:
+            color = tuple(min(255, c + 40) for c in color)
+        if link_highlight:
+            color = tuple(min(255, c + 25) for c in color)
 
-    def _draw_loadout_chips(
-        self,
-        *,
-        x: int,
-        y: int,
-        pending: Mapping[str, int],
+        flash_key = f"{tile.row},{tile.col}"
+        elapsed = time.time() - self._flash_start
+        if flash_key in self._tile_flashes and elapsed < 1.5:
+            flash_type = self._tile_flashes[flash_key]
+            intensity = max(0.0, 1.0 - elapsed / 1.5)
+            fc = COLOR_FLASH_G if flash_type == "clear" else COLOR_FLASH_R
+            color = tuple(int(c + (fc[i] - c) * intensity * 0.6)
+                          for i, c in enumerate(color))
+            color = tuple(max(0, min(255, c)) for c in color)
+
+        depth = ISO_DEPTH
+        left_pts = [
+            (cx - TILE_W // 2, cy),
+            (cx, cy + TILE_H // 2),
+            (cx, cy + TILE_H // 2 + depth),
+            (cx - TILE_W // 2, cy + depth),
+        ]
+        right_pts = [
+            (cx + TILE_W // 2, cy),
+            (cx, cy + TILE_H // 2),
+            (cx, cy + TILE_H // 2 + depth),
+            (cx + TILE_W // 2, cy + depth),
+        ]
+        left_col = tuple(max(0, c - 30) for c in color)
+        right_col = tuple(max(0, c - 50) for c in color)
+        self.pg.draw.polygon(self.screen, left_col, left_pts)
+        self.pg.draw.polygon(self.screen, right_col, right_pts)
+        self.pg.draw.polygon(self.screen, color, top_pts)
+
+        border = COLOR_BORDER_HI if tile.is_objective else COLOR_BORDER
+        if tile.is_current_wave:
+            border = COLOR_ACCENT_C
+        if link_highlight:
+            border = COLOR_ACCENT_C
+        bw = 2 if (tile.is_objective or tile.is_current_wave or link_highlight) else 1
+        self.pg.draw.polygon(self.screen, border, top_pts, bw)
+
+        if staged_value is not None:
+            pulse = abs(math.sin(time.time() * 4)) * 0.6 + 0.4
+            sc = COLOR_STAGED_ON if staged_value == 1 else COLOR_STAGED_OFF
+            sc_alpha = tuple(min(255, int(c * pulse)) for c in sc)
+            self.pg.draw.polygon(self.screen, sc_alpha, top_pts, 4)
+
+    # ------------------------------------------------- terrain features
+    def _draw_terrain_feature(self, tile: TileData, seed: int) -> None:
+        cx = tile.iso_x + TILE_W // 2
+        cy = tile.iso_y + TILE_H // 2
+        h = ((tile.row * 31 + tile.col * 17 + seed) * 2654435761) & 0xFFFFFFFF
+        variant = h % 100
+        sc = TILE_W / 96.0
+
+        if tile.tile_type == "rock" and variant < 70:
+            bx = cx - int(10 * sc) + (h % 5)
+            by = cy - int(6 * sc)
+            s = sc
+            pts = [
+                (bx, by + int(10 * s)), (bx + int(6 * s), by),
+                (bx + int(16 * s), by + int(3 * s)),
+                (bx + int(18 * s), by + int(11 * s)),
+                (bx + int(12 * s), by + int(14 * s)),
+                (bx + int(3 * s), by + int(12 * s)),
+            ]
+            self.pg.draw.polygon(self.screen, (78, 72, 62), pts)
+            self.pg.draw.polygon(self.screen, (58, 52, 44), pts, 2)
+            if variant < 35:
+                ox = int(20 * s)
+                pts2 = [
+                    (bx + ox, by + int(4 * s)),
+                    (bx + ox + int(5 * s), by - int(2 * s)),
+                    (bx + ox + int(10 * s), by + int(2 * s)),
+                    (bx + ox + int(9 * s), by + int(8 * s)),
+                    (bx + ox + int(4 * s), by + int(9 * s)),
+                ]
+                self.pg.draw.polygon(self.screen, (86, 78, 66), pts2)
+                self.pg.draw.polygon(self.screen, (58, 52, 44), pts2, 2)
+
+        elif tile.tile_type == "water":
+            for i in range(4):
+                wy = cy - int(8 * sc) + i * int(6 * sc)
+                wx = cx - int(16 * sc) + (h + i * 7) % int(12 * sc)
+                lighter = (58, 108, 168)
+                wave_len = int(20 * sc) + i * int(4 * sc)
+                self.pg.draw.line(self.screen, lighter,
+                                   (wx, wy), (wx + wave_len, wy), 1)
+                lighter2 = (48, 92, 148)
+                self.pg.draw.line(self.screen, lighter2,
+                                   (wx + 2, wy + 2), (wx + wave_len - 4, wy + 2), 1)
+
+        elif tile.tile_type == "ground" and variant > 70:
+            mx = cx - int(4 * sc) + (h % int(6 * sc))
+            my = cy - TILE_H // 2 - int(4 * sc)
+            mw = int(18 * sc) + (h % int(8 * sc))
+            mh = int(14 * sc) + (h % int(8 * sc))
+            dark = (48, 56, 42)
+            mid = (62, 68, 52)
+            snow = (192, 200, 210)
+            pts_base = [(mx, my + mh), (mx + mw // 2, my), (mx + mw, my + mh)]
+            self.pg.draw.polygon(self.screen, dark, pts_base)
+            self.pg.draw.polygon(self.screen, mid, pts_base, 2)
+            peak_h = mh // 3
+            pts_snow = [
+                (mx + mw // 4, my + peak_h),
+                (mx + mw // 2, my),
+                (mx + mw * 3 // 4, my + peak_h),
+            ]
+            self.pg.draw.polygon(self.screen, snow, pts_snow)
+            lighter_snow = (218, 224, 232)
+            self.pg.draw.polygon(self.screen, lighter_snow, pts_snow, 1)
+
+    # -------------------------------------------------------- top bar
+    def _draw_top_bar(
+        self, *, timestep: int, total_waves: int,
+        t_star: int, energy: int, energy_total: int,
+        cmd_pts: int, objective: str, effect_status: str,
     ) -> None:
-        self._loadout_chip_hitboxes = []
-        for idx, (token, ap_name) in enumerate(_pending_loadout_entries(pending)):
-            chip_x = x + idx * (
-                COMMAND_CONSOLE_LOADOUT_CHIP_W + COMMAND_CONSOLE_LOADOUT_CHIP_GAP
-            )
-            accent = (126, 196, 134) if token != "empty" and not token.startswith("+") else (115, 136, 168)
-            fill = (34, 52, 66) if token != "empty" else (40, 48, 64)
-            self._draw_rect(
-                chip_x,
-                y,
-                COMMAND_CONSOLE_LOADOUT_CHIP_W,
-                COMMAND_CONSOLE_LOADOUT_CHIP_H,
-                fill=fill,
-                border=accent,
-                border_width=1,
-            )
-            self._draw_text(
-                _truncate_ui_text(token, max_len=12),
-                chip_x + 8,
-                y + 4,
-                small=True,
-                color=(220, 230, 245),
-            )
-            if ap_name is not None:
-                self._loadout_chip_hitboxes.append(
-                    (
-                        chip_x,
-                        y,
-                        COMMAND_CONSOLE_LOADOUT_CHIP_W,
-                        COMMAND_CONSOLE_LOADOUT_CHIP_H,
-                        ap_name,
-                    )
-                )
+        self._rect(0, 0, SCREEN_W, TOP_BAR_H, fill=COLOR_PANEL, border=COLOR_BORDER, bw=1)
+        self._text(wave_label(timestep, total_waves), 16, 6, font="lg")
 
-    def _draw_console_sector_chips(
-        self,
-        *,
-        x: int,
-        y: int,
-        live_sector_name: str | None,
-        target_sector_name: str | None,
-        pinned_sector_name: str | None,
-    ) -> None:
-        chip_styles = {
-            "LIVE": ((36, 64, 52), (126, 196, 134)),
-            "TARGET": ((74, 64, 38), (212, 188, 122)),
-            "PIN": ((62, 46, 82), (205, 154, 228)),
-        }
-        for idx, token in enumerate(
-            _command_console_sector_tokens(
-                live_sector_name=live_sector_name,
-                target_sector_name=target_sector_name,
-                pinned_sector_name=pinned_sector_name,
-            )
-        ):
-            chip_x = x + idx * (
-                COMMAND_CONSOLE_SECTOR_CHIP_W + COMMAND_CONSOLE_SECTOR_CHIP_GAP
-            )
-            label = token.split(" ", 1)[0]
-            fill, border = chip_styles.get(label, ((40, 48, 64), (115, 136, 168)))
-            self._draw_rect(
-                chip_x,
-                y,
-                COMMAND_CONSOLE_SECTOR_CHIP_W,
-                COMMAND_CONSOLE_SECTOR_CHIP_H,
-                fill=fill,
-                border=border,
-                border_width=1,
-            )
-            self._draw_text(
-                _truncate_ui_text(token, max_len=15),
-                chip_x + 8,
-                y + 3,
-                small=True,
-                color=(232, 238, 249),
-            )
+        self._text("ENERGY", 220, 6, font="sm", color=COLOR_TEXT_DIM)
+        self._draw_energy_bar(220, 24, energy_total, energy)
 
-    def _draw_command_stage_badge(
-        self,
-        *,
-        x: int,
-        y: int,
-        live_sector_name: str | None,
-        target_sector_name: str | None,
-        pinned_sector_name: str | None,
-    ) -> None:
-        status, _detail = _command_console_stage_status(
-            live_sector_name=live_sector_name,
-            target_sector_name=target_sector_name,
-            pinned_sector_name=pinned_sector_name,
-        )
-        fills = {
-            "ON TARGET": ((92, 78, 42), (212, 188, 122)),
-            "ARMED": ((36, 64, 52), (126, 196, 134)),
-            "TRACKING": ((62, 46, 82), (205, 154, 228)),
-            "STAGING": ((38, 56, 78), (112, 176, 204)),
-        }
-        fill, border = fills.get(status, ((40, 48, 64), (115, 136, 168)))
-        self._draw_rect(
-            x,
-            y,
-            COMMAND_CONSOLE_STAGE_BADGE_W,
-            COMMAND_CONSOLE_STAGE_BADGE_H,
-            fill=fill,
-            border=border,
-            border_width=1,
-        )
-        self._draw_text(
-            status,
-            x + 10,
-            y + 4,
-            small=True,
-            color=(232, 238, 249),
-        )
+        self._text(cmd_points_label(cmd_pts), 440, 10, color=COLOR_CMD_PTS, font="md")
 
-    def _draw_sector_board_hud(
-        self,
-        *,
-        x: int,
-        y: int,
-        hovered_cell: _SectorBoardCell | None,
-        pinned: bool,
-        pressure_levels: Mapping[int, int],
-        max_t: int,
-        timestep: int,
-        t_star: int,
-        start_t: int,
-        end_t: int,
-        window_start: int,
-        window_end: int,
-        live_cell_name: str | None,
-        pending_count: int,
-        command_focus_timestep: int | None = None,
-        command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
-    ) -> None:
-        hud_x = x + SECTOR_BOARD_HUD_X_OFFSET
-        sections = _sector_board_hud_sections(
-            hovered_cell=hovered_cell,
-            pressure_levels=pressure_levels,
-            max_t=max_t,
-            timestep=timestep,
-            t_star=t_star,
-            start_t=start_t,
-            end_t=end_t,
-            window_start=window_start,
-            window_end=window_end,
-            live_cell_name=live_cell_name,
-            pending_count=pending_count,
-            command_focus_timestep=command_focus_timestep,
-            command_focus_timesteps=command_focus_timesteps,
-            pinned=pinned,
-        )
-        card_positions = (
-            (hud_x, y + SECTOR_BOARD_CARD_ROW_1_Y),
-            (hud_x + SECTOR_BOARD_CARD_W + SECTOR_BOARD_CARD_GAP_X, y + SECTOR_BOARD_CARD_ROW_1_Y),
-            (hud_x, y + SECTOR_BOARD_CARD_ROW_2_Y),
-            (hud_x + SECTOR_BOARD_CARD_W + SECTOR_BOARD_CARD_GAP_X, y + SECTOR_BOARD_CARD_ROW_2_Y),
-        )
-        for idx, ((title, lines), (card_x, card_y)) in enumerate(
-            zip(sections, card_positions)
-        ):
-            self._draw_sector_info_card(
-                x=card_x,
-                y=card_y,
-                title=title,
-                lines=lines,
-                accent=SECTOR_BOARD_HUD_CARD_ACCENTS[idx],
-            )
+        crit = critical_wave_label(t_star)
+        self._text(crit, SCREEN_W - 310, 6, color=COLOR_ACCENT_Y, font="lg")
 
-    def _draw_timeline(
-        self,
-        *,
-        timestep: int,
-        t_star: int,
-        mode: str,
-        window_size: int,
-        history_atoms: object,
-        timeline_span: int,
-        pressure_levels: Mapping[int, int] | None = None,
-        linked_range: tuple[int, int] | None = None,
-    ) -> None:
-        history_counts = history_counts_by_t(history_atoms)
-        observed_pressure: Mapping[int, int] = pressure_levels or {}
-        window_start, window_end = _objective_window_bounds(
-            mode=mode,
-            t_star=t_star,
-            window_size=window_size,
-        )
-        max_t = max([0, timestep, t_star, *history_counts.keys()])
-        start_t, end_t = _timeline_window_bounds(
-            timestep=timestep,
-            t_star=t_star,
-            history_counts=history_counts,
-            span=timeline_span,
-        )
-        cols = max(1, end_t - start_t + 1)
-        cell_w = 26
-        x0 = 24
-        y0 = 130
-        self._draw_text("Timeline sectors (t):", x0, y0 - 26)
-        for idx, t in enumerate(range(start_t, end_t + 1)):
-            x = x0 + idx * (cell_w + 3)
-            fill = (34, 44, 62)
-            if window_start <= t <= window_end:
-                fill = (57, 63, 76)
-            if t == t_star and t == timestep:
-                fill = (128, 110, 56)
-            elif t == t_star:
-                fill = (92, 76, 35)
-            elif t == timestep:
-                fill = (44, 80, 110)
-            if history_counts.get(t, 0) > 0:
-                # Slightly brighter when interventions happened at t.
-                fill = tuple(min(255, c + 30) for c in fill)
-            border = (70, 85, 110)
-            border_w = 1
-            if _range_contains_t(linked_range, t):
-                border = (128, 196, 166)
-                border_w = 2
-            self._draw_rect(
-                x,
-                y0,
-                cell_w,
-                30,
-                fill=fill,
-                border=border,
-                border_width=border_w,
-            )
-            level = observed_pressure.get(t)
-            if level is not None:
-                self._draw_pressure_band(x=x, y0=y0, cell_w=cell_w, level=level)
-            mark = _timeline_mark(t, timestep, t_star)
-            if mark:
-                self._draw_text(mark, x + 9, y0 - 16, small=True, color=(196, 212, 236))
-            self._draw_text(str(t), x + 7, y0 + 8, small=True)
-            self._draw_text(
-                _pressure_token(observed_pressure.get(t)),
-                x + 4,
-                y0 + 38,
-                small=True,
-                color=(176, 191, 216),
-            )
-            self._draw_text(
-                _edits_token(history_counts.get(t)),
-                x + 4,
-                y0 + 52,
-                small=True,
-                color=(176, 191, 216),
-            )
-        self._draw_text("marks: N=now, T=target, B=both", x0, y0 + 66, small=True)
-        self._draw_text(
-            "P=row pressure (0..10), E=row edits per t, mint border=board hover link",
-            x0,
-            y0 + 80,
-            small=True,
-        )
-        self._draw_text(
-            f"objective window: t={window_start}..{window_end}",
-            x0,
-            y0 + 96,
-            small=True,
-            color=(176, 191, 216),
-        )
-        self._draw_text(
-            f"window t={start_t}..{end_t} (span={cols}, [ / ] zoom)",
-            x0,
-            y0 + 112,
-            small=True,
-            color=(176, 191, 216),
-        )
-        self._draw_text(
-            _truncate_ui_text(
-                _objective_window_pressure_summary(
-                    pressure_levels=observed_pressure,
-                    window_start=window_start,
-                    window_end=window_end,
-                ),
-                max_len=62,
-            ),
-            x0,
-            y0 + 126,
-            small=True,
-            color=(176, 191, 216),
-        )
-        minimap = _build_timeline_minimap(
-            max_t=max_t,
-            start_t=start_t,
-            end_t=end_t,
-            timestep=timestep,
-            t_star=t_star,
-            window_start=window_start,
-            window_end=window_end,
-            history_counts=history_counts,
-            pressure_levels=observed_pressure,
-        )
-        self._draw_text(
-            f"minimap: {minimap}",
-            x0,
-            y0 + 140,
-            small=True,
-            color=(176, 191, 216),
-        )
-        if t_star < start_t:
-            self._draw_text(
-                "target t* is left of view (press ] to widen or advance time)",
-                x0 + 360,
-                y0 + 112,
-                small=True,
-                color=(214, 194, 138),
-            )
-        elif t_star > end_t:
-            self._draw_text(
-                "target t* is right of view (press ] to widen or advance time)",
-                x0 + 360,
-                y0 + 112,
-                small=True,
-                color=(214, 194, 138),
-            )
+        status_txt, status_col = effect_status_display(effect_status)
+        self._rect(440, 34, len(status_txt) * 8 + 16, 18, fill=status_col, bw=0, radius=3)
+        self._text(status_txt, 448, 35, font="sm", color=COLOR_TEXT_BRIGHT)
 
-    def _draw_sector_board(
-        self,
-        *,
-        max_t: int,
-        timestep: int,
-        t_star: int,
-        start_t: int,
-        end_t: int,
-        window_start: int,
-        window_end: int,
-        history_counts: Mapping[int, int],
-        pressure_levels: Mapping[int, int],
-        command_focus_timestep: int | None = None,
-        command_focus_timesteps: tuple[int, ...] | list[int] | None = None,
-        pending_count: int = 0,
-        mouse_pos: tuple[int, int] | None = None,
-    ) -> None:
-        x = 620
-        y = 390
-        w = 540
-        h = 178
-        self._draw_rect(
-            x,
-            y,
-            w,
-            h,
-            fill=(24, 34, 50),
-            border=(102, 124, 156),
-            border_width=2,
-        )
-        self._draw_text("Sector board (sampled full horizon):", x + 14, y + 10, small=True)
-        self._draw_sector_board_legend(x=x, y=y)
-        cells = _build_sector_board_cells(
-            max_t=max_t,
-            timestep=timestep,
-            t_star=t_star,
-            start_t=start_t,
-            end_t=end_t,
-            window_start=window_start,
-            window_end=window_end,
-            history_counts=history_counts,
-            pressure_levels=pressure_levels,
-            focus_timestep=command_focus_timestep,
-            focus_timesteps=command_focus_timesteps,
-        )
-        cell_size = 18
-        gap = 4
-        board_x = x + 36
-        board_y = y + 52
-        hitboxes: list[tuple[int, int, int, int, _SectorBoardCell]] = []
-        for col_idx in range(SECTOR_BOARD_COLS):
-            col_label = _sector_board_col_label(col_idx)
-            self._draw_text(
-                col_label,
-                board_x + col_idx * (cell_size + gap) + 5,
-                board_y - 16,
-                small=True,
-                color=(176, 191, 216),
-            )
-        hovered_cell: _SectorBoardCell | None = None
-        live_cell: _SectorBoardCell | None = None
-        target_cell: _SectorBoardCell | None = None
-        pinned_cell: _SectorBoardCell | None = None
-        for cell in cells:
-            cx = board_x + cell.col * (cell_size + gap)
-            cy = board_y + cell.row * (cell_size + gap)
-            hitboxes.append((cx, cy, cell_size, cell_size, cell))
-            is_live_cell = _range_contains_t((cell.start_t, cell.end_t), timestep)
-            if is_live_cell:
-                live_cell = cell
-            if _range_contains_t((cell.start_t, cell.end_t), t_star):
-                target_cell = cell
-            if self._pinned_sector_coords == (cell.row, cell.col):
-                pinned_cell = cell
-            if cell.col == 0:
-                self._draw_text(
-                    str(cell.row + 1),
-                    board_x - 18,
-                    cy + 2,
-                    small=True,
-                    color=(176, 191, 216),
-                )
-            fill = (38, 48, 66)
-            if cell.in_objective_window:
-                fill = (58, 65, 80)
-            if cell.pressure_level is not None:
-                fill = _sector_pressure_fill(cell.pressure_level)
-                if cell.in_objective_window:
-                    fill = tuple(min(255, channel + 18) for channel in fill)
-            if cell.edits > 0:
-                fill = tuple(min(255, channel + 10) for channel in fill)
-            border = (76, 92, 118)
-            if cell.in_viewport:
-                border = (164, 184, 214)
-            if cell.focus_age == 0:
-                border = (126, 196, 134)
-            elif cell.focus_age == 1:
-                border = (112, 176, 204)
-            elif cell.focus_age == 2:
-                border = (98, 148, 188)
-            if cell.marker:
-                border = (212, 188, 122)
-            rect = self.pg.Rect(cx, cy, cell_size, cell_size)
-            if mouse_pos is not None and rect.collidepoint(mouse_pos):
-                hovered_cell = cell
-                border = (230, 220, 162)
-            if self._pinned_sector_coords == (cell.row, cell.col):
-                border = (205, 154, 228)
-            self._draw_rect(
-                cx,
-                cy,
-                cell_size,
-                cell_size,
-                fill=fill,
-                border=border,
-                border_width=2 if cell.marker else 1,
-            )
-            glyph = _sector_board_cell_glyph(cell)
-            if glyph != ".":
-                self._draw_text(
-                    glyph,
-                    cx + 5,
-                    cy + 2,
-                    small=True,
-                    color=(18, 24, 34),
-                )
-            if is_live_cell and pending_count > 0:
-                self._draw_sector_pending_badge(
-                    x=cx + cell_size - SECTOR_BOARD_PENDING_BADGE_OFFSET_X,
-                    y=cy - SECTOR_BOARD_PENDING_BADGE_OFFSET_Y,
-                    pending_count=pending_count,
-                )
+        self._text(objective, 16, 36, font="md", color=COLOR_ACCENT_Y)
 
-        self._sector_board_hitboxes = hitboxes
-        active_cell = pinned_cell if pinned_cell is not None else hovered_cell
-        self._hovered_sector_range = (
-            None
-            if active_cell is None
-            else (int(active_cell.start_t), int(active_cell.end_t))
-        )
-        live_cell_name = (
-            None
-            if live_cell is None
-            else _sector_board_cell_name(row=live_cell.row, col=live_cell.col)
-        )
-        self._live_sector_name = live_cell_name
-        self._target_sector_name = (
-            None
-            if target_cell is None
-            else _sector_board_cell_name(row=target_cell.row, col=target_cell.col)
-        )
-        self._pinned_sector_name = (
-            None
-            if pinned_cell is None
-            else _sector_board_cell_name(row=pinned_cell.row, col=pinned_cell.col)
-        )
-        self._pinned_sector_range = (
-            None
-            if pinned_cell is None
-            else (int(pinned_cell.start_t), int(pinned_cell.end_t))
-        )
-        self._draw_sector_board_hud(
-            x=x,
-            y=y,
-            hovered_cell=active_cell,
-            pinned=pinned_cell is not None,
-            pressure_levels=pressure_levels,
-            max_t=max_t,
-            timestep=timestep,
-            t_star=t_star,
-            start_t=start_t,
-            end_t=end_t,
-            window_start=window_start,
-            window_end=window_end,
-            live_cell_name=live_cell_name,
-            pending_count=pending_count,
-            command_focus_timestep=command_focus_timestep,
-            command_focus_timesteps=command_focus_timesteps,
-        )
-
-    def _draw_help_overlay(self) -> None:
-        lines = _help_overlay_lines()
-        x = 620
-        y = 350
-        w = 540
-        h = 28 + len(lines) * 28
-        self._draw_rect(
-            x,
-            y,
-            w,
-            h,
-            fill=(25, 34, 48),
-            border=(115, 136, 168),
-            border_width=2,
-        )
-        for idx, line in enumerate(lines):
-            color = (229, 236, 250) if idx == 0 else (206, 216, 234)
-            self._draw_text(
-                line,
-                x + 16,
-                y + 30 + idx * 28,
-                color=color,
-                small=(idx != 0),
-                title=False,
-            )
-
-    def _draw_observation_inspector(
-        self,
-        *,
-        last_obs: dict[str, object] | None,
-        timestep: int,
+    # -------------------------------------------------------- sidebar
+    def _draw_sidebar(
+        self, *,
         instance: "GF01Instance",
-        objective_text: str,
-    ) -> None:
-        lines = _observation_inspector_lines(
-            _canonical_exposure_payload(
-                last_obs=last_obs,
-                timestep=timestep,
-                instance=instance,
-                objective_text=objective_text,
-            )
-        )
-        x = 620
-        y = 580
-        w = 540
-        h = 30 + len(lines) * 22
-        self._draw_rect(
-            x,
-            y,
-            w,
-            h,
-            fill=(24, 34, 50),
-            border=(115, 136, 168),
-            border_width=2,
-        )
-        for idx, line in enumerate(lines):
-            color = (229, 236, 250) if idx == 0 else (206, 216, 234)
-            self._draw_text(
-                line,
-                x + 14,
-                y + 10 + idx * 22,
-                small=True,
-                color=color,
-            )
-
-    def _draw_onboarding_strip(self, *, timestep: int) -> None:
-        lines = _onboarding_strip_lines(timestep)
-        if not lines:
-            return
-        x = 620
-        y = 96
-        w = 540
-        h = 80
-        self._draw_rect(
-            x,
-            y,
-            w,
-            h,
-            fill=(27, 38, 56),
-            border=(115, 136, 168),
-            border_width=2,
-        )
-        self._draw_text(lines[0], x + 14, y + 12, small=True, color=(229, 236, 250))
-        self._draw_text(lines[1], x + 14, y + 40, small=True, color=(206, 216, 234))
-
-    def _draw_wave_pressure_strip(
-        self,
-        *,
         timestep: int,
-        label: str,
-        filled: int,
-        fill_color: tuple[int, int, int],
-        trend: str,
-        pressure_levels: Mapping[int, int] | None = None,
-    ) -> None:
-        x = 620
-        y = 184
-        w = 540
-        h = 86
-        self._draw_rect(
-            x,
-            y,
-            w,
-            h,
-            fill=(24, 34, 50),
-            border=(102, 124, 156),
-            border_width=2,
-        )
-        self._draw_text("Sector Wave Strip (observed):", x + 14, y + 10, small=True)
-        cell_x = x + 270
-        cell_y = y + 10
-        for i in range(10):
-            active = i < max(0, min(10, int(filled)))
-            self._draw_rect(
-                cell_x + i * 22,
-                cell_y,
-                18,
-                18,
-                fill=fill_color if active else (37, 47, 66),
-                border=(92, 108, 132),
-            )
-        self._draw_text(label, x + 14, y + 36, small=True, color=(198, 212, 234))
-
-        self._wave_strip.update_history(timestep=timestep, trend=trend)
-        hot_summary = _format_top_pressure_summary(pressure_levels or {}, max_items=3)
-        self._draw_text(
-            _truncate_ui_text(
-                "Recent wave trends: "
-                + self._wave_strip.trail_text()
-                + " | Hot sectors: "
-                + hot_summary,
-                max_len=90,
-            ),
-            x + 14,
-            y + 58,
-            small=True,
-            color=(176, 191, 216),
-        )
-
-    def _draw_command_response_lane(self, *, x: int, y: int) -> None:
-        w = 540
-        h = 96
-        self._draw_rect(
-            x,
-            y,
-            w,
-            h,
-            fill=(24, 34, 50),
-            border=(102, 124, 156),
-            border_width=2,
-        )
-        self._draw_text("Command -> Sector response (observed):", x + 14, y + 10, small=True)
-        for idx, line in enumerate(self._command_response_trail.lines()):
-            self._draw_text(
-                line,
-                x + 14,
-                y + 34 + idx * 18,
-                small=True,
-                color=(198, 212, 234),
-            )
-
-    def _draw_controls(
-        self,
-        *,
-        timestep: int,
-        input_aps: list[str],
-        all_input_aps: list[str],
         pending: dict[str, int],
-        y_start: int,
+        y_t: dict[str, int],
+        pressure_levels: Mapping[int, int],
+        history_counts: Mapping[int, int],
+        report: _DeploymentReport,
+    ) -> None:
+        sx = SIDEBAR_X
+        panel_h = SCREEN_H - TOP_BAR_H - BOTTOM_H
+        self._rect(sx, TOP_BAR_H, SIDEBAR_W, panel_h,
+                    fill=COLOR_PANEL, border=COLOR_BORDER)
+
+        self._text("DEFENSE STATUS", sx + 14, TOP_BAR_H + 10, font="md", color=COLOR_TEXT_BRIGHT)
+
+        on_count = sum(1 for v in y_t.values() if v == 1)
+        total_out = max(1, len(y_t))
+        self._text("Base Integrity", sx + 14, TOP_BAR_H + 34, font="sm", color=COLOR_TEXT_DIM)
+        integrity = 1.0 - (on_count / total_out) if y_t else 1.0
+        pct_txt = f"{int(integrity * 100)}%"
+        pct_col = COLOR_ACCENT_G if integrity > 0.5 else COLOR_ACCENT_Y if integrity > 0.25 else COLOR_ACCENT_R
+        self._text(pct_txt, sx + SIDEBAR_W - 50, TOP_BAR_H + 34, font="sm", color=pct_col)
+        self._bar(sx + 14, TOP_BAR_H + 52, SIDEBAR_W - 28, 14, ratio=integrity, fg=pct_col)
+
+        y_off = TOP_BAR_H + 76
+
+        if report.wave >= 0:
+            self._text("LAST DEPLOYMENT", sx + 14, y_off, font="md", color=COLOR_TEXT_BRIGHT)
+            y_off += 22
+            action_parts: list[str] = []
+            input_aps = instance.automaton.input_aps
+            for ap_name, val in report.actions[:4]:
+                dname = defense_name(ap_name, input_aps)
+                tag = "ON" if val == 1 else "OFF"
+                action_parts.append(f"{dname} {tag}")
+            if action_parts:
+                self._text(f"Wave {report.wave + 1}: " + ", ".join(action_parts),
+                            sx + 14, y_off, font="sm", color=COLOR_TEXT)
+            else:
+                self._text(f"Wave {report.wave + 1}: skipped", sx + 14, y_off,
+                            font="sm", color=COLOR_TEXT_DIM)
+            y_off += 18
+
+            if report.deltas:
+                self._text("RESULT", sx + 14, y_off, font="sm", color=COLOR_TEXT_BRIGHT)
+                y_off += 16
+                for tname, old_s, new_s in report.deltas[:4]:
+                    if old_s != new_s:
+                        arrow_col = COLOR_ACCENT_G if new_s == "CLEAR" else COLOR_ACCENT_R
+                        self._text(f"{tname}: {old_s} \u2192 {new_s}",
+                                    sx + 20, y_off, font="sm", color=arrow_col)
+                        y_off += 16
+            y_off += 8
+        else:
+            y_off += 4
+
+        self._text("Threat Sensors", sx + 14, y_off, font="sm", color=COLOR_TEXT_DIM)
+        y_off += 18
+        output_aps = instance.automaton.output_aps
+        for oap in output_aps[:6]:
+            tname = threat_name(oap, output_aps)
+            val = y_t.get(oap, 0)
+            col = COLOR_ACCENT_R if val == 1 else COLOR_ACCENT_G
+            status = "ACTIVE" if val == 1 else "CLEAR"
+            self._text(f"{tname}: {status}", sx + 20, y_off, font="sm", color=col)
+            y_off += 16
+
+        # wave timeline strip
+        self._text("WAVE TIMELINE", sx + 14, TIMELINE_Y_OFFSET, font="md", color=COLOR_TEXT_BRIGHT)
+        total_waves = len(instance.base_trace)
+        entries = wave_timeline_data(
+            total_waves, timestep, instance.t_star, instance.mode,
+            instance.window_size, pressure_levels, history_counts,
+        )
+        ty = TIMELINE_Y_OFFSET + 24
+        cols_per_row = max(1, (SIDEBAR_W - 28) // (TIMELINE_CELL + TIMELINE_GAP))
+        for i, entry in enumerate(entries):
+            tx = sx + 14 + (i % cols_per_row) * (TIMELINE_CELL + TIMELINE_GAP)
+            row_y = ty + (i // cols_per_row) * (TIMELINE_CELL + TIMELINE_GAP)
+            fill = COLOR_PANEL_LITE
+            border = COLOR_BORDER
+            bw = 1
+            if entry["in_window"]:
+                fill = (58, 52, 34)
+            if entry["is_past"]:
+                fill = (28, 32, 42)
+            if entry["is_current"]:
+                fill = (38, 68, 88)
+                border = COLOR_ACCENT_C
+                bw = 2
+            if entry["is_critical"]:
+                border = COLOR_ACCENT_Y
+                bw = 2
+            if entry["has_edits"]:
+                fill = tuple(min(255, c + 16) for c in fill)
+            self._rect(tx, row_y, TIMELINE_CELL, TIMELINE_CELL,
+                        fill=fill, border=border, bw=bw, radius=2)
+            label = str(entry["wave"])
+            self._text(label, tx + (TIMELINE_CELL - len(label) * 7) // 2,
+                        row_y + 7, font="sm")
+
+    # -------------------------------------------------------- iso map
+    def _draw_map(
+        self, tiles: list[TileData], *,
+        instance: "GF01Instance",
+        pending: dict[str, int],
+        mouse_pos: tuple[int, int],
+        hovered_tile: TileData | None,
+        hovered_card_ap: str | None,
+    ) -> None:
+        self._rect(MAP_X - 4, MAP_Y - 4, MAP_W + 8, MAP_H + 8,
+                    fill=COLOR_BG, border=COLOR_BORDER, bw=1)
+
+        input_aps = instance.automaton.input_aps
+        obj_xs: list[int] = []
+        obj_ys: list[int] = []
+
+        for tile in tiles:
+            is_hover = (hovered_tile is not None
+                        and tile.row == hovered_tile.row
+                        and tile.col == hovered_tile.col)
+            is_link = (hovered_card_ap is not None
+                       and tile.defense_ap == hovered_card_ap)
+            staged = pending.get(tile.defense_ap) if tile.defense_ap else None
+
+            self._draw_iso_tile(tile, highlight=is_hover, link_highlight=is_link,
+                                 staged_value=staged)
+            self._draw_terrain_feature(tile, instance.seed)
+
+            if tile.is_objective:
+                obj_xs.append(tile.iso_x + TILE_W // 2)
+                obj_ys.append(tile.iso_y + TILE_H // 2)
+                pulse = int(abs((time.time() * 3) % 2.0 - 1.0) * 5) + 3
+                ocx = tile.iso_x + TILE_W // 2
+                ocy = tile.iso_y + TILE_H // 2
+                self.pg.draw.circle(self.screen, COLOR_ACCENT_Y, (ocx, ocy), pulse, 1)
+
+            if tile.defense_ap is not None:
+                val = pending.get(tile.defense_ap)
+                if val == 1:
+                    col = defense_color(tile.defense_ap, input_aps)
+                elif val == 0:
+                    col = COLOR_TEXT_DIM
+                else:
+                    col = (100, 108, 124)
+                ap_idx = tile.defense_index if tile.defense_index is not None else 0
+                self._draw_defense_sprite(
+                    tile.iso_x + TILE_W // 2 - SPRITE_SIZE // 2,
+                    tile.iso_y + TILE_H // 2 - SPRITE_SIZE // 2 - 4,
+                    ap_idx, col, size=SPRITE_SIZE,
+                )
+                badge_num = str(ap_idx + 1)
+                bx = tile.iso_x + TILE_W // 2 + SPRITE_SIZE // 2
+                by = tile.iso_y + TILE_H // 2 - SPRITE_SIZE // 2 - 8
+                self._rect(bx, by, 20, 18, fill=(16, 22, 36),
+                            border=COLOR_ACCENT_C, bw=2, radius=3)
+                self._text(badge_num, bx + 4, by + 1, font="badge", color=COLOR_ACCENT_C)
+
+            if tile.deployed_value is not None and tile.defense_ap not in pending:
+                dot_col = COLOR_HISTORY_ON if tile.deployed_value == 1 else COLOR_HISTORY_OFF
+                dx = tile.iso_x + TILE_W // 2 - SPRITE_SIZE // 2 - 6
+                dy = tile.iso_y + TILE_H // 2 + 8
+                self.pg.draw.circle(self.screen, dot_col, (dx, dy), 6)
+                self.pg.draw.circle(self.screen, (18, 22, 32), (dx, dy), 6, 1)
+                marker = "\u25B2" if tile.deployed_value == 1 else "\u25BC"
+                self._text(marker, dx - 4, dy - 6, font="badge", color=COLOR_TEXT_BRIGHT)
+
+            if tile.threat_level > 0.3:
+                tcx = tile.iso_x + TILE_W // 2
+                tcy = tile.iso_y + 6
+                ring_size = 6 + int(tile.threat_level * 8)
+                pulse_r = ring_size + int(abs(math.sin(time.time() * 3)) * 3)
+                self.pg.draw.circle(self.screen, COLOR_ACCENT_R, (tcx, tcy), pulse_r, 2)
+                if tile.threat_level > 0.5:
+                    self.pg.draw.circle(self.screen, (148, 42, 36), (tcx, tcy),
+                                         pulse_r + 4, 1)
+                n_chev = 1 + int(tile.threat_level * 2)
+                for ci in range(min(n_chev, 3)):
+                    offset = 10 + ci * 8
+                    pts = [
+                        (tcx + offset, tcy - 5),
+                        (tcx + offset + 6, tcy),
+                        (tcx + offset, tcy + 5),
+                    ]
+                    self.pg.draw.lines(self.screen, COLOR_ACCENT_R, False, pts, 2)
+
+        if obj_xs:
+            obj_label = objective_text_themed(instance)
+            label_w = len(obj_label) * 9 + 16
+            label_x = sum(obj_xs) // len(obj_xs) - label_w // 2
+            label_y = min(obj_ys) - 32
+            bg_surf = self.pg.Surface((label_w, 26), self.pg.SRCALPHA)
+            bg_surf.fill((14, 18, 26, 210))
+            self.screen.blit(bg_surf, (label_x - 4, label_y - 3))
+            self.pg.draw.rect(self.screen, COLOR_ACCENT_Y,
+                               (label_x - 4, label_y - 3, label_w, 26), 2)
+            self._text(obj_label, label_x + 4, label_y + 2, font="sm", color=COLOR_ACCENT_Y)
+
+        if hovered_tile is not None:
+            tooltip_x = mouse_pos[0] + 16
+            tooltip_y = mouse_pos[1] - 28
+            if hovered_tile.defense_ap:
+                name = defense_name(hovered_tile.defense_ap, input_aps)
+                idx = hovered_tile.defense_index
+                label = f"[{idx + 1 if idx is not None else '?'}] {name}"
+                bg_surf = self.pg.Surface((len(label) * 8 + 12, 20), self.pg.SRCALPHA)
+                bg_surf.fill((14, 18, 26, 180))
+                self.screen.blit(bg_surf, (tooltip_x - 4, tooltip_y - 2))
+                self._text(label, tooltip_x, tooltip_y, font="sm", color=COLOR_TEXT_BRIGHT)
+            elif hovered_tile.is_objective:
+                bg_surf = self.pg.Surface((110, 20), self.pg.SRCALPHA)
+                bg_surf.fill((14, 18, 26, 180))
+                self.screen.blit(bg_surf, (tooltip_x - 4, tooltip_y - 2))
+                self._text("Objective Zone", tooltip_x, tooltip_y,
+                            font="sm", color=COLOR_ACCENT_Y)
+
+    # ------------------------------------------------- defense cards
+    def _draw_defense_cards(
+        self, *,
+        input_aps: list[str],
+        pending: dict[str, int],
         page: int,
         page_size: int,
-        group_filter: str | None,
-        collapse_rows: bool,
-    ) -> tuple[list[_Button], int, int, int]:
-        buttons: list[_Button] = []
-        visible_aps, page, total_pages = _paginate_input_aps(
-            input_aps,
-            page=page,
-            page_size=page_size,
-        )
-        panel_h = max(
-            COMMAND_CONSOLE_MIN_H,
-            COMMAND_CONSOLE_ROWS_Y + 32 + len(visible_aps) * 40,
-        )
-        panel_y = y_start - COMMAND_CONSOLE_Y_OFFSET
-        accent = (205, 154, 228) if self._pinned_sector_name else (102, 124, 156)
-        self._draw_rect(
-            COMMAND_CONSOLE_X,
-            panel_y,
-            COMMAND_CONSOLE_W,
-            panel_h,
-            fill=(24, 34, 50),
-            border=accent,
-            border_width=2,
-        )
-        self._draw_text("Command console", 24, panel_y + COMMAND_CONSOLE_TITLE_Y)
-        self._draw_command_stage_badge(
-            x=COMMAND_CONSOLE_X + COMMAND_CONSOLE_STAGE_BADGE_X,
-            y=panel_y + COMMAND_CONSOLE_STAGE_BADGE_Y,
-            live_sector_name=self._live_sector_name,
-            target_sector_name=self._target_sector_name,
-            pinned_sector_name=self._pinned_sector_name,
-        )
-        self._draw_console_sector_chips(
-            x=COMMAND_CONSOLE_X + COMMAND_CONSOLE_SECTOR_CHIP_X,
-            y=panel_y + COMMAND_CONSOLE_SECTOR_CHIP_Y,
-            live_sector_name=self._live_sector_name,
-            target_sector_name=self._target_sector_name,
-            pinned_sector_name=self._pinned_sector_name,
-        )
-        console_lines = _command_console_lines(
-            timestep=timestep,
-            live_sector_name=self._live_sector_name,
-            target_sector_name=self._target_sector_name,
-            pinned_sector_name=self._pinned_sector_name,
-            pinned_sector_range=self._pinned_sector_range,
-        )
-        self._draw_text(
-            console_lines[0],
-            24,
-            panel_y + COMMAND_CONSOLE_INFO_1_Y,
-            small=True,
-            color=(198, 212, 234),
-        )
-        self._draw_text(
-            console_lines[1],
-            24,
-            panel_y + COMMAND_CONSOLE_INFO_2_Y,
-            small=True,
-            color=(176, 191, 216),
-        )
-        self._draw_text(
-            "Queued loadout",
-            24,
-            panel_y + COMMAND_CONSOLE_LOADOUT_LABEL_Y,
-            small=True,
-            color=(198, 212, 234),
-        )
-        self._draw_loadout_chips(
-            x=24,
-            y=panel_y + COMMAND_CONSOLE_LOADOUT_Y,
-            pending=pending,
-        )
-        group_label = "ALL" if group_filter is None else group_filter
-        collapse_label = "ON" if collapse_rows else "OFF"
-        self._draw_text(
-            f"AP page {page + 1}/{total_pages} | page size={page_size}  "
-            f"group={group_label} collapse={collapse_label} "
-            "(Left/Right, +/-, G group, C collapse)",
-            24,
-            panel_y + COMMAND_CONSOLE_PAGE_Y,
-            small=True,
-        )
-        self._draw_text(
-            _summarize_visible_ap_groups(visible_aps),
-            24,
-            panel_y + COMMAND_CONSOLE_GROUPS_Y,
-            small=True,
-            color=(176, 191, 216),
-        )
-        if collapse_rows:
-            self._draw_text(
-                "Collapsed map rows:",
-                420,
-                panel_y + COMMAND_CONSOLE_PAGE_Y,
-                small=True,
-                color=(176, 191, 216),
-            )
-            for idx, line in enumerate(_group_rows_for_controls(all_input_aps, pending)):
-                self._draw_text(
-                    line,
-                    420,
-                    panel_y + COMMAND_CONSOLE_GROUPS_Y + idx * 18,
-                    small=True,
-                    color=(176, 191, 216),
-                )
-        if not visible_aps:
-            self._draw_text(
-                "No AP rows visible (press G to expand one group).",
-                24,
-                panel_y + COMMAND_CONSOLE_ROWS_Y,
-                small=True,
-                color=(176, 191, 216),
-            )
-            return buttons, page, total_pages, 0
-        for idx, ap in enumerate(visible_aps):
-            y = panel_y + COMMAND_CONSOLE_ROWS_Y + idx * 40
-            row_status, _row_detail = _command_row_status(
-                ap=ap,
-                pending=pending,
-                live_sector_name=self._live_sector_name,
-                target_sector_name=self._target_sector_name,
-                pinned_sector_name=self._pinned_sector_name,
-            )
-            row_palette = {
-                "TARGET": ((80, 66, 34), (212, 188, 122)),
-                "ARMED": ((34, 60, 48), (126, 196, 134)),
-                "QUEUED": ((42, 58, 86), (130, 168, 220)),
-                "READY": ((30, 42, 58), (96, 118, 150)),
-                "IDLE": ((24, 30, 42), (72, 88, 110)),
-            }
-            card_fill, card_border = row_palette.get(
-                row_status, ((30, 42, 58), (96, 118, 150))
-            )
-            self._draw_rect(
-                16,
-                y - 2,
-                COMMAND_CONSOLE_ROW_CARD_W,
-                COMMAND_CONSOLE_ROW_CARD_H,
-                fill=card_fill,
-                border=card_border,
-                border_width=1,
-            )
-            self._draw_text(ap, 28, y + 6)
-            self._draw_rect(
-                COMMAND_CONSOLE_ROW_BADGE_X,
-                y + 3,
-                COMMAND_CONSOLE_ROW_BADGE_W,
-                COMMAND_CONSOLE_ROW_BADGE_H,
-                fill=(22, 28, 40),
-                border=card_border,
-                border_width=1,
-            )
-            self._draw_text(
-                row_status,
-                COMMAND_CONSOLE_ROW_BADGE_X + 10,
-                y + 5,
-                small=True,
-                color=(220, 230, 245),
-            )
+        hovered_card_ap: str | None,
+    ) -> tuple[list[_HitRect], int, int, str | None]:
+        total = len(input_aps)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = min(max(0, page), total_pages - 1)
+        start = page * page_size
+        visible = input_aps[start:start + page_size]
 
-            for choice_idx, bit in enumerate((0, 1)):
-                x = 220 + choice_idx * 70
-                selected = pending.get(ap) == bit
-                fill = (42, 100, 62) if selected else (40, 48, 64)
-                self._draw_rect(x, y, 56, 28, fill=fill)
-                self._draw_text(str(bit), x + 22, y + 5)
-                buttons.append(_Button(ap=ap, value=bit, x=x, y=y, w=56, h=28))
+        hits: list[_HitRect] = []
+        new_hover_ap: str | None = None
 
-            clear_selected = ap in pending
-            fill = (120, 70, 60) if clear_selected else (52, 52, 60)
-            self._draw_rect(300, y, 82, 28, fill=fill)
-            self._draw_text("clear", 316, y + 6, small=True)
-            buttons.append(_Button(ap=ap, value=-1, x=300, y=y, w=82, h=28))
-        return buttons, page, total_pages, len(visible_aps)
+        self._rect(0, SCREEN_H - BOTTOM_H, SIDEBAR_X, BOTTOM_H,
+                    fill=COLOR_PANEL, border=COLOR_BORDER)
 
+        self._text("DEFENSES", CARD_AREA_X, CARD_Y - 12, font="md", color=COLOR_TEXT_BRIGHT)
+        self._text(
+            f"Page {page + 1}/{total_pages}  [\u2190/\u2192]  [+/-]",
+            CARD_AREA_X + 100, CARD_Y - 12, font="sm", color=COLOR_TEXT_DIM,
+        )
+
+        mouse_x, mouse_y = self.pg.mouse.get_pos()
+
+        for idx, ap in enumerate(visible):
+            cx = CARD_AREA_X + idx * (CARD_W + CARD_GAP)
+            cy = CARD_Y + 4
+            if cx + CARD_W > SIDEBAR_X - 8:
+                break
+
+            val = pending.get(ap)
+            name = defense_name(ap, input_aps)
+            d_col = defense_color(ap, input_aps)
+            try:
+                ap_idx = input_aps.index(ap)
+            except ValueError:
+                ap_idx = 0
+
+            card_rect = self.pg.Rect(cx, cy, CARD_W, CARD_H)
+            is_hovered = card_rect.collidepoint(mouse_x, mouse_y)
+            if is_hovered:
+                new_hover_ap = ap
+
+            if val == 1:
+                fill = (34, 58, 48)
+                border = d_col
+            elif val == 0:
+                fill = (48, 36, 34)
+                border = COLOR_ACCENT_R
+            else:
+                fill = COLOR_PANEL_LITE
+                border = COLOR_BORDER
+            if is_hovered:
+                fill = tuple(min(255, c + 15) for c in fill)
+                border = COLOR_ACCENT_C
+
+            self._rect(cx, cy, CARD_W, CARD_H, fill=fill, border=border, bw=2, radius=4)
+
+            badge_num = str(ap_idx + 1)
+            self._rect(cx + 4, cy + 4, 22, 20, fill=(16, 22, 36),
+                        border=COLOR_ACCENT_C, bw=2, radius=3)
+            self._text(badge_num, cx + 8, cy + 5, font="badge", color=COLOR_ACCENT_C)
+
+            self._draw_defense_sprite(cx + 26, cy + 4, ap_idx, d_col, size=22)
+            self._text(name, cx + 52, cy + 8, font="sm", color=COLOR_TEXT)
+
+            status_txt = "ACTIVE" if val == 1 else "OFF" if val == 0 else "\u2014"
+            status_col = COLOR_ACCENT_G if val == 1 else COLOR_ACCENT_R if val == 0 else COLOR_TEXT_DIM
+            self._text(status_txt, cx + 52, cy + 28, font="sm", color=status_col)
+
+            on_x = cx + 10
+            on_y = cy + CARD_H - 34
+            on_fill = (38, 72, 56) if val == 1 else COLOR_PANEL_LITE
+            on_bdr = COLOR_ACCENT_G if val == 1 else COLOR_BORDER
+            self._rect(on_x, on_y, 56, 26, fill=on_fill, border=on_bdr, bw=1, radius=3)
+            self._text("ON", on_x + 18, on_y + 5, font="md",
+                        color=COLOR_ACCENT_G if val == 1 else COLOR_TEXT_DIM)
+            hits.append(_HitRect(on_x, on_y, 56, 26, "set", ap + ":1"))
+
+            off_x = cx + 76
+            off_fill = (72, 38, 34) if val == 0 else COLOR_PANEL_LITE
+            off_bdr = COLOR_ACCENT_R if val == 0 else COLOR_BORDER
+            self._rect(off_x, on_y, 56, 26, fill=off_fill, border=off_bdr, bw=1, radius=3)
+            self._text("OFF", off_x + 14, on_y + 5, font="md",
+                        color=COLOR_ACCENT_R if val == 0 else COLOR_TEXT_DIM)
+            hits.append(_HitRect(off_x, on_y, 56, 26, "set", ap + ":0"))
+
+        return hits, page, total_pages, new_hover_ap
+
+    # ------------------------------------------------- action buttons (stacked right)
+    def _draw_action_buttons(self, pending_count: int) -> list[_HitRect]:
+        hits: list[_HitRect] = []
+        bx = BTN_AREA_X
+        by = SCREEN_H - BOTTOM_H + 10
+
+        deploy_label = f"DEPLOY ({pending_count})" if pending_count > 0 else "DEPLOY"
+        self._rect(bx, by, BTN_W, BTN_H,
+                    fill=COLOR_DEPLOY_BTN if pending_count > 0 else (38, 68, 52),
+                    border=COLOR_ACCENT_G, bw=2, radius=5)
+        self._text(deploy_label, bx + 16, by + 8, font="md", color=COLOR_TEXT_BRIGHT)
+        hits.append(_HitRect(bx, by, BTN_W, BTN_H, "action", "deploy"))
+
+        by2 = by + BTN_H + BTN_GAP
+        self._rect(bx, by2, BTN_W, BTN_H,
+                    fill=COLOR_SKIP_BTN, border=COLOR_BORDER, bw=1, radius=5)
+        self._text("SKIP WAVE", bx + 22, by2 + 8, font="md", color=COLOR_TEXT_DIM)
+        hits.append(_HitRect(bx, by2, BTN_W, BTN_H, "action", "skip"))
+
+        by3 = by2 + BTN_H + BTN_GAP
+        self._rect(bx, by3, BTN_W, BTN_H,
+                    fill=COLOR_UNDO_BTN if pending_count > 0 else (58, 38, 36),
+                    border=COLOR_ACCENT_R if pending_count > 0 else COLOR_BORDER,
+                    bw=1, radius=5)
+        self._text("UNDO ALL", bx + 24, by3 + 8, font="md",
+                    color=COLOR_TEXT_BRIGHT if pending_count > 0 else COLOR_TEXT_DIM)
+        hits.append(_HitRect(bx, by3, BTN_W, BTN_H, "action", "recall"))
+
+        return hits
+
+    # ------------------------------------------------- wave transition
+    def _draw_wave_transition(
+        self, wave_num: int, report: _DeploymentReport | None = None,
+    ) -> None:
+        overlay = self.pg.Surface((SCREEN_W, SCREEN_H), self.pg.SRCALPHA)
+        overlay.fill((14, 18, 26, 200))
+        self.screen.blit(overlay, (0, 0))
+
+        if report and report.wave >= 0 and report.actions:
+            self._text(f"WAVE {report.wave + 1} DEPLOYED",
+                        SCREEN_W // 2 - 100, SCREEN_H // 2 - 60,
+                        font="lg", color=COLOR_ACCENT_C)
+            y_off = SCREEN_H // 2 - 24
+            for ap_name, val in report.actions[:6]:
+                tag = "ACTIVATED" if val == 1 else "DEACTIVATED"
+                col = COLOR_ACCENT_G if val == 1 else COLOR_ACCENT_R
+                self._text(f"{ap_name}: {tag}", SCREEN_W // 2 - 80, y_off,
+                            font="sm", color=col)
+                y_off += 18
+            if report.deltas:
+                y_off += 6
+                for tname, old_s, new_s in report.deltas[:4]:
+                    if old_s != new_s:
+                        col = COLOR_ACCENT_G if new_s == "CLEAR" else COLOR_ACCENT_R
+                        self._text(f"{tname}: {old_s} \u2192 {new_s}",
+                                    SCREEN_W // 2 - 80, y_off, font="sm", color=col)
+                        y_off += 18
+        else:
+            txt = f"WAVE {wave_num}"
+            self._text(txt, SCREEN_W // 2 - len(txt) * 7, SCREEN_H // 2 - 24,
+                        font="lg", color=COLOR_ACCENT_C)
+            sub = "Prepare your defenses"
+            self._text(sub, SCREEN_W // 2 - len(sub) * 4, SCREEN_H // 2 + 12,
+                        font="sm", color=COLOR_TEXT_DIM)
+        self.pg.display.flip()
+        self.pg.time.wait(800)
+
+    # ------------------------------------------------- victory / defeat
+    def _draw_end_screen(self, *, goal: bool, suff: bool, min1: bool) -> None:
+        title, subtitle, color = victory_text(goal, suff, min1)
+        overlay = self.pg.Surface((SCREEN_W, SCREEN_H), self.pg.SRCALPHA)
+        overlay.fill((14, 18, 26, 220))
+        self.screen.blit(overlay, (0, 0))
+
+        bw = 420
+        bh = 170
+        bx = (SCREEN_W - bw) // 2
+        by = (SCREEN_H - bh) // 2
+        self._rect(bx, by, bw, bh, fill=COLOR_PANEL, border=color, bw=3, radius=8)
+        self._text(title, bx + (bw - len(title) * 14) // 2, by + 30, font="lg", color=color)
+        words = subtitle.split()
+        line = ""
+        ly = by + 76
+        for word in words:
+            test = (line + " " + word).strip()
+            if len(test) * 8 > bw - 40:
+                self._text(line, bx + 20, ly, font="sm", color=COLOR_TEXT)
+                ly += 20
+                line = word
+            else:
+                line = test
+        if line:
+            self._text(line, bx + 20, ly, font="sm", color=COLOR_TEXT)
+        self._text("Press any key to continue", bx + 90, by + bh - 30,
+                    font="sm", color=COLOR_TEXT_DIM)
+        self.pg.display.flip()
+        waiting = True
+        while waiting:
+            for event in self.pg.event.get():
+                if event.type == self.pg.QUIT:
+                    return
+                if event.type in (self.pg.KEYDOWN, self.pg.MOUSEBUTTONDOWN):
+                    waiting = False
+
+    # ------------------------------------------------- help overlay
+    def _draw_help_overlay(self) -> None:
+        lines = [
+            "TOWER DEFENSE  \u2014  QUICK HELP",
+            "",
+            "Goal: Activate defenses to protect the base at the critical wave.",
+            "Each defense is numbered [1], [2], etc. on the map and cards.",
+            "",
+            "Mouse: Click ON/OFF on defense cards to stage deployments.",
+            "       Click a map tile to toggle its defense.",
+            "       Hover a card to highlight its tile on the map.",
+            "",
+            "Keys:  1-9,0   Toggle visible defense cards",
+            "       Enter   Deploy staged defenses (commit wave)",
+            "       Escape  Skip wave (no deployment)",
+            "       Backsp  Recall all staged defenses",
+            "       \u2190/\u2192     Page through defenses",
+            "       +/-     Adjust cards per page",
+            "       I       Toggle canonical observation inspector",
+            "       H       Toggle this help panel",
+            "",
+            "After deploying, check LAST DEPLOYMENT in the sidebar",
+            "to see what changed. Press H to dismiss.",
+        ]
+        w = 520
+        h = 30 + len(lines) * 22
+        x = (SCREEN_W - w) // 2
+        y = (SCREEN_H - h) // 2
+        self._rect(x, y, w, h, fill=(18, 22, 32), border=COLOR_BORDER_HI, bw=2, radius=6)
+        for i, line in enumerate(lines):
+            col = COLOR_TEXT_BRIGHT if i == 0 else COLOR_TEXT
+            self._text(line, x + 20, y + 16 + i * 22, font="sm", color=col)
+
+    def _draw_inspector_overlay(self, payload: dict[str, object]) -> None:
+        lines = _inspector_lines(payload)
+        width = 420
+        height = 24 + len(lines) * 18
+        x = SCREEN_W - width - 18
+        y = TOP_BAR_H + 18
+        self._rect(
+            x,
+            y,
+            width,
+            height,
+            fill=(18, 22, 32),
+            border=COLOR_BORDER_HI,
+            bw=2,
+            radius=6,
+        )
+        for idx, line in enumerate(lines):
+            color = COLOR_TEXT_BRIGHT if idx == 0 else COLOR_TEXT
+            self._text(line, x + 14, y + 10 + idx * 18, font="sm", color=color)
+
+    # ================================================ main entry point
     def choose_action(
-        self,
-        *,
+        self, *,
         last_obs: dict[str, object] | None,
         timestep: int,
         instance: "GF01Instance",
         objective_text: str,
     ) -> dict[str, int] | None:
         pending: dict[str, int] = {}
-        current_buttons: list[_Button] = []
         page = 0
-        page_size = 10
-        timeline_span = 24
-        input_aps_all = list(instance.automaton.input_aps)
-        group_keys = list(_grouped_input_aps(input_aps_all).keys())
-        group_filter: str | None = None
-        collapse_rows = False
+        page_size = 6
+        input_aps = list(instance.automaton.input_aps)
+        output_aps = list(instance.automaton.output_aps)
+        total_waves = len(instance.base_trace)
+
         if timestep == 0:
-            self._previous_observed_y_t = None
-            self._last_committed_action_summary = None
-            self._last_committed_t = None
-            self._wave_strip.reset()
-            self._sector_pressure_history.reset()
-            self._command_response_trail.reset()
-            self._command_focus_timesteps = []
-            self._hovered_sector_range = None
-            self._sector_board_hitboxes = []
-            self._loadout_chip_hitboxes = []
-            self._pinned_sector_coords = None
-            self._live_sector_name = None
-            self._target_sector_name = None
-            self._pinned_sector_name = None
-            self._pinned_sector_range = None
-            self._show_help_overlay = True
-            self._show_observation_inspector = False
-        previous_y_t = self._previous_observed_y_t
+            self._prev_y_t = None
+            self._prev_history_atoms_count = 0
+            self._pressure.reset()
+            self._show_help = True
+            self._show_inspector = False
+            self._report.clear()
+            self._tile_flashes.clear()
+            self._hovered_card_ap = None
+            self._last_committed_action = None
+            self._draw_wave_transition(1)
+
         current_y_t = _normalize_binary_map(
             None if last_obs is None else last_obs.get("y_t", {})
         )
+        history_atoms_raw = [] if last_obs is None else last_obs.get("history_atoms", [])
+        parsed_atoms = iter_history_atoms(history_atoms_raw)
+
+        if last_obs is not None and self._prev_y_t is not None:
+            if len(parsed_atoms) > self._prev_history_atoms_count:
+                new_atoms = parsed_atoms[self._prev_history_atoms_count:]
+                self._report.wave = max(0, timestep - 1)
+                self._report.actions = [
+                    (defense_name(ap, input_aps), val) for _t, ap, val in new_atoms
+                ]
+                self._report.deltas = []
+                for oap in output_aps:
+                    old_val = self._prev_y_t.get(oap, 0)
+                    new_val = current_y_t.get(oap, 0)
+                    old_s = "THREAT" if old_val == 1 else "CLEAR"
+                    new_s = "THREAT" if new_val == 1 else "CLEAR"
+                    tname = threat_name(oap, output_aps)
+                    self._report.deltas.append((tname, old_s, new_s))
+
+                self._tile_flashes.clear()
+                self._flash_start = time.time()
+                for oap in output_aps:
+                    old_val = self._prev_y_t.get(oap, 0)
+                    new_val = current_y_t.get(oap, 0)
+                    if old_val != new_val:
+                        for tile in _find_tiles_for_output(oap):
+                            key = f"{tile[0]},{tile[1]}"
+                            self._tile_flashes[key] = "clear" if new_val == 0 else "threat"
+
+                self._draw_wave_transition(timestep + 1, self._report)
+            elif timestep > 0 and len(parsed_atoms) == self._prev_history_atoms_count:
+                self._draw_wave_transition(timestep + 1)
+
         if last_obs is not None:
-            observed_t = max(0, int(timestep) - 1)
-            if self._last_committed_t is not None and self._last_committed_t <= int(
-                timestep
-            ):
-                observed_t = max(0, int(self._last_committed_t))
-            self._sector_pressure_history.record(
-                timestep=observed_t,
-                y_t=current_y_t,
-            )
-        delta_summary = _describe_output_delta(previous_y_t, current_y_t)
-        wave_label, wave_filled, wave_fill, wave_trend = _wave_pressure_strip_state(
-            previous_y_t, current_y_t
-        )
+            obs_t = max(0, timestep - 1)
+            self._pressure.record(obs_t, current_y_t)
         if current_y_t:
-            self._previous_observed_y_t = dict(current_y_t)
-        if (
-            last_obs is not None
-            and self._last_committed_action_summary is not None
-            and self._last_committed_t == timestep - 1
-        ):
-            self._command_response_trail.record(
-                timestep=int(self._last_committed_t),
-                command=self._last_committed_action_summary,
-                response_delta=delta_summary,
-            )
-        pressure_levels = self._sector_pressure_history.levels()
+            self._prev_y_t = dict(current_y_t)
+        self._prev_history_atoms_count = len(parsed_atoms)
+
+        pressure_levels = self._pressure.levels()
+        h_counts = history_counts_by_t(history_atoms_raw)
+
+        energy_total = int(instance.budget_timestep)
+        energy = (
+            int(last_obs["budget_t_remaining"])
+            if last_obs and "budget_t_remaining" in last_obs
+            else energy_total
+        )
+        cmd_pts = (
+            int(last_obs["budget_a_remaining"])
+            if last_obs and "budget_a_remaining" in last_obs
+            else int(instance.budget_atoms)
+        )
+        effect_status = (
+            str(last_obs.get("effect_status_t", "unknown"))
+            if last_obs else "unknown"
+        )
+
+        iso_width = (GRID_COLS + GRID_ROWS - 1) * (TILE_W // 2)
+        iso_height = (GRID_COLS + GRID_ROWS - 1) * (TILE_H // 2) + ISO_DEPTH
+        grid_origin_x = MAP_X + (MAP_W - iso_width) // 2 + GRID_ROWS * (TILE_W // 2)
+        grid_origin_y = MAP_Y + (MAP_H - iso_height) // 2
+
+        tiles = build_grid(
+            instance,
+            timestep=timestep,
+            pressure_levels=pressure_levels,
+            history_counts=h_counts,
+            history_atoms=parsed_atoms,
+            origin_x=grid_origin_x,
+            origin_y=grid_origin_y,
+        )
+
+        card_hits: list[_HitRect] = []
+        btn_hits: list[_HitRect] = []
+
         while True:
-            visible_pool = _control_visible_pool(
-                input_aps_all,
-                group_filter=group_filter,
-                collapse_rows=collapse_rows,
-            )
-            visible_aps, page, _ = _paginate_input_aps(
-                visible_pool,
-                page=page,
-                page_size=page_size,
-            )
             self.clock.tick(30)
+            mouse_pos = self.pg.mouse.get_pos()
+            hovered_tile = tile_at_screen_pos(tiles, mouse_pos[0], mouse_pos[1])
+
             for event in self.pg.event.get():
-                if event.type == self.pg.QUIT:  # pragma: no cover - UI event
+                if event.type == self.pg.QUIT:
                     return None
                 if event.type == self.pg.KEYDOWN:
                     if event.key in (self.pg.K_RETURN, self.pg.K_KP_ENTER):
-                        self._last_committed_action_summary = (
-                            _summarize_committed_action(pending)
-                        )
-                        self._last_committed_t = int(timestep)
-                        self._record_command_focus(int(timestep))
                         return dict(pending)
                     if event.key == self.pg.K_ESCAPE:
-                        self._last_committed_action_summary = (
-                            _summarize_committed_action({})
-                        )
-                        self._last_committed_t = int(timestep)
-                        self._record_command_focus(int(timestep))
                         return {}
                     if event.key == self.pg.K_BACKSPACE:
                         pending.clear()
                     if event.key == self.pg.K_h:
-                        self._show_help_overlay = not self._show_help_overlay
+                        self._show_help = not self._show_help
                     if event.key == self.pg.K_i:
-                        self._show_observation_inspector = (
-                            not self._show_observation_inspector
-                        )
+                        self._show_inspector = not self._show_inspector
                     if event.key in (self.pg.K_LEFT, self.pg.K_PAGEUP):
                         page = max(0, page - 1)
                     if event.key in (self.pg.K_RIGHT, self.pg.K_PAGEDOWN):
-                        # Clamp later using pagination helper.
                         page += 1
                     if event.key in (self.pg.K_EQUALS, self.pg.K_PLUS, self.pg.K_KP_PLUS):
-                        page_size = _clamp_page_size(page_size + 1)
+                        page_size = min(10, page_size + 1)
                     if event.key in (self.pg.K_MINUS, self.pg.K_UNDERSCORE, self.pg.K_KP_MINUS):
-                        page_size = _clamp_page_size(page_size - 1)
-                    if event.key == self.pg.K_LEFTBRACKET:
-                        timeline_span = _clamp_timeline_span(timeline_span - 4)
-                    if event.key == self.pg.K_RIGHTBRACKET:
-                        timeline_span = _clamp_timeline_span(timeline_span + 4)
-                    if event.key == self.pg.K_g and group_keys:
-                        if group_filter is None:
-                            group_filter = group_keys[0]
-                        else:
-                            try:
-                                idx = group_keys.index(group_filter) + 1
-                            except ValueError:
-                                idx = 0
-                            group_filter = group_keys[idx] if idx < len(group_keys) else None
-                        page = 0
-                    if event.key == self.pg.K_c:
-                        collapse_rows = not collapse_rows
-                        page = 0
-                    key_to_index = {
-                        self.pg.K_1: 0,
-                        self.pg.K_2: 1,
-                        self.pg.K_3: 2,
-                        self.pg.K_4: 3,
-                        self.pg.K_5: 4,
-                        self.pg.K_6: 5,
-                        self.pg.K_7: 6,
-                        self.pg.K_8: 7,
-                        self.pg.K_9: 8,
+                        page_size = max(3, page_size - 1)
+
+                    key_map = {
+                        self.pg.K_1: 0, self.pg.K_2: 1, self.pg.K_3: 2,
+                        self.pg.K_4: 3, self.pg.K_5: 4, self.pg.K_6: 5,
+                        self.pg.K_7: 6, self.pg.K_8: 7, self.pg.K_9: 8,
                         self.pg.K_0: 9,
                     }
-                    index = key_to_index.get(event.key, None)
-                    if index is not None and index < len(visible_aps):
-                        _cycle_pending_bit(pending, visible_aps[index])
+                    ki = key_map.get(event.key)
+                    if ki is not None:
+                        tp = max(1, (len(input_aps) + page_size - 1) // page_size)
+                        clamped_page = min(max(0, page), tp - 1)
+                        vis_start = clamped_page * page_size
+                        vis = input_aps[vis_start:vis_start + page_size]
+                        if ki < len(vis):
+                            ap = vis[ki]
+                            cur = pending.get(ap)
+                            if cur is None:
+                                pending[ap] = 1
+                            elif cur == 1:
+                                pending[ap] = 0
+                            else:
+                                pending.pop(ap, None)
+
                 if event.type == self.pg.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = event.pos
                     consumed = False
-                    for button in current_buttons:
-                        if not button.contains(mx, my):
+                    for hr in card_hits:
+                        if not hr.contains(mx, my):
                             continue
-                        if button.value == -1:
-                            pending.pop(button.ap, None)
+                        ap_str, val_str = hr.payload.split(":", 1)
+                        v = int(val_str)
+                        if pending.get(ap_str) == v:
+                            pending.pop(ap_str, None)
                         else:
-                            pending[button.ap] = button.value
+                            pending[ap_str] = v
                         consumed = True
                         break
-                    if consumed:
-                        continue
-                    for x0, y0, w0, h0, ap_name in self._loadout_chip_hitboxes:
-                        if not (x0 <= mx <= x0 + w0 and y0 <= my <= y0 + h0):
-                            continue
-                        pending.pop(ap_name, None)
-                        consumed = True
-                        break
-                    if consumed:
-                        continue
-                    for x0, y0, w0, h0, cell in self._sector_board_hitboxes:
-                        if not (x0 <= mx <= x0 + w0 and y0 <= my <= y0 + h0):
-                            continue
-                        coords = (cell.row, cell.col)
-                        if self._pinned_sector_coords == coords:
-                            self._pinned_sector_coords = None
+                    if not consumed:
+                        for hr in btn_hits:
+                            if not hr.contains(mx, my):
+                                continue
+                            if hr.payload == "deploy":
+                                return dict(pending)
+                            elif hr.payload == "skip":
+                                return {}
+                            elif hr.payload == "recall":
+                                pending.clear()
+                            consumed = True
+                            break
+                    if not consumed and hovered_tile and hovered_tile.defense_ap:
+                        ap = hovered_tile.defense_ap
+                        cur = pending.get(ap)
+                        if cur is None:
+                            pending[ap] = 1
+                        elif cur == 1:
+                            pending[ap] = 0
                         else:
-                            self._pinned_sector_coords = coords
-                        break
+                            pending.pop(ap, None)
 
-            self.screen.fill((18, 24, 34))
-            self._draw_text("GF-01-R1 Map-First Visual", 24, 18, title=True)
-            self._draw_text(f"t={timestep}  t*={instance.t_star}  mode={instance.mode}", 24, 54)
-            self._draw_text(objective_text, 24, 82)
-            self._draw_onboarding_strip(timestep=timestep)
-            self._draw_wave_pressure_strip(
-                timestep=timestep,
-                label=wave_label,
-                filled=wave_filled,
-                fill_color=wave_fill,
-                trend=wave_trend,
-                pressure_levels=pressure_levels,
-            )
-            self._draw_command_response_lane(x=620, y=278)
+            # ---- draw frame ----
+            self.screen.fill(COLOR_BG)
 
-            history_atoms = [] if last_obs is None else last_obs.get("history_atoms", [])
-            history_counts = history_counts_by_t(history_atoms)
-            max_t = max([0, int(timestep), int(instance.t_star), *history_counts.keys()])
-            window_start, window_end = _objective_window_bounds(
-                mode=str(instance.mode),
-                t_star=int(instance.t_star),
-                window_size=int(instance.window_size),
-            )
-            start_t, end_t = _timeline_window_bounds(
-                timestep=int(timestep),
-                t_star=int(instance.t_star),
-                history_counts=history_counts,
-                span=timeline_span,
-            )
-            self._draw_sector_board(
-                max_t=max_t,
-                timestep=int(timestep),
-                t_star=int(instance.t_star),
-                start_t=start_t,
-                end_t=end_t,
-                window_start=window_start,
-                window_end=window_end,
-                history_counts=history_counts,
-                pressure_levels=pressure_levels,
-                command_focus_timestep=self._last_committed_t,
-                command_focus_timesteps=self._command_focus_timesteps,
-                pending_count=len(pending),
-                mouse_pos=self.pg.mouse.get_pos(),
-            )
-            self._draw_timeline(
+            self._draw_top_bar(
                 timestep=timestep,
-                t_star=int(instance.t_star),
-                mode=str(instance.mode),
-                window_size=int(instance.window_size),
-                history_atoms=history_atoms,
-                timeline_span=timeline_span,
-                pressure_levels=pressure_levels,
-                linked_range=self._hovered_sector_range,
+                total_waves=total_waves,
+                t_star=instance.t_star,
+                energy=energy,
+                energy_total=energy_total,
+                cmd_pts=cmd_pts,
+                objective=objective_text_themed(instance),
+                effect_status=effect_status,
             )
-            current_buttons, page, _, _ = self._draw_controls(
-                timestep=int(timestep),
-                input_aps=visible_pool,
-                all_input_aps=input_aps_all,
+
+            self._draw_map(
+                tiles,
+                instance=instance,
                 pending=pending,
-                y_start=286,
+                mouse_pos=mouse_pos,
+                hovered_tile=hovered_tile,
+                hovered_card_ap=self._hovered_card_ap,
+            )
+
+            self._draw_sidebar(
+                instance=instance,
+                timestep=timestep,
+                pending=pending,
+                y_t=current_y_t,
+                pressure_levels=pressure_levels,
+                history_counts=h_counts,
+                report=self._report,
+            )
+
+            card_hits, page, _, self._hovered_card_ap = self._draw_defense_cards(
+                input_aps=input_aps,
+                pending=pending,
                 page=page,
                 page_size=page_size,
-                group_filter=group_filter,
-                collapse_rows=collapse_rows,
+                hovered_card_ap=self._hovered_card_ap,
             )
-            status_x = 460
-            status_y = 250
-            if last_obs is None:
-                self._draw_text(
-                    "No prior observation yet (episode start).", status_x, status_y
-                )
-                self._draw_text(
-                    _summarize_pending_interventions(pending),
-                    status_x,
-                    status_y + 28,
-                    small=True,
-                    color=(192, 209, 232),
-                )
-            else:
-                y_t = last_obs.get("y_t", {})
-                effect = str(last_obs.get("effect_status_t", "unknown"))
-                bt = int(last_obs.get("budget_t_remaining", instance.budget_timestep))
-                ba = int(last_obs.get("budget_a_remaining", instance.budget_atoms))
-                effect_text, effect_fill = _effect_status_badge(effect)
-                self._draw_text("Observation Summary:", status_x, status_y)
-                self._draw_text(
-                    _summarize_observed_outputs(y_t), status_x, status_y + 28
-                )
-                self._draw_text(
-                    f"Budget remaining: timesteps={bt}, atoms={ba}",
-                    status_x,
-                    status_y + 56,
-                )
-                self._draw_rect(
-                    status_x + 430,
-                    status_y + 52,
-                    240,
-                    28,
-                    fill=effect_fill,
-                    border=(114, 132, 158),
-                )
-                self._draw_text(
-                    effect_text,
-                    status_x + 438,
-                    status_y + 59,
-                    small=True,
-                    color=(232, 238, 249),
-                )
-                delta_y = status_y + 84
-                if (
-                    self._last_committed_action_summary is not None
-                    and self._last_committed_t == timestep - 1
-                ):
-                    self._draw_text(
-                        "Previous command: "
-                        f"{self._last_committed_action_summary}",
-                        status_x,
-                        status_y + 84,
-                    )
-                    delta_y = status_y + 112
-                self._draw_text(delta_summary, status_x, delta_y)
-                self._draw_text(
-                    _summarize_pending_interventions(pending),
-                    status_x,
-                    delta_y + 28,
-                    small=True,
-                    color=(192, 209, 232),
-                )
+            btn_hits = self._draw_action_buttons(len(pending))
 
-            footer_y = 712
-            self._draw_text("Controls:", 24, footer_y, small=True)
-            self._draw_text(
-                "Click 0/1 to set AP value, clear to unset | 1..9,0 cycle APs | "
-                "Enter=commit | Esc=skip | Backspace=clear all | "
-                "Left/Right=AP page | +/-=AP density | [ ]=timeline zoom | "
-                "G=group | C=collapse | H=help | I=inspector",
-                100,
-                footer_y,
-                small=True,
+            self._text(
+                "H=Help  I=Inspector  Enter=Deploy  Esc=Skip  Backspace=Undo  "
+                "\u2190/\u2192=Page  1-9=Toggle",
+                16, SCREEN_H - 18, font="sm", color=COLOR_TEXT_DIM,
             )
-            if self._show_help_overlay:
-                self._draw_help_overlay()
-            if self._show_observation_inspector:
-                self._draw_observation_inspector(
-                    last_obs=last_obs,
-                    timestep=timestep,
-                    instance=instance,
-                    objective_text=objective_text,
+
+            if self._show_inspector:
+                self._draw_inspector_overlay(
+                    _canonical_inspector_payload(
+                        last_obs=last_obs,
+                        instance=instance,
+                    )
                 )
+            if self._show_help:
+                self._draw_help_overlay()
+
             self.pg.display.flip()
 
 
-def _session() -> _R1PygameSession:
+def _find_tiles_for_output(_output_ap: str) -> list[tuple[int, int]]:
+    """Placeholder: map output APs to tile coordinates for flash effects.
+
+    Since output APs don't have a fixed spatial mapping, flash a few central
+    tiles as a visual cue.
+    """
+    h = abs(hash(_output_ap)) % 48
+    return [(h // 8, h % 8), ((h + 7) // 8, (h + 3) % 8)]
+
+
+def _session() -> _R1Session:
     global _SESSION
     if _SESSION is None:
-        _SESSION = _R1PygameSession()
+        _SESSION = _R1Session()
     return _SESSION
 
 

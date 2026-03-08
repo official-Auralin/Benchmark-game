@@ -15,7 +15,8 @@ mode, and budget information.
 
 ## Allowed Interface Differences
 
-- Text, JSON, and pygame renderers may reformat the same information.
+- Text, JSON, and the canonical `GF-01-R1` pygame renderer may reformat the
+  same information.
 - Visual overlays may summarize or highlight observed information.
 - Human-facing mockups may improve readability and onboarding.
 
@@ -29,8 +30,8 @@ mode, and budget information.
 ## Validation Expectations
 
 - Renderer parity is enforced by tests and by the ablation plan.
-- The pygame backend must provide explicit access to the canonical observation
-  payload for parity auditing.
+- The canonical `GF-01-R1` pygame backend must provide explicit access to the
+  canonical observation payload for parity auditing.
 - Derived summaries must be computable only from already observed outputs,
   action history, and static mission metadata.
 

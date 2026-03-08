@@ -29,9 +29,12 @@ should reuse whenever possible.
 
 ## Renderer Boundary
 
-- `gf01.renderers.r1_pygame_helpers`: deterministic helper logic that is safe
-  to unit test directly.
-- `gf01.renderers.r1_pygame`: session flow, event loop, and UI composition.
+- `gf01.renderers.r1_theme`: deterministic mapping from formal benchmark
+  elements to tower-defense player vocabulary, labels, icons, and colors.
+- `gf01.renderers.r1_grid`: deterministic grid geometry, tile assignment, and
+  wave-strip helpers for the canonical graphical renderer.
+- `gf01.renderers.r1_pygame`: session flow, event loop, parity-safe inspector,
+  and UI composition for the canonical `GF-01-R1` tower-defense window.
 
 Renderer work must preserve the observation contract described in
 `spec/parity.md`.

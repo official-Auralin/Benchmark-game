@@ -28,8 +28,8 @@ publication-ready evidence package for benchmark results.
 - Spec backbone: keep `spec/tex_files/Spec.tex`, `spec/contracts.md`,
   `spec/environment.md`, and `spec/parity.md` synchronized.
 - Stable layer: keep `gf01` modular enough that future family work stays local.
-- Human parity: keep the `GF-01-R1` visual path readable without hidden-state
-  leakage.
+- Human parity: keep the canonical `GF-01-R1` tower-defense visual path
+  readable without hidden-state leakage.
 - Benchmark ops: keep gate, profiling, q033, pilot, and release workflows
   reproducible.
 - Publication: keep the retained evidence chain defensible and the archive
