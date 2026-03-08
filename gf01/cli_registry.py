@@ -802,7 +802,7 @@ def register_playback_commands(sub: argparse._SubParsersAction[argparse.Argument
         choices=["text", "pygame"],
         help=(
             "Human-play visual backend. 'text' uses terminal snapshots; "
-            "'pygame' opens a map-first graphical window when available."
+            "'pygame' opens the canonical GF-01-R1 tower-defense graphical window."
         ),
     )
     p_play.add_argument("--eval-track", type=str, default="EVAL-CB", choices=list(ALLOWED_EVAL_TRACKS))
