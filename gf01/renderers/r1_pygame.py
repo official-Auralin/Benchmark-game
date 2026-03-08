@@ -75,7 +75,7 @@ from .r1_pygame_helpers import (
     _objective_window_pressure_summary,
     _observation_inspector_lines,
     _onboarding_strip_lines,
-    _pending_loadout_tokens,
+    _pending_loadout_entries,
     _paginate_input_aps,
     _place_minimap_bracket,
     _pressure_level_from_observation,
@@ -185,6 +185,7 @@ class _R1PygameSession:
         self._command_focus_timesteps: list[int] = []
         self._hovered_sector_range: tuple[int, int] | None = None
         self._sector_board_hitboxes: list[tuple[int, int, int, int, _SectorBoardCell]] = []
+        self._loadout_chip_hitboxes: list[tuple[int, int, int, int, str]] = []
         self._pinned_sector_coords: tuple[int, int] | None = None
         self._live_sector_name: str | None = None
         self._target_sector_name: str | None = None
@@ -319,7 +320,8 @@ class _R1PygameSession:
         y: int,
         pending: Mapping[str, int],
     ) -> None:
-        for idx, token in enumerate(_pending_loadout_tokens(pending)):
+        self._loadout_chip_hitboxes = []
+        for idx, (token, ap_name) in enumerate(_pending_loadout_entries(pending)):
             chip_x = x + idx * (
                 COMMAND_CONSOLE_LOADOUT_CHIP_W + COMMAND_CONSOLE_LOADOUT_CHIP_GAP
             )
@@ -341,6 +343,16 @@ class _R1PygameSession:
                 small=True,
                 color=(220, 230, 245),
             )
+            if ap_name is not None:
+                self._loadout_chip_hitboxes.append(
+                    (
+                        chip_x,
+                        y,
+                        COMMAND_CONSOLE_LOADOUT_CHIP_W,
+                        COMMAND_CONSOLE_LOADOUT_CHIP_H,
+                        ap_name,
+                    )
+                )
 
     def _draw_console_sector_chips(
         self,
@@ -1138,6 +1150,7 @@ class _R1PygameSession:
             self._command_focus_timesteps = []
             self._hovered_sector_range = None
             self._sector_board_hitboxes = []
+            self._loadout_chip_hitboxes = []
             self._pinned_sector_coords = None
             self._live_sector_name = None
             self._target_sector_name = None
@@ -1265,6 +1278,14 @@ class _R1PygameSession:
                             pending.pop(button.ap, None)
                         else:
                             pending[button.ap] = button.value
+                        consumed = True
+                        break
+                    if consumed:
+                        continue
+                    for x0, y0, w0, h0, ap_name in self._loadout_chip_hitboxes:
+                        if not (x0 <= mx <= x0 + w0 and y0 <= my <= y0 + h0):
+                            continue
+                        pending.pop(ap_name, None)
                         consumed = True
                         break
                     if consumed:

@@ -50,7 +50,8 @@ python3 -m gf01 play --seed 1337 --agent greedy --renderer-track json
 
 The `pygame` path is a map-first visual layer. It may add readability cues such
 as `LIVE`, `TARGET`, and `PIN` sector tags or staging-status badges, but it
-must not change the canonical observation contract or scoring behavior.
+must not change the canonical observation contract or scoring behavior. Queued
+loadout chips are also interactive removal controls in that visual layer.
 
 Run the standard validation baseline:
 

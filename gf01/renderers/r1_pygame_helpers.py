@@ -680,14 +680,24 @@ def _pending_loadout_tokens(
     *,
     max_items: int = 4,
 ) -> list[str]:
+    return [token for token, _ap in _pending_loadout_entries(pending, max_items=max_items)]
+
+
+def _pending_loadout_entries(
+    pending: Mapping[str, int],
+    *,
+    max_items: int = 4,
+) -> list[tuple[str, str | None]]:
     if not pending:
-        return ["empty"]
-    items = [f"{ap}={int(value)}" for ap, value in sorted(pending.items())]
+        return [("empty", None)]
+    items = [
+        (f"{ap}={int(value)}", str(ap)) for ap, value in sorted(pending.items())
+    ]
     limit = max(1, int(max_items))
     if len(items) <= limit:
         return items
     remaining = len(items) - limit
-    return items[:limit] + [f"+{remaining} more"]
+    return items[:limit] + [(f"+{remaining} more", None)]
 
 
 def _sector_board_objective_lines(
