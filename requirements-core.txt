@@ -1,0 +1,2 @@
+# Pinned Python dependencies for the core CLI profile.
+# The core CLI is stdlib-only; this file remains intentionally empty.

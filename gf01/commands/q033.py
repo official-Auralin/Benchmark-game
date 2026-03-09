@@ -64,13 +64,12 @@ def cmd_q033_build_manifests(args: argparse.Namespace) -> int:
         manifest_id = str(manifest.get("manifest_id", "q033_manifest"))
         path = out_dir / f"{manifest_id}.json"
         write_json(str(path), manifest)
-        manifest_paths.append(str(path))
+        manifest_paths.append(path.name)
 
     index_payload = {
         "status": "ok",
         "schema_version": str(payload.get("schema_version", "")),
         "protocol_version": str(payload.get("protocol_version", Q033_PROTOCOL_VERSION)),
-        "out_dir": str(out_dir),
         "manifest_count": len(manifest_paths),
         "manifest_paths": manifest_paths,
         "seed_start": int(payload.get("seed_start", int(args.seed_start))),
@@ -88,8 +87,22 @@ def cmd_q033_build_manifests(args: argparse.Namespace) -> int:
     }
     index_path = out_dir / "q033_manifest_index.json"
     write_json(str(index_path), index_payload)
-    index_payload["index_path"] = str(index_path)
-    print(json.dumps(index_payload, indent=2, sort_keys=True))
+    receipt_path = out_dir / "build_receipt.json"
+    write_json(
+        str(receipt_path),
+        {
+            "status": "ok",
+            "receipt_type": "build_receipt",
+            "out_dir": str(out_dir),
+            "index_path": str(index_path),
+            "manifest_paths": [str(out_dir / path) for path in manifest_paths],
+        },
+    )
+    summary_payload = dict(index_payload)
+    summary_payload["build_receipt_path"] = str(receipt_path)
+    summary_payload["index_path"] = str(index_path)
+    summary_payload["out_dir"] = str(out_dir)
+    print(json.dumps(summary_payload, indent=2, sort_keys=True))
     return 0
 
 

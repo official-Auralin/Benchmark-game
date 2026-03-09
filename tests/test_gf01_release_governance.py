@@ -11,7 +11,7 @@ from __future__ import annotations
 
 __author__ = "Bobby Veihman"
 __copyright__ = "Academic Commons"
-__license__ = "License Name"
+__license__ = "Apache-2.0"
 __version__ = "1.0.0"
 __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
@@ -56,9 +56,9 @@ def _manifest_payload(entries: list[tuple[str, str]]) -> dict[str, object]:
     return {
         "schema_version": "gf01.split_manifest.v1",
         "family_id": "GF-01",
-        "benchmark_version": "0.1.0-dev",
-        "generator_version": "0.1.0-dev",
-        "checker_version": "0.1.0-dev",
+        "benchmark_version": "0.1.0",
+        "generator_version": "0.1.0",
+        "checker_version": "0.1.0",
         "harness_version": "1.0.0",
         "instance_count": len(rows),
         "instances": rows,

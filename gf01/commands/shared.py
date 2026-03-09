@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import statistics
 from collections import defaultdict
+from typing import Any
 
 from ..io import load_json, validate_manifest, validate_run_rows
 from ..meta import (
@@ -26,13 +27,16 @@ def compute_manifest_coverage(
     rows: list[dict[str, object]], manifest: dict[str, object]
 ) -> tuple[dict[str, object], list[str], list[str]]:
     manifest_entries = manifest.get("instances", [])
-    expected_ids = {str(e.get("instance_id")) for e in manifest_entries}
+    if not isinstance(manifest_entries, list):
+        manifest_entries = []
+    typed_entries = [entry for entry in manifest_entries if isinstance(entry, dict)]
+    expected_ids = {str(e.get("instance_id")) for e in typed_entries}
     observed_ids = {str(r.get("instance_id")) for r in rows}
     missing_ids = sorted(expected_ids - observed_ids)
     unexpected_ids = sorted(observed_ids - expected_ids)
 
     expected_group_counts: dict[tuple[str, str], int] = {}
-    for entry in manifest_entries:
+    for entry in typed_entries:
         key = (str(entry.get("split_id", "unknown")), str(entry.get("mode", "unknown")))
         expected_group_counts[key] = expected_group_counts.get(key, 0) + 1
 
@@ -457,12 +461,15 @@ def build_report_payload(
     coverage_payload: dict[str, object] | None,
 ) -> dict[str, object]:
     groups: dict[
-        tuple[str, str, str, str, str, bool, str, int, str, str, str],
+        tuple[str, str, str, str, str, str, bool, str, int, str, str],
         list[dict[str, object]],
     ] = {}
     for row in rows:
         try:
-            adaptation_budget_tokens = int(row.get("adaptation_budget_tokens", 0))
+            budget_value: Any = row.get("adaptation_budget_tokens", 0)
+            if budget_value is None or not isinstance(budget_value, (int, float, str)):
+                raise TypeError
+            adaptation_budget_tokens = int(budget_value)
         except Exception:
             adaptation_budget_tokens = -1
         key = (
@@ -498,8 +505,14 @@ def build_report_payload(
         n = len(entries)
         cert_rate = sum(1 for e in entries if bool(e.get("valid", False))) / max(1, n)
         goal_rate = sum(1 for e in entries if bool(e.get("goal", False))) / max(1, n)
-        ap_f1_mean = statistics.fmean(float(e.get("ap_f1", 0.0)) for e in entries)
-        ts_f1_mean = statistics.fmean(float(e.get("ts_f1", 0.0)) for e in entries)
+        ap_f1_mean = statistics.fmean(
+            float(value) if isinstance(value, (int, float, str)) else 0.0
+            for value in (e.get("ap_f1", 0.0) for e in entries)
+        )
+        ts_f1_mean = statistics.fmean(
+            float(value) if isinstance(value, (int, float, str)) else 0.0
+            for value in (e.get("ts_f1", 0.0) for e in entries)
+        )
         report_rows.append(
             {
                 "eval_track": eval_track,

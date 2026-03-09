@@ -12,7 +12,7 @@ from __future__ import annotations
 
 __author__ = "Bobby Veihman"
 __copyright__ = "Academic Commons"
-__license__ = "License Name"
+__license__ = "Apache-2.0"
 __version__ = "1.0.0"
 __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
@@ -269,14 +269,31 @@ def _parse_legacy_visual(lines: list[str]) -> dict[str, object]:
     }
 
 
+def _coerce_visual_int(value: object, field_name: str) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"visual observation field {field_name} must be integer-like"
+            ) from exc
+    raise ValueError(f"visual observation field {field_name} must be integer-like")
+
+
 def render_visual(obs: dict[str, object]) -> str:
     # Human-facing view with an embedded canonical payload for exact parsing.
-    t_now = int(obs["t"])
-    t_star = int(obs["t_star"])
+    t_now = _coerce_visual_int(obs.get("t"), "t")
+    t_star = _coerce_visual_int(obs.get("t_star"), "t_star")
     mode = str(obs["mode"])
     effect_status = str(obs["effect_status_t"])
-    budget_t = int(obs["budget_t_remaining"])
-    budget_a = int(obs["budget_a_remaining"])
+    budget_t = _coerce_visual_int(obs.get("budget_t_remaining"), "budget_t_remaining")
+    budget_a = _coerce_visual_int(obs.get("budget_a_remaining"), "budget_a_remaining")
     y_text = _format_y_t_for_visual(obs.get("y_t", {}))
     history_atoms = obs.get("history_atoms", [])
     timeline_lines = _format_timeline_for_visual(t_now, t_star, history_atoms)

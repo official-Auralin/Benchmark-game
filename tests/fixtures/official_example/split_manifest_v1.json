@@ -1,8 +1,8 @@
 {
-  "benchmark_version": "0.1.0-dev",
-  "checker_version": "0.1.0-dev",
+  "benchmark_version": "0.1.0",
+  "checker_version": "0.1.0",
   "family_id": "GF-01",
-  "generator_version": "0.1.0-dev",
+  "generator_version": "0.1.0",
   "group_counts": [
     {
       "count": 3,
@@ -60,7 +60,6 @@
     }
   ],
   "schema_version": "gf01.split_manifest.v1",
-  "source_bundle_hash": "57281cd97c5faa58e0beab867d9969405f54517b3958d3cf26c6ccdce17fbb9f",
-  "source_bundle_schema_version": "gf01.instance_bundle.v1",
-  "source_path": "tests/fixtures/official_example/instance_bundle_v1.json"
+  "source_bundle_hash": "46561efcfe46b44b72624e064f3442c9c176f46e1edc06fe76c0edd4f16ee013",
+  "source_bundle_schema_version": "gf01.instance_bundle.v1"
 }

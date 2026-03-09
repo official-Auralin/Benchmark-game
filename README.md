@@ -6,6 +6,10 @@ stable reference implementation, retained evaluation artifacts, and a compact
 set of canonical docs that future contributors can use without loading the
 entire project history.
 
+This repository is released under the Apache-2.0 license. The authoritative
+license file must exist at the root of the public GitHub mirror as `LICENSE`,
+not only in the private source repository.
+
 ## Start Here
 
 - `docs/INDEX.md`: primary steering context.
@@ -14,23 +18,44 @@ entire project history.
 - `spec/environment.md`: task model and observation/action semantics.
 - `spec/parity.md`: human-versus-agent information parity rules.
 - `docs/benchmarking.md`: evaluation protocol, retained artifact paths, and reproducibility.
+- `docs/HUMAN_DATA_GOVERNANCE.md`: current local-only human-data boundary and future deployment checklist.
 - `docs/ARCHITECTURE.md`: module boundaries and extension points.
 - `docs/CONTRIBUTING.md`: setup, workflow rules, docs policy, and archive procedure.
 
 ## Quick Setup
 
 - Python `3.10+`
-- Install mirrored/public-scope dependencies:
+- Core profile (stdlib-only runtime plus editable package metadata):
 
 ```bash
-python3 -m pip install -r requirements.txt
+python3 -m pip install -e .
 ```
 
-- Rebuild the formal spec PDF when TeX changes:
+- Human-ui profile:
+
+```bash
+python3 -m pip install -e .[human-ui]
+python3 -m pip install -r requirements-human-ui.txt
+```
+
+- Paper-artifact profile:
+
+```bash
+python3 -m pip install -e .[paper-artifact]
+python3 -m pip install -r requirements-paper-artifact.txt
+```
+
+- In the private source repo only, rebuild the locked formal spec PDF when TeX changes:
 
 ```bash
 python3 scripts/build_spec.py
+python3 scripts/build_spec.py --check
 ```
+
+- The paper-artifact path also requires `latexmk` to be installed and available
+  on `PATH`.
+- The public GitHub mirror intentionally exposes only `spec/Spec.pdf`. The
+  locked TeX source is not mirrored there and is not contributor-editable.
 
 ## Quick Commands
 

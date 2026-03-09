@@ -15,6 +15,7 @@ Read these pages in order before opening large historical artifacts.
 ## Build And Research Context
 
 - `docs/benchmarking.md` for evaluation protocol, retained artifact paths, and reproducibility rules.
+- `docs/HUMAN_DATA_GOVERNANCE.md` for the current human-data boundary and any future deployment checklist.
 - `docs/research-notes.md` for hypotheses, threats to validity, ablations, and paper-facing rationale.
 - `docs/ARCHITECTURE.md` for code boundaries and extension points.
 - `docs/CONTRIBUTING.md` for setup, workflow rules, documentation policy, and archive procedure.

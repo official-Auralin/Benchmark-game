@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gf01-benchmark-harness"
+version = "1.0.0"
+description = "GF-01 benchmark harness for temporal causal reasoning."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+  { name = "Bobby Veihman", email = "bv2340@columbia.edu" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = []
+
+[project.optional-dependencies]
+human-ui = [
+  "pygame-ce==2.5.2",
+]
+paper-artifact = [
+  "pygame-ce==2.5.2",
+]
+dev = [
+  "coverage==7.6.12",
+  "hypothesis==6.131.6",
+  "mypy==1.15.0",
+  "pygame-ce==2.5.2",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["gf01", "gf01.*"]

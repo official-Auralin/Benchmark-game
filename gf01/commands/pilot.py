@@ -50,7 +50,7 @@ from ..meta import (
     RENDERER_POLICY_VERSION,
     RUN_RECORD_SCHEMA_VERSION,
     config_hash,
-    current_git_commit,
+    require_git_commit,
     renderer_profile_for_track,
     stable_hash_json,
 )
@@ -96,6 +96,7 @@ def run_freeze_pilot(
     force: bool,
 ) -> tuple[int, dict[str, object]]:
     cfg = GeneratorConfig()
+    git_commit = require_git_commit()
     mode_override = str(mode).strip() if mode is not None else ""
     if mode_override and mode_override not in ALLOWED_MODES:
         return 2, {
@@ -129,6 +130,7 @@ def run_freeze_pilot(
     bundle_path = out_dir / "instance_bundle_v1.json"
     manifest_path = out_dir / "split_manifest_v1.json"
     freeze_path = out_dir / "pilot_freeze_v1.json"
+    receipt_path = out_dir / "build_receipt.json"
 
     suite = generate_suite(
         seeds=seeds,
@@ -144,13 +146,12 @@ def run_freeze_pilot(
         "generator_version": GENERATOR_VERSION,
         "checker_version": CHECKER_VERSION,
         "harness_version": HARNESS_VERSION,
-        "git_commit": current_git_commit(),
+        "git_commit": git_commit,
         "config_hash": config_hash(cfg),
         "split_id": split,
         "seed_start": int(min(seeds)),
         "count": len(seeds),
         "seeds": seeds,
-        "generated_on": date.today().isoformat(),
         "mode_override": mode_override or "mixed",
         "identifiability_policy_version": IDENTIFIABILITY_POLICY_VERSION,
         "identifiability_metric_id": IDENTIFIABILITY_METRIC_ID,
@@ -164,7 +165,6 @@ def run_freeze_pilot(
     manifest = build_split_manifest(
         suite,
         bundle_meta=bundle,
-        source_path=str(bundle_path),
     )
     manifest_errors = validate_manifest(manifest, strict=True)
     if manifest_errors:
@@ -185,15 +185,12 @@ def run_freeze_pilot(
         "generator_version": GENERATOR_VERSION,
         "checker_version": CHECKER_VERSION,
         "harness_version": HARNESS_VERSION,
-        "git_commit": current_git_commit(),
+        "git_commit": git_commit,
         "config_hash": config_hash(cfg),
         "split_id": split,
         "seed_count": len(seeds),
         "seeds": seeds,
         "mode_override": mode_override or "mixed",
-        "created_on": date.today().isoformat(),
-        "instance_bundle_path": str(bundle_path),
-        "split_manifest_path": str(manifest_path),
         "instance_bundle_hash": stable_hash_json(bundle),
         "split_manifest_hash": stable_hash_json(manifest),
         "identifiability_policy_version": IDENTIFIABILITY_POLICY_VERSION,
@@ -206,6 +203,19 @@ def run_freeze_pilot(
         ),
     }
     write_json(str(freeze_path), freeze_meta)
+    write_json(
+        str(receipt_path),
+        {
+            "status": "ok",
+            "receipt_type": "build_receipt",
+            "generated_on": date.today().isoformat(),
+            "git_commit": git_commit,
+            "output_root": str(out_dir),
+            "instance_bundle_path": str(bundle_path),
+            "split_manifest_path": str(manifest_path),
+            "pilot_freeze_path": str(freeze_path),
+        },
+    )
 
     summary = {
         "status": "ok",
@@ -215,6 +225,7 @@ def run_freeze_pilot(
         "bundle_path": str(bundle_path),
         "manifest_path": str(manifest_path),
         "freeze_meta_path": str(freeze_path),
+        "build_receipt_path": str(receipt_path),
         "instance_count": len(suite),
         "split_id": split,
         "mode_override": mode_override or "mixed",
@@ -346,6 +357,7 @@ def cmd_pilot_campaign(args: argparse.Namespace) -> int:
         return 2
 
     instances, bundle_meta = load_instance_bundle(str(bundle_path))
+    git_commit = require_git_commit()
     instance_lookup = {inst.instance_id: inst for inst in instances}
     rows: list[dict[str, object]] = []
     panel_raw = panel_ids(args.baseline_panel)
@@ -423,7 +435,7 @@ def cmd_pilot_campaign(args: argparse.Namespace) -> int:
             tool_allowlist_id = args.tool_allowlist_id
             tool_log_hash = args.tool_log_hash or stable_hash_json(
                 {
-                    "freeze_dir": str(freeze_dir),
+                    "instances_hash": bundle_meta.get("instances_hash", ""),
                     "agent": agent.name,
                     "seed": int(args.seed + idx),
                     "panel_index": idx,
@@ -433,7 +445,7 @@ def cmd_pilot_campaign(args: argparse.Namespace) -> int:
             tool_allowlist_id = DEFAULT_TOOL_ALLOWLIST_BY_TRACK["EVAL-OC"]
             tool_log_hash = stable_hash_json(
                 {
-                    "freeze_dir": str(freeze_dir),
+                    "instances_hash": bundle_meta.get("instances_hash", ""),
                     "agent": agent.name,
                     "seed": int(args.seed + idx),
                     "panel_index": idx,
@@ -478,7 +490,7 @@ def cmd_pilot_campaign(args: argparse.Namespace) -> int:
             "generator_version": bundle_meta.get("generator_version", GENERATOR_VERSION),
             "checker_version": bundle_meta.get("checker_version", CHECKER_VERSION),
             "harness_version": HARNESS_VERSION,
-            "git_commit": current_git_commit(),
+            "git_commit": git_commit,
             "config_hash": bundle_meta.get("config_hash", "unknown"),
             "tool_allowlist_id": tool_allowlist_id,
             "tool_log_hash": tool_log_hash,
@@ -511,7 +523,7 @@ def cmd_pilot_campaign(args: argparse.Namespace) -> int:
         "generator_version": bundle_meta.get("generator_version", GENERATOR_VERSION),
         "checker_version": bundle_meta.get("checker_version", CHECKER_VERSION),
         "harness_version": HARNESS_VERSION,
-        "git_commit": current_git_commit(),
+        "git_commit": git_commit,
         "config_hash": bundle_meta.get("config_hash", "unknown"),
     }
     for external_episode_path in args.external_episodes:
@@ -577,8 +589,6 @@ def cmd_pilot_campaign(args: argparse.Namespace) -> int:
         "strict_mode": True,
         "official_mode": True,
         "rows": len(rows),
-        "manifest_path": str(manifest_path),
-        "runs_path": str(runs_path),
     }
     if coverage_payload is not None:
         validation_ok["manifest_coverage"] = coverage_payload
@@ -590,6 +600,22 @@ def cmd_pilot_campaign(args: argparse.Namespace) -> int:
         coverage_payload=coverage_payload,
     )
     write_json(str(report_path), report)
+    receipt_path = out_dir / "build_receipt.json"
+    write_json(
+        str(receipt_path),
+        {
+            "status": "ok",
+            "receipt_type": "build_receipt",
+            "generated_on": date.today().isoformat(),
+            "git_commit": git_commit,
+            "freeze_dir": str(freeze_dir),
+            "out_dir": str(out_dir),
+            "manifest_path": str(manifest_path),
+            "runs_path": str(runs_path),
+            "validation_path": str(validation_path),
+            "report_path": str(report_path),
+        },
+    )
 
     summary = {
         "status": "ok",
@@ -598,6 +624,7 @@ def cmd_pilot_campaign(args: argparse.Namespace) -> int:
         "runs_path": str(runs_path),
         "validation_path": str(validation_path),
         "report_path": str(report_path),
+        "build_receipt_path": str(receipt_path),
         "row_count": len(rows),
         "renderer_track": renderer_track,
         "baseline_policy_version": BASELINE_PANEL_POLICY_VERSION,
@@ -776,12 +803,7 @@ def cmd_release_package(args: argparse.Namespace) -> int:
         "generator_version": GENERATOR_VERSION,
         "checker_version": CHECKER_VERSION,
         "harness_version": HARNESS_VERSION,
-        "git_commit": current_git_commit(),
-        "created_on": date.today().isoformat(),
-        "source_paths": {
-            "freeze_dir": str(freeze_dir),
-            "campaign_dir": str(campaign_dir),
-        },
+        "git_commit": require_git_commit(),
         "strict_validation": {
             "status": "ok",
             "rows": len(rows),
@@ -791,6 +813,19 @@ def cmd_release_package(args: argparse.Namespace) -> int:
     }
     manifest_path = out_dir / "release_package_manifest.json"
     write_json(str(manifest_path), package_manifest)
+    receipt_path = out_dir / "build_receipt.json"
+    write_json(
+        str(receipt_path),
+        {
+            "status": "ok",
+            "receipt_type": "build_receipt",
+            "created_on": date.today().isoformat(),
+            "git_commit": package_manifest["git_commit"],
+            "freeze_dir": str(freeze_dir),
+            "campaign_dir": str(campaign_dir),
+            "out_dir": str(out_dir),
+        },
+    )
 
     summary = {
         "status": "ok",
@@ -798,6 +833,7 @@ def cmd_release_package(args: argparse.Namespace) -> int:
         "out_dir": str(out_dir),
         "manifest_path": str(manifest_path),
         "instructions_path": str(instructions_path),
+        "build_receipt_path": str(receipt_path),
         "artifact_count": len(copied_files),
         "source_freeze_dir": str(freeze_dir),
         "source_campaign_dir": str(campaign_dir),
@@ -1084,7 +1120,7 @@ def cmd_pilot_analyze(args: argparse.Namespace) -> int:
                 "generator_version": GENERATOR_VERSION,
                 "checker_version": CHECKER_VERSION,
                 "harness_version": HARNESS_VERSION,
-                "git_commit": current_git_commit(),
+                "git_commit": require_git_commit(),
                 "config_hash": "pilot-analyze-legacy-backfill",
                 "tool_allowlist_id": DEFAULT_TOOL_ALLOWLIST_BY_TRACK["EVAL-CB"],
                 "tool_log_hash": "",
@@ -1232,9 +1268,6 @@ def cmd_pilot_analyze(args: argparse.Namespace) -> int:
             "score_method": COMPLEXITY_SCORE_METHOD,
             "knob_keys": list(COMPLEXITY_KNOB_KEYS),
         },
-        "campaign_dir": str(campaign_dir),
-        "runs_path": str(runs_path),
-        "validation_path": str(validation_path) if validation_path.exists() else "",
         "row_count": len(rows),
         "analysis_scope": {
             "eval_track": eval_track,

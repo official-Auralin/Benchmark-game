@@ -12,7 +12,7 @@ from __future__ import annotations
 
 __author__ = "Bobby Veihman"
 __copyright__ = "Academic Commons"
-__license__ = "License Name"
+__license__ = "Apache-2.0"
 __version__ = "1.0.0"
 __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
@@ -243,7 +243,6 @@ def build_split_manifest(
         "harness_version": bundle_meta.get("harness_version", HARNESS_VERSION),
         "source_bundle_schema_version": bundle_meta.get("schema_version", "legacy-instance-list"),
         "source_bundle_hash": bundle_meta.get("instances_hash", stable_hash_json(entries)),
-        "source_path": source_path,
         "instance_count": len(entries),
         "group_counts": counts,
         "instances": entries,
@@ -607,7 +606,12 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
 
         for float_field in ("ap_f1", "ts_f1"):
             try:
-                float(row.get(float_field))
+                numeric_value = row.get(float_field, 0.0)
+                if numeric_value is None or not isinstance(
+                    numeric_value, (int, float, str)
+                ):
+                    raise TypeError
+                float(numeric_value)
             except Exception:
                 errors.append(f"row {idx}: {float_field} must be numeric")
 
@@ -949,9 +953,9 @@ def migrate_run_rows(
 
         for bool_field in ("suff", "min1", "valid", "goal", "scored_commit_episode"):
             before = item.get(bool_field, False)
-            after = _to_bool(before)
-            item[bool_field] = after
-            if before is not after and before != after:
+            after_bool = _to_bool(before)
+            item[bool_field] = after_bool
+            if before is not after_bool and before != after_bool:
                 _mark(coercion_counts, bool_field)
 
         for float_field in (
@@ -962,10 +966,10 @@ def migrate_run_rows(
             "ts_recall",
             "ts_f1",
         ):
-            before = item.get(float_field, 0.0)
-            after = _to_float(before, default=0.0)
-            item[float_field] = after
-            if before != after:
+            before_float: Any = item.get(float_field, 0.0)
+            after_float = _to_float(before_float, default=0.0)
+            item[float_field] = after_float
+            if before_float != after_float:
                 _mark(coercion_counts, float_field)
 
         for int_field in (
@@ -980,11 +984,11 @@ def migrate_run_rows(
         ):
             if int_field not in item:
                 continue
-            before = item[int_field]
+            before_int: Any = item[int_field]
             try:
-                after = int(before)
-                item[int_field] = after
-                if before != after:
+                after_int = int(before_int)
+                item[int_field] = after_int
+                if before_int != after_int:
                     _mark(coercion_counts, int_field)
             except Exception:
                 pass

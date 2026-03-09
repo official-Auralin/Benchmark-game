@@ -10,8 +10,14 @@ This repository uses a two-repo workflow:
 
 The sync script copies only:
 
+- `LICENSE`
 - `README.md`
+- `pyproject.toml`
 - `requirements.txt`
+- `requirements-core.txt`
+- `requirements-human-ui.txt`
+- `requirements-paper-artifact.txt`
+- `requirements-dev.txt`
 - `docs/`
 - `spec/Spec.pdf`
 - `spec/overview.md`
@@ -20,11 +26,20 @@ The sync script copies only:
 - `spec/parity.md`
 - `spec/acceptance-tests.md`
 - `spec/plan.md`
+- `spec/contract_inventory.json`
 - `.github/workflows/gf01-gate.yml`
 - `gf01/`
 - `tests/`
 
 Everything else stays private by default.
+
+Notably excluded on purpose:
+
+- `spec/tex_files/Spec.tex`
+- `scripts/build_spec.py`
+
+The public mirror publishes the locked `spec/Spec.pdf` only. Contributors
+should validate that artifact, not edit or rebuild the TeX source there.
 
 ## One-Command Sync
 
@@ -63,8 +78,12 @@ git push
 
 - Keep the allowlist explicit; do not mirror `research_pack/`, local scripts, or
   private artifact directories by accident.
+- Treat the mirrored root as the publication root on GitHub. Files such as
+  `LICENSE`, `pyproject.toml`, and the profile requirements files must exist at
+  the mirror root when they are part of the public contract.
 - Keep `requirements.txt` limited to dependencies needed by mirrored/public
-  files.
+  files, and keep the profile-specific requirements files aligned with
+  `pyproject.toml`.
 - Keep the GitHub branch protection rule requiring both
   `GF01 Gate / gate` and `GF01 Gate / release-candidate` on the mirror
   `main` branch.

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 __author__ = "Bobby Veihman"
 __copyright__ = "Academic Commons"
-__license__ = "License Name"
+__license__ = "Apache-2.0"
 __version__ = "1.0.0"
 __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
@@ -25,9 +25,9 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 
 FAMILY_ID = "GF-01"
-BENCHMARK_VERSION = "0.1.0-dev"
-GENERATOR_VERSION = "0.1.0-dev"
-CHECKER_VERSION = "0.1.0-dev"
+BENCHMARK_VERSION = "0.1.0"
+GENERATOR_VERSION = "0.1.0"
+CHECKER_VERSION = "0.1.0"
 HARNESS_VERSION = __version__
 
 INSTANCE_BUNDLE_SCHEMA_VERSION = "gf01.instance_bundle.v1"
@@ -145,7 +145,7 @@ def stable_hash_json(value: Any) -> str:
 
 
 def config_hash(cfg: Any) -> str:
-    if is_dataclass(cfg):
+    if is_dataclass(cfg) and not isinstance(cfg, type):
         return stable_hash_json(asdict(cfg))
     return stable_hash_json(cfg)
 
@@ -164,4 +164,13 @@ def current_git_commit() -> str:
         )
         return out.stdout.strip()
     except Exception:
-        return "unknown"
+        return ""
+
+
+def require_git_commit() -> str:
+    commit = current_git_commit()
+    if commit:
+        return commit
+    raise RuntimeError(
+        "git commit provenance is required for publication-grade artifacts"
+    )

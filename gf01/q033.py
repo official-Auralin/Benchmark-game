@@ -12,7 +12,7 @@ from __future__ import annotations
 
 __author__ = "Bobby Veihman"
 __copyright__ = "Academic Commons"
-__license__ = "License Name"
+__license__ = "Apache-2.0"
 __version__ = "1.0.0"
 __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
@@ -24,7 +24,6 @@ import statistics
 import sys
 import time
 from dataclasses import asdict
-from datetime import date
 from typing import Any
 
 from .baselines import make_agent
@@ -38,7 +37,7 @@ from .meta import (
     GENERATOR_VERSION,
     HARNESS_VERSION,
     config_hash,
-    current_git_commit,
+    require_git_commit,
 )
 from .models import GeneratorConfig, GF01Instance
 from .profiling import PerformanceGates
@@ -196,8 +195,7 @@ def build_q033_manifests(
             "generator_version": GENERATOR_VERSION,
             "checker_version": CHECKER_VERSION,
             "harness_version": HARNESS_VERSION,
-            "git_commit": current_git_commit(),
-            "generated_on": date.today().isoformat(),
+            "git_commit": require_git_commit(),
             "quartile_assignment_method": "global_complexity_sort_index_quartiles",
         }
         manifests.append(manifest)
@@ -446,7 +444,7 @@ def run_q033_sweep(
         "generator_version": GENERATOR_VERSION,
         "checker_version": CHECKER_VERSION,
         "harness_version": HARNESS_VERSION,
-        "git_commit": current_git_commit(),
+        "git_commit": require_git_commit(),
         "generator_config_hash": config_hash(cfg),
         "generator_config": asdict(cfg),
         "hardware": _hardware_declaration(),
