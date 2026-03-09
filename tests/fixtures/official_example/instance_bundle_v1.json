@@ -1,13 +1,16 @@
 {
-  "benchmark_version": "0.1.0-dev",
-  "checker_version": "0.1.0-dev",
-  "config_hash": "8ebf451162aacfcb505a0771d377e6f06b3ce01e3f00d151cf055aab308cc1e5",
+  "benchmark_version": "0.1.0",
+  "checker_version": "0.1.0",
+  "config_hash": "b88a00905bb96a47cc28eff587bc5c2d9da71359f77380fb8a42369a0c22dd33",
   "count": 4,
   "family_id": "GF-01",
-  "generated_on": "2026-02-14",
-  "generator_version": "0.1.0-dev",
-  "git_commit": "e81fcdf16da02c76eb612066d6f6c896ae402770",
+  "generator_version": "0.1.0",
+  "git_commit": "1d54ad1b3ed3766984390671e65feb39e617cff3",
   "harness_version": "1.0.0",
+  "identifiability_metric_id": "single_atom_observation_divergence.v1",
+  "identifiability_min_response_ratio": 0.6,
+  "identifiability_min_unique_signatures": 8,
+  "identifiability_policy_version": "gf01.identifiability_policy.v1",
   "instances": [
     {
       "automaton": {
@@ -259,6 +262,18 @@
         "transition_count_norm": 0.1875
       },
       "effect_ap": "out1",
+      "identifiability": {
+        "candidate_atom_count": 27,
+        "metric_id": "single_atom_observation_divergence.v1",
+        "min_response_ratio": 0.6,
+        "min_unique_signatures": 8,
+        "passes_threshold": true,
+        "policy_version": "gf01.identifiability_policy.v1",
+        "response_atom_count": 26,
+        "response_ratio": 0.9629629629629629,
+        "signature_diversity_ratio": 0.8888888888888888,
+        "unique_signature_count": 24
+      },
       "instance_id": "gf01-2306ebfa159a",
       "mode": "hard",
       "renderer_track": "json",
@@ -635,6 +650,18 @@
         "transition_count_norm": 0.3125
       },
       "effect_ap": "out1",
+      "identifiability": {
+        "candidate_atom_count": 27,
+        "metric_id": "single_atom_observation_divergence.v1",
+        "min_response_ratio": 0.6,
+        "min_unique_signatures": 8,
+        "passes_threshold": true,
+        "policy_version": "gf01.identifiability_policy.v1",
+        "response_atom_count": 24,
+        "response_ratio": 0.8888888888888888,
+        "signature_diversity_ratio": 0.8518518518518519,
+        "unique_signature_count": 23
+      },
       "instance_id": "gf01-3e29532e854e",
       "mode": "hard",
       "renderer_track": "json",
@@ -1060,6 +1087,18 @@
         "transition_count_norm": 0.375
       },
       "effect_ap": "out1",
+      "identifiability": {
+        "candidate_atom_count": 21,
+        "metric_id": "single_atom_observation_divergence.v1",
+        "min_response_ratio": 0.6,
+        "min_unique_signatures": 8,
+        "passes_threshold": true,
+        "policy_version": "gf01.identifiability_policy.v1",
+        "response_atom_count": 21,
+        "response_ratio": 1.0,
+        "signature_diversity_ratio": 0.9523809523809523,
+        "unique_signature_count": 20
+      },
       "instance_id": "gf01-7a189480696b",
       "mode": "normal",
       "renderer_track": "json",
@@ -1303,6 +1342,18 @@
         "transition_count_norm": 0.1875
       },
       "effect_ap": "out0",
+      "identifiability": {
+        "candidate_atom_count": 18,
+        "metric_id": "single_atom_observation_divergence.v1",
+        "min_response_ratio": 0.6,
+        "min_unique_signatures": 8,
+        "passes_threshold": true,
+        "policy_version": "gf01.identifiability_policy.v1",
+        "response_atom_count": 16,
+        "response_ratio": 0.8888888888888888,
+        "signature_diversity_ratio": 0.7777777777777778,
+        "unique_signature_count": 14
+      },
       "instance_id": "gf01-253ad22c2c13",
       "mode": "hard",
       "renderer_track": "json",
@@ -1312,7 +1363,7 @@
       "window_size": 1
     }
   ],
-  "instances_hash": "57281cd97c5faa58e0beab867d9969405f54517b3958d3cf26c6ccdce17fbb9f",
+  "instances_hash": "46561efcfe46b44b72624e064f3442c9c176f46e1edc06fe76c0edd4f16ee013",
   "schema_version": "gf01.instance_bundle.v1",
   "seed_start": 7100,
   "seeds": [

@@ -15,9 +15,12 @@ except ImportError:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_REQUIRED_PATHS = (
+    ROOT / "LICENSE",
+    ROOT / "pyproject.toml",
     ROOT / "docs" / "INDEX.md",
     ROOT / "docs" / "ARCHITECTURE.md",
     ROOT / "docs" / "CONTRIBUTING.md",
+    ROOT / "docs" / "HUMAN_DATA_GOVERNANCE.md",
     ROOT / "docs" / "STYLE.md",
     ROOT / "docs" / "benchmarking.md",
     ROOT / "docs" / "research-notes.md",
@@ -29,8 +32,13 @@ COMMON_REQUIRED_PATHS = (
     ROOT / "spec" / "parity.md",
     ROOT / "spec" / "acceptance-tests.md",
     ROOT / "spec" / "plan.md",
+    ROOT / "spec" / "contract_inventory.json",
     ROOT / "spec" / "Spec.pdf",
     ROOT / "requirements.txt",
+    ROOT / "requirements-core.txt",
+    ROOT / "requirements-human-ui.txt",
+    ROOT / "requirements-paper-artifact.txt",
+    ROOT / "requirements-dev.txt",
 )
 SOURCE_ONLY_REQUIRED_PATHS = (
     ROOT / "spec" / "tex_files" / "Spec.tex",
@@ -67,10 +75,14 @@ class TestDocsSpecSync(unittest.TestCase):
 
     def test_public_scope_dependency_rule_is_documented(self) -> None:
         req_text = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+        human_ui_text = (ROOT / "requirements-human-ui.txt").read_text(
+            encoding="utf-8"
+        ).lower()
         contrib_text = (ROOT / "docs" / "CONTRIBUTING.md").read_text(
             encoding="utf-8"
         ).lower()
         self.assertIn("mirrored repository only", req_text)
+        self.assertIn("pygame-ce==", human_ui_text)
         self.assertIn("do not add local-only", contrib_text)
         self.assertIn("mirrored/public files", contrib_text)
 

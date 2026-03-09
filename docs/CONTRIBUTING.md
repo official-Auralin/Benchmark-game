@@ -3,11 +3,18 @@
 ## Setup
 
 - Python `3.10+` is required.
-- Install public-scope dependencies with:
-  `python3 -m pip install -r requirements.txt`
-- `requirements.txt` is intentionally limited to dependencies needed by the
-  mirrored/public files. Do not add local-only, private-only, or non-mirrored
-  tooling there.
+- Install the core editable package with:
+  `python3 -m pip install -e .`
+- Install the public human-ui profile with:
+  `python3 -m pip install -e .[human-ui]`
+  and `python3 -m pip install -r requirements-human-ui.txt`
+- Install the paper-artifact profile with:
+  `python3 -m pip install -e .[paper-artifact]`
+  and `python3 -m pip install -r requirements-paper-artifact.txt`
+- `requirements.txt` remains intentionally limited to dependencies needed by
+  the mirrored/public files. Do not add local-only, private-only, or
+  non-mirrored tooling there.
+- `latexmk` is required for the paper-artifact path and for `scripts/build_spec.py`.
 
 ## Canonical Doc Map
 
@@ -18,6 +25,7 @@
 - `spec/parity.md`: human-versus-agent information parity.
 - `spec/plan.md`: only active long-lived plan.
 - `docs/benchmarking.md`: reproducibility and evaluation protocol.
+- `docs/HUMAN_DATA_GOVERNANCE.md`: current human-data boundary and future deployment checklist.
 - `docs/ARCHITECTURE.md`: code boundaries and extension points.
 - `docs/STYLE.md`: documentation hygiene rules.
 
@@ -31,6 +39,10 @@
   `python3 -m gf01 gate --fixture-root tests/fixtures/official_example --seed-profile 4200 --unittest-shards 2`
 - Build the formal spec PDF:
   `python3 scripts/build_spec.py`
+- Check that the committed formal spec PDF is fresh:
+  `python3 scripts/build_spec.py --check`
+- Human-ui smoke path:
+  `SDL_VIDEODRIVER=dummy python3 -m unittest tests.test_gf01_play_loop tests.test_r1_renderer_modules -v`
 
 ## Workflow Rules
 
@@ -77,4 +89,5 @@
 - If you changed benchmarking protocol or retained artifact policy, update
   `docs/benchmarking.md`.
 - If you changed mirrored dependency needs, update `requirements.txt`, but only
-  for dependencies required by mirrored/public files.
+  for dependencies required by mirrored/public files. Update the profile-specific
+  requirements files and `pyproject.toml` at the same time when applicable.

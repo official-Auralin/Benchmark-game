@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date
 from pathlib import Path
 
 from ..baselines import (
@@ -45,7 +44,7 @@ from ..meta import (
     RENDERER_POLICY_VERSION,
     RUN_RECORD_SCHEMA_VERSION,
     config_hash,
-    current_git_commit,
+    require_git_commit,
     renderer_profile_for_track,
     stable_hash_json,
 )
@@ -103,6 +102,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
     seeds = [args.seed + i for i in range(args.count)]
     suite = generate_suite(seeds=seeds, split_id=args.split, cfg=cfg)
     instances_payload = [inst.to_canonical_dict() for inst in suite]
+    git_commit = require_git_commit()
     bundle = {
         "schema_version": INSTANCE_BUNDLE_SCHEMA_VERSION,
         "family_id": FAMILY_ID,
@@ -110,13 +110,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
         "generator_version": GENERATOR_VERSION,
         "checker_version": CHECKER_VERSION,
         "harness_version": HARNESS_VERSION,
-        "git_commit": current_git_commit(),
+        "git_commit": git_commit,
         "config_hash": config_hash(cfg),
         "split_id": args.split,
         "seed_start": int(args.seed),
         "count": int(args.count),
         "seeds": seeds,
-        "generated_on": date.today().isoformat(),
         "identifiability_policy_version": IDENTIFIABILITY_POLICY_VERSION,
         "identifiability_metric_id": IDENTIFIABILITY_METRIC_ID,
         "identifiability_min_response_ratio": float(IDENTIFIABILITY_MIN_RESPONSE_RATIO),
@@ -137,7 +136,6 @@ def cmd_generate(args: argparse.Namespace) -> int:
         manifest = build_split_manifest(
             suite,
             bundle_meta=(bundle if not args.legacy_list else {}),
-            source_path=(args.out or "stdout"),
         )
         write_json(args.manifest_out, manifest)
     return 0
@@ -262,7 +260,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         "generator_version": bundle_meta.get("generator_version", GENERATOR_VERSION),
         "checker_version": bundle_meta.get("checker_version", CHECKER_VERSION),
         "harness_version": bundle_meta.get("harness_version", HARNESS_VERSION),
-        "git_commit": current_git_commit(),
+        "git_commit": require_git_commit(),
         "config_hash": bundle_meta.get("config_hash", "unknown"),
         "tool_allowlist_id": tool_allowlist_id or "none",
         "tool_log_hash": tool_log_hash,
@@ -466,7 +464,7 @@ def cmd_migrate_runs(args: argparse.Namespace) -> int:
         "generator_version": args.generator_version,
         "checker_version": args.checker_version,
         "harness_version": args.harness_version,
-        "git_commit": args.git_commit or current_git_commit(),
+        "git_commit": args.git_commit or require_git_commit(),
         "config_hash": args.config_hash,
         "tool_allowlist_id": tool_allowlist_id,
         "tool_log_hash": tool_log_hash,
@@ -522,7 +520,7 @@ def cmd_migrate_runs(args: argparse.Namespace) -> int:
 
 def cmd_manifest(args: argparse.Namespace) -> int:
     instances, bundle_meta = load_instance_bundle(args.instances)
-    manifest = build_split_manifest(instances, bundle_meta=bundle_meta, source_path=args.instances)
+    manifest = build_split_manifest(instances, bundle_meta=bundle_meta)
     if args.out:
         write_json(args.out, manifest)
     else:

@@ -43,13 +43,27 @@ Older campaign slices and exploratory summaries belong in the external archive.
 
 ## Reproducibility Workflow
 
-- Install contributor dependencies with `python3 -m pip install -r requirements.txt`.
+- Core CLI profile:
+  `python3 -m pip install -e .`
+- Human-ui profile:
+  `python3 -m pip install -e .[human-ui]`
+  and `python3 -m pip install -r requirements-human-ui.txt`
+- Paper-artifact profile:
+  `python3 -m pip install -e .[paper-artifact]`
+  and `python3 -m pip install -r requirements-paper-artifact.txt`
+- The paper-artifact path also requires `latexmk` on `PATH`.
 - Run `python3 -m gf01 checks --seed 3000` before publication-facing changes.
 - Run `python3 -m unittest discover -s tests -p 'test_*.py' -v` before merging.
 - Use `python3 -m gf01 gate --fixture-root tests/fixtures/official_example --seed-profile 4200 --unittest-shards 2`
   for the fast gate-equivalent local check.
 - Rebuild the formal PDF with `python3 scripts/build_spec.py` after TeX or
   formal-spec edits.
+- Check for stale committed formal-spec output with
+  `python3 scripts/build_spec.py --check`.
+- For reviewer reproduction, prefer the paper-artifact profile and keep the
+  `generate`, `freeze-pilot`, `pilot-campaign`, `release-package`, and
+  `q033-build-manifests` outputs deterministic across reruns with identical
+  inputs and repo state.
 
 ## Q-033 Performance Closure
 
@@ -66,6 +80,8 @@ decision, and hardware declaration needed to defend the result.
 
 - Treat `spec/tex_files/Spec.tex` as the formal benchmark authority.
 - Keep `spec/` and `docs/` in sync with any behavior or policy change.
+- Treat `docs/HUMAN_DATA_GOVERNANCE.md` as the current statement of the repo's
+  local-only human-study boundary.
 - Use `research_pack/26_phase_h2_threats_validity.md`,
   `research_pack/27_phase_h3_ablations_adversarial_checks.md`, and
   `docs/research-notes.md` when preparing paper claims or reviewer responses.

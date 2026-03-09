@@ -1,0 +1,5 @@
+# Pinned Python dependencies for local development and CI.
+-r requirements-paper-artifact.txt
+coverage==7.6.12
+hypothesis==6.131.6
+mypy==1.15.0

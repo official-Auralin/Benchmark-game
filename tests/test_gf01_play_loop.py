@@ -11,7 +11,7 @@ from __future__ import annotations
 
 __author__ = "Bobby Veihman"
 __copyright__ = "Academic Commons"
-__license__ = "License Name"
+__license__ = "Apache-2.0"
 __version__ = "1.0.0"
 __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
@@ -35,6 +35,7 @@ from gf01.play import EpisodeAborted, _objective_text, run_episode
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REQUIRE_PYGAME = os.environ.get("GF01_REQUIRE_PYGAME", "").strip() == "1"
 
 
 def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -45,6 +46,16 @@ def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         check=False,
     )
+
+
+def _require_pygame_session(module):
+    module._SESSION = None
+    try:
+        return module._session()
+    except RuntimeError as exc:
+        if "pygame is not installed" in str(exc) and not REQUIRE_PYGAME:
+            raise unittest.SkipTest(str(exc)) from exc
+        raise
 
 
 def _toy_instance(mode: str) -> GF01Instance:
@@ -338,13 +349,7 @@ class TestPlayableLoop(unittest.TestCase):
     def test_choose_action_pygame_smoke_under_dummy_sdl(self) -> None:
         with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
             module = importlib.import_module("gf01.renderers.r1_pygame")
-            module._SESSION = None
-            try:
-                session = module._session()
-            except RuntimeError as exc:
-                if "pygame is not installed" in str(exc):
-                    self.skipTest(str(exc))
-                raise
+            session = _require_pygame_session(module)
             try:
                 session.pg.event.post(session.pg.event.Event(session.pg.QUIT))
                 action = module.choose_action_pygame(
@@ -361,13 +366,7 @@ class TestPlayableLoop(unittest.TestCase):
     def test_choose_action_pygame_escape_returns_skip_action(self) -> None:
         with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
             module = importlib.import_module("gf01.renderers.r1_pygame")
-            module._SESSION = None
-            try:
-                session = module._session()
-            except RuntimeError as exc:
-                if "pygame is not installed" in str(exc):
-                    self.skipTest(str(exc))
-                raise
+            session = _require_pygame_session(module)
             try:
                 session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_ESCAPE))
                 action = module.choose_action_pygame(
@@ -384,13 +383,7 @@ class TestPlayableLoop(unittest.TestCase):
     def test_choose_action_pygame_keyboard_stage_and_deploys(self) -> None:
         with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
             module = importlib.import_module("gf01.renderers.r1_pygame")
-            module._SESSION = None
-            try:
-                session = module._session()
-            except RuntimeError as exc:
-                if "pygame is not installed" in str(exc):
-                    self.skipTest(str(exc))
-                raise
+            session = _require_pygame_session(module)
             try:
                 session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_1))
                 session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_RETURN))
@@ -408,13 +401,7 @@ class TestPlayableLoop(unittest.TestCase):
     def test_choose_action_pygame_card_click_stages_and_deploys(self) -> None:
         with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
             module = importlib.import_module("gf01.renderers.r1_pygame")
-            module._SESSION = None
-            try:
-                session = module._session()
-            except RuntimeError as exc:
-                if "pygame is not installed" in str(exc):
-                    self.skipTest(str(exc))
-                raise
+            session = _require_pygame_session(module)
             try:
                 card_x = module.CARD_AREA_X + 20
                 card_y = module.CARD_Y + module.CARD_H - 18
@@ -445,13 +432,7 @@ class TestPlayableLoop(unittest.TestCase):
     def test_choose_action_pygame_tile_click_stages_and_deploys(self) -> None:
         with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
             module = importlib.import_module("gf01.renderers.r1_pygame")
-            module._SESSION = None
-            try:
-                session = module._session()
-            except RuntimeError as exc:
-                if "pygame is not installed" in str(exc):
-                    self.skipTest(str(exc))
-                raise
+            session = _require_pygame_session(module)
             try:
                 instance = _toy_instance("normal")
                 iso_width = (module.GRID_COLS + module.GRID_ROWS - 1) * (module.TILE_W // 2)
@@ -500,13 +481,7 @@ class TestPlayableLoop(unittest.TestCase):
     def test_choose_action_pygame_recall_clears_pending_before_deploy(self) -> None:
         with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}, clear=False):
             module = importlib.import_module("gf01.renderers.r1_pygame")
-            module._SESSION = None
-            try:
-                session = module._session()
-            except RuntimeError as exc:
-                if "pygame is not installed" in str(exc):
-                    self.skipTest(str(exc))
-                raise
+            session = _require_pygame_session(module)
             try:
                 session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_1))
                 session.pg.event.post(session.pg.event.Event(session.pg.KEYDOWN, key=session.pg.K_BACKSPACE))

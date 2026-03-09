@@ -12,7 +12,7 @@ from __future__ import annotations
 
 __author__ = "Bobby Veihman"
 __copyright__ = "Academic Commons"
-__license__ = "License Name"
+__license__ = "Apache-2.0"
 __version__ = "1.0.0"
 __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
@@ -243,7 +243,6 @@ def build_split_manifest(
         "harness_version": bundle_meta.get("harness_version", HARNESS_VERSION),
         "source_bundle_schema_version": bundle_meta.get("schema_version", "legacy-instance-list"),
         "source_bundle_hash": bundle_meta.get("instances_hash", stable_hash_json(entries)),
-        "source_path": source_path,
         "instance_count": len(entries),
         "group_counts": counts,
         "instances": entries,

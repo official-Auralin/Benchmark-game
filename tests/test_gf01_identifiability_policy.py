@@ -13,7 +13,7 @@ from __future__ import annotations
 
 __author__ = "Bobby Veihman"
 __copyright__ = "Academic Commons"
-__license__ = "License Name"
+__license__ = "Apache-2.0"
 __version__ = "1.0.0"
 __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
