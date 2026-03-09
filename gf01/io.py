@@ -953,9 +953,9 @@ def migrate_run_rows(
 
         for bool_field in ("suff", "min1", "valid", "goal", "scored_commit_episode"):
             before = item.get(bool_field, False)
-            after = _to_bool(before)
-            item[bool_field] = after
-            if before is not after and before != after:
+            after_bool = _to_bool(before)
+            item[bool_field] = after_bool
+            if before is not after_bool and before != after_bool:
                 _mark(coercion_counts, bool_field)
 
         for float_field in (
@@ -967,9 +967,9 @@ def migrate_run_rows(
             "ts_f1",
         ):
             before_float: Any = item.get(float_field, 0.0)
-            after = _to_float(before_float, default=0.0)
-            item[float_field] = after
-            if before_float != after:
+            after_float = _to_float(before_float, default=0.0)
+            item[float_field] = after_float
+            if before_float != after_float:
                 _mark(coercion_counts, float_field)
 
         for int_field in (
@@ -986,9 +986,9 @@ def migrate_run_rows(
                 continue
             before_int: Any = item[int_field]
             try:
-                after = int(before_int)
-                item[int_field] = after
-                if before_int != after:
+                after_int = int(before_int)
+                item[int_field] = after_int
+                if before_int != after_int:
                     _mark(coercion_counts, int_field)
             except Exception:
                 pass
