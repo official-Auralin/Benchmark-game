@@ -82,6 +82,7 @@ jobs:
           python -m pip install -e .
 
       - name: Install TeX Toolchain
+        if: ${{ hashFiles('scripts/build_spec.py') != '' }}
         shell: bash
         run: |
           sudo apt-get update
@@ -90,14 +91,20 @@ jobs:
       - name: Run Spec Build Check
         shell: bash
         run: |
-          python scripts/build_spec.py --check
+          if [[ -f scripts/build_spec.py ]]; then
+            python scripts/build_spec.py --check
+          else
+            python -m unittest tests.test_docs_spec_sync tests.test_spec_tex_integrity -v
+          fi
 
       - name: Upload Built Spec PDF
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gf01-spec-pdf
-          path: spec/tex_files/artifacts/Spec.pdf
+          path: |
+            spec/tex_files/artifacts/Spec.pdf
+            spec/Spec.pdf
           if-no-files-found: warn
           retention-days: 14
 

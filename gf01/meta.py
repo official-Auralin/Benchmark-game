@@ -145,7 +145,7 @@ def stable_hash_json(value: Any) -> str:
 
 
 def config_hash(cfg: Any) -> str:
-    if is_dataclass(cfg):
+    if is_dataclass(cfg) and not isinstance(cfg, type):
         return stable_hash_json(asdict(cfg))
     return stable_hash_json(cfg)
 

@@ -114,6 +114,10 @@ class TestCiPolicyWorkflow(unittest.TestCase):
 
         spec_run = str(spec_steps["Run Spec Build Check"].get("run", ""))
         self.assertIn("python scripts/build_spec.py --check", spec_run)
+        self.assertIn(
+            "python -m unittest tests.test_docs_spec_sync tests.test_spec_tex_integrity -v",
+            spec_run,
+        )
 
         ui_run = str(ui_steps["Run Human UI Smoke And Tests"].get("run", ""))
         self.assertIn("tests.test_gf01_play_loop", ui_run)

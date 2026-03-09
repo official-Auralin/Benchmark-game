@@ -45,7 +45,7 @@ python3 -m pip install -e .[paper-artifact]
 python3 -m pip install -r requirements-paper-artifact.txt
 ```
 
-- Rebuild the formal spec PDF when TeX changes:
+- In the private source repo only, rebuild the locked formal spec PDF when TeX changes:
 
 ```bash
 python3 scripts/build_spec.py
@@ -54,6 +54,8 @@ python3 scripts/build_spec.py --check
 
 - The paper-artifact path also requires `latexmk` to be installed and available
   on `PATH`.
+- The public GitHub mirror intentionally exposes only `spec/Spec.pdf`. The
+  locked TeX source is not mirrored there and is not contributor-editable.
 
 ## Quick Commands
 

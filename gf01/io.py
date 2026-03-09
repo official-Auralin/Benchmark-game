@@ -606,7 +606,12 @@ def validate_run_rows(rows: list[dict[str, Any]], strict: bool = False) -> list[
 
         for float_field in ("ap_f1", "ts_f1"):
             try:
-                float(row.get(float_field))
+                numeric_value = row.get(float_field, 0.0)
+                if numeric_value is None or not isinstance(
+                    numeric_value, (int, float, str)
+                ):
+                    raise TypeError
+                float(numeric_value)
             except Exception:
                 errors.append(f"row {idx}: {float_field} must be numeric")
 
@@ -961,10 +966,10 @@ def migrate_run_rows(
             "ts_recall",
             "ts_f1",
         ):
-            before = item.get(float_field, 0.0)
-            after = _to_float(before, default=0.0)
+            before_float: Any = item.get(float_field, 0.0)
+            after = _to_float(before_float, default=0.0)
             item[float_field] = after
-            if before != after:
+            if before_float != after:
                 _mark(coercion_counts, float_field)
 
         for int_field in (
@@ -979,11 +984,11 @@ def migrate_run_rows(
         ):
             if int_field not in item:
                 continue
-            before = item[int_field]
+            before_int: Any = item[int_field]
             try:
-                after = int(before)
+                after = int(before_int)
                 item[int_field] = after
-                if before != after:
+                if before_int != after:
                     _mark(coercion_counts, int_field)
             except Exception:
                 pass

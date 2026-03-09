@@ -33,6 +33,14 @@ The sync script copies only:
 
 Everything else stays private by default.
 
+Notably excluded on purpose:
+
+- `spec/tex_files/Spec.tex`
+- `scripts/build_spec.py`
+
+The public mirror publishes the locked `spec/Spec.pdf` only. Contributors
+should validate that artifact, not edit or rebuild the TeX source there.
+
 ## One-Command Sync
 
 From the source repo root:
