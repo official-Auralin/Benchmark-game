@@ -62,7 +62,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  spec-build:
+  docs-spec-surface:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -81,30 +81,17 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -e .
 
-      - name: Install TeX Toolchain
-        if: ${{ hashFiles('scripts/build_spec.py') != '' }}
+      - name: Run Docs And Spec Surface Check
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y latexmk texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended
+          python -m unittest tests.test_docs_spec_sync tests.test_repo_layout_policy tests.test_gf01_ci_policy -v
 
-      - name: Run Spec Build Check
-        shell: bash
-        run: |
-          if [[ -f scripts/build_spec.py ]]; then
-            python scripts/build_spec.py --check
-          else
-            python -m unittest tests.test_docs_spec_sync tests.test_spec_tex_integrity -v
-          fi
-
-      - name: Upload Built Spec PDF
+      - name: Upload Published Spec PDF
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gf01-spec-pdf
-          path: |
-            spec/tex_files/artifacts/Spec.pdf
-            spec/Spec.pdf
+          name: gf01-spec-surface
+          path: spec/Spec.pdf
           if-no-files-found: warn
           retention-days: 14
 
@@ -185,7 +172,7 @@ jobs:
     timeout-minutes: 10
     needs:
       - core-gate
-      - spec-build
+      - docs-spec-surface
       - human-ui
       - type-and-coverage
 

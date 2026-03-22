@@ -1,8 +1,8 @@
 # GF-01 Public Contracts
 
 `gf01` exposes its primary public contract through the `python -m gf01` CLI,
-versioned JSON/JSONL artifacts, and the formal benchmark semantics in
-`spec/tex_files/Spec.tex`.
+versioned JSON/JSONL artifacts, and the formal benchmark semantics published in
+`spec/Spec.pdf`.
 
 ## Command Contract
 
@@ -41,13 +41,16 @@ with code, tests, and documentation.
 - Strict validation remains the guard for official or release-grade artifacts.
 - Renderer, adaptation, tool-allowlist, split, rotation, and baseline-panel
   policies remain machine-checkable and versioned.
-- Public mirror contents remain intentionally minimal.
-- `requirements.txt` is public-scope-only; local/private dependencies must not
+- The primary repo remains the public contract surface.
+- `requirements.txt` is primary-repo-only; local/private dependencies must not
   be added there.
+- Runtime defaults must not depend on `research_pack/`, `public_repo/`, or
+  sibling private paths.
 
-## Public Mirror Contract
+## Repo Contract
 
-The public mirror is synced from an explicit allowlist and currently includes:
+The primary repo includes the public implementation and retained public
+artifacts:
 
 - `README.md`
 - `requirements.txt`
@@ -62,6 +65,15 @@ The public mirror is synced from an explicit allowlist and currently includes:
 - `.github/workflows/gf01-gate.yml`
 - `gf01/`
 - `tests/`
+- `pilot_freeze/gf01_pilot_freeze_v1`
+- `pilot_runs/gf01_pilot_campaign_v1`
 
-Private research materials, local sync tooling, and local-only dependencies are
-out of scope for the public mirror.
+Private authoring and evidence surfaces live outside this repo:
+
+- `../spec_source/Spec.tex`: private TeX authoring source
+- `../gf01_private_companion/skill/gf01-private-companion/references/spec/spec.md`:
+  agent-ingestible companion copy
+- `../gf01_private_companion/source/research_pack/`: private evidence library
+
+`research_pack/`, `spec/tex_files/`, `public_repo/`, and local sync/build
+tooling are out of scope for the primary repo.

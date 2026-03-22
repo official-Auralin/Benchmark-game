@@ -23,7 +23,6 @@ import unittest
 from pathlib import Path
 
 try:
-    from .repo_scope import is_public_mirror
     from .workflow_parser_subset import (
         WorkflowSubsetParseError,
         job_needs,
@@ -33,7 +32,6 @@ try:
         steps_by_name,
     )
 except ImportError:  # pragma: no cover - discover mode imports test modules top-level.
-    from repo_scope import is_public_mirror
     from workflow_parser_subset import (
         WorkflowSubsetParseError,
         job_needs,
@@ -46,14 +44,8 @@ except ImportError:  # pragma: no cover - discover mode imports test modules top
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "gf01-gate.yml"
-BRANCH_GUIDANCE_PATH = (
-    ROOT
-    / "docs"
-    / "PUBLIC_MIRROR.md"
-)
+BRANCH_GUIDANCE_PATH = ROOT / "docs" / "LOCAL_COMPANION.md"
 CONTRACT_INVENTORY_PATH = ROOT / "spec" / "contract_inventory.json"
-
-IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
 
 
 class TestCiPolicyWorkflow(unittest.TestCase):
@@ -77,7 +69,7 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         text = self._read_workflow_text()
         jobs = parse_workflow_jobs_subset(text)
         self.assertIn("core-gate", jobs)
-        self.assertIn("spec-build", jobs)
+        self.assertIn("docs-spec-surface", jobs)
         self.assertIn("human-ui", jobs)
         self.assertIn("type-and-coverage", jobs)
         self.assertIn("gate", jobs)
@@ -85,7 +77,7 @@ class TestCiPolicyWorkflow(unittest.TestCase):
 
         gate_needs = job_needs(jobs["gate"])
         self.assertIn("core-gate", gate_needs)
-        self.assertIn("spec-build", gate_needs)
+        self.assertIn("docs-spec-surface", gate_needs)
         self.assertIn("human-ui", gate_needs)
         self.assertIn("type-and-coverage", gate_needs)
 
@@ -93,14 +85,14 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         self.assertIn("gate", rc_needs)
 
         core_steps = steps_by_name(jobs["core-gate"])
-        spec_steps = steps_by_name(jobs["spec-build"])
+        docs_steps = steps_by_name(jobs["docs-spec-surface"])
         ui_steps = steps_by_name(jobs["human-ui"])
         type_steps = steps_by_name(jobs["type-and-coverage"])
         gate_steps = steps_by_name(jobs["gate"])
         rc_steps = steps_by_name(jobs["release-candidate"])
 
         self.assertIn("Run GF01 Core Gate", core_steps)
-        self.assertIn("Run Spec Build Check", spec_steps)
+        self.assertIn("Run Docs And Spec Surface Check", docs_steps)
         self.assertIn("Run Human UI Smoke And Tests", ui_steps)
         self.assertIn("Run Targeted Mypy", type_steps)
         self.assertIn("Run Coverage Suite", type_steps)
@@ -112,12 +104,10 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         self.assertIn("python -m gf01 gate", core_run)
         self.assertIn("--unittest-shards 2", core_run)
 
-        spec_run = str(spec_steps["Run Spec Build Check"].get("run", ""))
-        self.assertIn("python scripts/build_spec.py --check", spec_run)
-        self.assertIn(
-            "python -m unittest tests.test_docs_spec_sync tests.test_spec_tex_integrity -v",
-            spec_run,
-        )
+        docs_run = str(docs_steps["Run Docs And Spec Surface Check"].get("run", ""))
+        self.assertIn("tests.test_docs_spec_sync", docs_run)
+        self.assertIn("tests.test_repo_layout_policy", docs_run)
+        self.assertIn("tests.test_gf01_ci_policy", docs_run)
 
         ui_run = str(ui_steps["Run Human UI Smoke And Tests"].get("run", ""))
         self.assertIn("tests.test_gf01_play_loop", ui_run)
@@ -174,30 +164,34 @@ class TestCiPolicyWorkflow(unittest.TestCase):
 
     def test_workflow_avoids_private_paths(self) -> None:
         text = self._read_workflow_text()
-        for forbidden in ("research_pack/", "readings/"):
+        for forbidden in (
+            "research_pack/",
+            "public_repo/",
+            "spec/tex_files/",
+            "scripts/build_spec.py",
+            "readings/",
+        ):
             self.assertNotIn(
                 forbidden,
                 text,
                 msg=(
-                    "public mirror workflow must not depend on private/local-only "
+                    "primary workflow must not depend on private/local-only "
                     f"paths ({forbidden})"
                 ),
             )
 
-    def test_branch_protection_guidance_presence_by_repo_scope(self) -> None:
+    def test_branch_protection_guidance_presence(self) -> None:
         self.assertTrue(
             BRANCH_GUIDANCE_PATH.exists(),
-            msg=f"missing public-mirror guidance doc: {BRANCH_GUIDANCE_PATH}",
+            msg=f"missing local-companion guidance doc: {BRANCH_GUIDANCE_PATH}",
         )
 
-    @unittest.skipUnless(
-        BRANCH_GUIDANCE_PATH.exists(),
-        "branch-protection guidance is absent in this repository scope",
-    )
     def test_branch_protection_guidance_requires_both_checks(self) -> None:
         text = BRANCH_GUIDANCE_PATH.read_text(encoding="utf-8")
         self.assertIn("GF01 Gate / gate", text)
         self.assertIn("GF01 Gate / release-candidate", text)
+        self.assertIn("../spec_source/Spec.tex", text)
+        self.assertIn("../gf01_private_companion/skill/gf01-private-companion/", text)
 
 class TestParseWorkflowJobsUnit(unittest.TestCase):
     """Focused unit tests for ``parse_workflow_jobs_subset``."""

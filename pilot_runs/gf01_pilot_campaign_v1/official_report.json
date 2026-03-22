@@ -1,0 +1,86 @@
+{
+  "groups": [
+    {
+      "ap_f1_mean": 1.0,
+      "certified_rate": 1.0,
+      "count": 16,
+      "eval_track": "EVAL-CB",
+      "goal_rate": 1.0,
+      "mode": "hard",
+      "play_protocol": "commit_only",
+      "renderer_track": "json",
+      "scored_commit_episode": true,
+      "split_id": "pilot_internal_v1",
+      "ts_f1_mean": 1.0
+    },
+    {
+      "ap_f1_mean": 1.0,
+      "certified_rate": 1.0,
+      "count": 8,
+      "eval_track": "EVAL-CB",
+      "goal_rate": 1.0,
+      "mode": "normal",
+      "play_protocol": "commit_only",
+      "renderer_track": "json",
+      "scored_commit_episode": true,
+      "split_id": "pilot_internal_v1",
+      "ts_f1_mean": 1.0
+    },
+    {
+      "ap_f1_mean": 1.0,
+      "certified_rate": 1.0,
+      "count": 16,
+      "eval_track": "EVAL-OC",
+      "goal_rate": 1.0,
+      "mode": "hard",
+      "play_protocol": "commit_only",
+      "renderer_track": "json",
+      "scored_commit_episode": true,
+      "split_id": "pilot_internal_v1",
+      "ts_f1_mean": 1.0
+    },
+    {
+      "ap_f1_mean": 1.0,
+      "certified_rate": 1.0,
+      "count": 8,
+      "eval_track": "EVAL-OC",
+      "goal_rate": 1.0,
+      "mode": "normal",
+      "play_protocol": "commit_only",
+      "renderer_track": "json",
+      "scored_commit_episode": true,
+      "split_id": "pilot_internal_v1",
+      "ts_f1_mean": 1.0
+    }
+  ],
+  "manifest_coverage": {
+    "group_coverage": [
+      {
+        "coverage_rate": 2.0,
+        "expected": 16,
+        "mode": "hard",
+        "observed": 32,
+        "split_id": "pilot_internal_v1"
+      },
+      {
+        "coverage_rate": 2.0,
+        "expected": 8,
+        "mode": "normal",
+        "observed": 16,
+        "split_id": "pilot_internal_v1"
+      }
+    ],
+    "manifest_instance_count": 24,
+    "manifest_schema_version": "gf01.split_manifest.v1",
+    "missing_instance_count": 0,
+    "missing_instance_ids_preview": [],
+    "observed_instance_count": 24,
+    "unexpected_instance_count": 0,
+    "unexpected_instance_ids_preview": []
+  },
+  "schema_versions": [
+    "gf01.run_record.v1"
+  ],
+  "strict_mode": true,
+  "total_rows": 48
+}

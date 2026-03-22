@@ -1,4 +1,4 @@
-# Public-scope runtime dependencies for the mirrored repository only.
-# Keep local-only or private-repo tooling out of this file.
+# Primary-repo runtime dependencies only.
+# Keep local-only or sibling-companion tooling out of this file.
 # This compatibility file intentionally tracks the public human-ui profile.
 -r requirements-human-ui.txt
