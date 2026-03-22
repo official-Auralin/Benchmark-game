@@ -9,7 +9,8 @@ separate documentation backbone that future game families can build on.
 - `gf01.semantics`: canonical trace, observation, and intervention mechanics.
 - `gf01.verifier`: exact sufficiency and minimality checks.
 - `gf01.generator`: deterministic instance generation.
-- `gf01.io`: artifact loading, migration, validation, and writing.
+- `gf01.formal_loader`: raw formal-artifact ingestion and normalization.
+- `gf01.io`: canonical bundle loading, migration, validation, and artifact writing.
 - `gf01.meta`: schema versions, policy versions, and reproducibility metadata.
 
 These modules define the stable implementation layer that later game families
@@ -30,14 +31,18 @@ should reuse whenever possible.
 ## Renderer Boundary
 
 - `gf01.renderers.r1_theme`: deterministic mapping from formal benchmark
-  elements to tower-defense player vocabulary, labels, icons, and colors.
-- `gf01.renderers.r1_grid`: deterministic grid geometry, tile assignment, and
-  wave-strip helpers for the canonical graphical renderer.
+  elements to AP-grounded causal-board labels, icons, and colors.
+- `gf01.renderers.r1_grid`: deterministic spatial layout derived from control/
+  signal roles and coarse relation structure, plus timeline helpers.
 - `gf01.renderers.r1_pygame`: session flow, event loop, parity-safe inspector,
-  and UI composition for the canonical `GF-01-R1` tower-defense window.
+  and UI composition for the canonical `GF-01-R1` causal-board window.
 
 Renderer work must preserve the observation contract described in
 `spec/parity.md`.
+
+Official semantic identity is normalized formal content, not `seed`. Legacy
+seed-backed generation remains available as development tooling, but the active
+runtime now also supports direct raw formal ingestion via `--formal`.
 
 ## Dependency Rules
 

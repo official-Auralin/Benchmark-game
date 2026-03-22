@@ -159,6 +159,41 @@ class TestPlayableLoop(unittest.TestCase):
             self.assertIn("instance", payload)
             self.assertIn("episode", payload)
 
+    def test_run_episode_surfaces_requested_vs_committed_noop(self) -> None:
+        instance = _toy_instance("hard")
+        calls = {"count": 0}
+
+        def _policy(_last_obs, timestep, _instance):
+            if timestep == 0 and calls["count"] == 0:
+                calls["count"] += 1
+                return {"in0": 0}
+            return {}
+
+        episode = run_episode(instance, _policy, renderer_track="json")
+        first_step = episode["steps"][0]
+        self.assertEqual(first_step["requested_action_set"], {"in0": 0})
+        self.assertEqual(first_step["committed_action_set"], {})
+        self.assertEqual(first_step["observation"]["submitted_action_t"], {"in0": 0})
+        self.assertEqual(first_step["observation"]["committed_action_t"], {})
+
+    def test_formal_loader_cli_path_runs_episode(self) -> None:
+        formal_path = ROOT / "tests" / "fixtures" / "formal_toy" / "task.json"
+        proc = _run_cli(
+            [
+                "play",
+                "--formal",
+                str(formal_path),
+                "--agent",
+                "greedy",
+                "--renderer-track",
+                "json",
+            ]
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload.get("run_contract", {}).get("instance_source"), "formal")
+        self.assertEqual(payload.get("instance", {}).get("provenance", {}).get("source_type"), "tempo_hoa_trace")
+
     def test_play_rejects_tool_agent_on_closed_book_track(self) -> None:
         proc = _run_cli(["play", "--seed", "1337", "--agent", "tool", "--eval-track", "EVAL-CB"])
         self.assertEqual(proc.returncode, 2, msg=proc.stdout + proc.stderr)

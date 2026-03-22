@@ -28,7 +28,6 @@ from .baselines import BaselineAgent
 from .models import GF01Instance, InterventionAtom, Valuation
 from .semantics import (
     apply_certificate,
-    atom_cost,
     canonical_observation,
     effect_satisfied,
     input_key,
@@ -54,9 +53,11 @@ class EpisodeAborted(RuntimeError):
 
 def _remaining_budgets(
     instance: GF01Instance, history: list[InterventionAtom]
-) -> tuple[int, int]:
+) -> tuple[int, int | None]:
     budget_t_remaining = instance.budget_timestep - timestep_cost(history)
-    budget_a_remaining = instance.budget_atoms - atom_cost(history)
+    budget_a_remaining = None
+    if instance.budget_atoms is not None:
+        budget_a_remaining = instance.budget_atoms - len(history)
     return budget_t_remaining, budget_a_remaining
 
 
@@ -135,8 +136,6 @@ def _validate_step_budget(
     used_timesteps.add(step_atoms[0].timestep)
     if len(used_timesteps) > instance.budget_timestep:
         raise ValueError("timestep budget exceeded")
-    if len(history) + len(step_atoms) > instance.budget_atoms:
-        raise ValueError("atom budget exceeded")
 
 
 def _step_input(
@@ -186,7 +185,7 @@ def parse_action_script(path: str) -> dict[int, dict[str, int]]:
 
 
 def baseline_policy(agent: BaselineAgent, instance: GF01Instance) -> PolicyFn:
-    full_certificate = sorted_certificate(agent.propose(instance, seed=instance.seed))
+    full_certificate = sorted_certificate(agent.propose(instance, seed=instance.seed or 0))
     actions_by_t: dict[int, dict[str, int]] = {}
     for atom in full_certificate:
         actions_by_t.setdefault(atom.timestep, {})
@@ -267,15 +266,14 @@ def human_policy(renderer_track: str = "visual", visual_backend: str = "text") -
                 else:
                     _ = parse_visual(rendered)
             print(_objective_text(instance))
-            budget_t_remaining = int(last_obs["budget_t_remaining"]) if last_obs else int(
-                instance.budget_timestep
-            )
-            budget_a_remaining = int(last_obs["budget_a_remaining"]) if last_obs else int(
-                instance.budget_atoms
-            )
-            print(
-                f"Budget remaining: timestep={budget_t_remaining}, atoms={budget_a_remaining}"
-            )
+            budget_t_remaining = int(last_obs["budget_t_remaining"]) if last_obs else int(instance.budget_timestep)
+            if last_obs and "budget_a_remaining" in last_obs:
+                budget_a_remaining = int(last_obs["budget_a_remaining"])
+                print(
+                    f"Budget remaining: timestep={budget_t_remaining}, legacy-atoms={budget_a_remaining}"
+                )
+            else:
+                print(f"Budget remaining: timestep={budget_t_remaining}")
             print(
                 "Enter action for THIS timestep only.\n"
                 "  Accepted: 'skip' | 'in0=1' | 'in0=1,in2=0'\n"
@@ -308,6 +306,9 @@ def run_episode(
         if raw_action is None:
             raise EpisodeAborted("interactive episode terminated by user")
         raw_action = raw_action or {}
+        submitted_action = {
+            str(ap): int(value) for ap, value in sorted(raw_action.items())
+        }
         step_atoms = normalize_step_action(instance, timestep, raw_action)
         _validate_step_budget(instance, history, step_atoms)
         step_input = _step_input(instance, timestep, step_atoms)
@@ -327,15 +328,19 @@ def run_episode(
             outputs,
             effect_now,
             budget_t_remaining,
-            budget_a_remaining,
             history,
             instance.mode,
             instance.t_star,
+            budget_a_remaining=budget_a_remaining,
+            submitted_action_t=submitted_action,
+            committed_action_t={atom.ap: int(atom.value) for atom in step_atoms},
         )
         rendered = _render_observation(obs, renderer_track)
         steps.append(
             {
                 "t": int(timestep),
+                "requested_action_set": submitted_action,
+                "committed_action_set": {atom.ap: int(atom.value) for atom in step_atoms},
                 "action_set": {atom.ap: int(atom.value) for atom in step_atoms},
                 "observation": obs,
                 "observation_rendered": rendered,
@@ -351,14 +356,13 @@ def run_episode(
     _, replay_outputs = run_automaton(instance.automaton, replay_trace)
     replay_goal = effect_satisfied(instance, replay_outputs)
 
-    return {
+    payload = {
         "instance_id": instance.instance_id,
         "mode": instance.mode,
         "t_star": int(instance.t_star),
         "effect_ap": instance.effect_ap,
         "budgets": {
             "timestep": int(instance.budget_timestep),
-            "atoms": int(instance.budget_atoms),
         },
         "certificate": [atom.to_tuple() for atom in certificate],
         "steps": steps,
@@ -368,3 +372,6 @@ def run_episode(
         "goal": bool(verification.goal),
         "replay_goal": bool(replay_goal),
     }
+    if instance.budget_atoms is not None:
+        payload["budgets"]["legacy_atoms"] = int(instance.budget_atoms)
+    return payload

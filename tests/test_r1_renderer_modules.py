@@ -10,6 +10,7 @@ from gf01.renderers.r1_grid import (
     TILE_W,
     build_grid,
     defense_tile_assignments,
+    grid_dimensions,
     iso_project,
     tile_at_screen_pos,
     wave_timeline_data,
@@ -79,19 +80,22 @@ class TestR1Grid(unittest.TestCase):
 
     def test_build_grid_marks_objective_current_and_deployments(self) -> None:
         instance = _toy_instance("normal")
+        cols, rows = grid_dimensions(instance)
         tiles = build_grid(
             instance,
             timestep=3,
             pressure_levels={1: 7, 3: 9},
             history_counts={1: 1, 3: 2},
             history_atoms=[(1, "in0", 1), (3, "in1", 0)],
+            current_outputs={"out0": 1, "out1": 0},
             origin_x=120,
             origin_y=160,
         )
-        self.assertEqual(len(tiles), GRID_COLS * GRID_ROWS)
-        self.assertTrue(any(tile.is_objective for tile in tiles))
-        self.assertTrue(any(tile.is_current_wave for tile in tiles))
-        self.assertTrue(any(tile.has_edits for tile in tiles))
+        self.assertEqual(len(tiles), cols * rows)
+        objective_tile = next(tile for tile in tiles if tile.is_objective)
+        self.assertEqual(objective_tile.output_ap, "out0")
+        self.assertFalse(any(tile.is_current_wave for tile in tiles))
+        self.assertTrue(any(tile.has_edits for tile in tiles if tile.defense_ap is not None))
         deployed_tile = next(tile for tile in tiles if tile.defense_ap == "in0")
         self.assertEqual(deployed_tile.deployed_value, 1)
 
@@ -135,20 +139,20 @@ class TestR1Theme(unittest.TestCase):
     def test_objective_text_themed_reflects_mode(self) -> None:
         normal = objective_text_themed(_toy_instance("normal"))
         hard = objective_text_themed(_toy_instance("hard"))
-        self.assertIn("Defend", normal)
-        self.assertIn("Waves", normal)
-        self.assertIn("exactly Wave", hard)
+        self.assertIn("Cause", normal)
+        self.assertIn("steps", normal)
+        self.assertIn("exactly step", hard)
 
     def test_effect_status_display_and_victory_text(self) -> None:
-        self.assertEqual(effect_status_display("triggered")[0], "BASE SECURE")
-        self.assertEqual(effect_status_display("not-triggered")[0], "UNDER THREAT")
-        self.assertEqual(victory_text(True, True, True)[0], "VICTORY")
-        self.assertEqual(victory_text(False, False, False)[0], "DEFEAT")
+        self.assertEqual(effect_status_display("triggered")[0], "TARGET TRIGGERED")
+        self.assertEqual(effect_status_display("not-triggered")[0], "TARGET NOT TRIGGERED")
+        self.assertEqual(victory_text(True, True, True)[0], "CERTIFIED")
+        self.assertEqual(victory_text(False, False, False)[0], "GOAL MISSED")
 
     def test_tile_palette_and_threat_name_are_stable(self) -> None:
         self.assertEqual(tile_type_for_index(3, 48, 7), tile_type_for_index(3, 48, 7))
-        self.assertEqual(tile_color("objective"), (118, 102, 46))
-        self.assertTrue(threat_name("out0", ["out0", "out1"]).startswith("Sector"))
+        self.assertEqual(tile_color("objective"), (154, 114, 52))
+        self.assertEqual(threat_name("out0", ["out0", "out1"]), "Out0")
 
 
 class TestR1PygamePureHelpers(unittest.TestCase):

@@ -23,6 +23,15 @@ def register_playback_commands(
     p_play.add_argument("--seed", type=int, default=1337)
     p_play.add_argument("--split", type=str, default="public_dev")
     p_play.add_argument("--instances", type=str, default="", help="Optional instance bundle/list JSON")
+    p_play.add_argument(
+        "--formal",
+        type=str,
+        default="",
+        help=(
+            "Optional raw formal artifact path (formal task/bundle JSON, JSONL, "
+            "directory with task.json, or HOA with sidecar task JSON)"
+        ),
+    )
     p_play.add_argument("--instance-index", type=int, default=0, help="Instance index when --instances contains multiple entries")
     p_play.add_argument("--agent", type=str, default="", help="Optional baseline policy id")
     p_play.add_argument("--script", type=str, default="", help="Optional action script JSON")
@@ -32,7 +41,7 @@ def register_playback_commands(
         type=str,
         default="text",
         choices=["text", "pygame"],
-        help="Human-play visual backend. 'text' uses terminal snapshots; 'pygame' opens the canonical GF-01-R1 tower-defense graphical window.",
+        help="Human-play visual backend. 'text' uses terminal snapshots; 'pygame' opens the canonical GF-01-R1 causal-board graphical window.",
     )
     p_play.add_argument("--eval-track", type=str, default="EVAL-CB", choices=list(ALLOWED_EVAL_TRACKS))
     p_play.add_argument("--tool-allowlist-id", type=str, default="none")

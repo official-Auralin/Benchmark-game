@@ -32,6 +32,10 @@ from .semantics import (
 from .verifier import candidate_atoms, find_valid_certificates
 
 
+def _max_certificate_atoms(instance: GF01Instance) -> int:
+    return max(1, instance.budget_timestep * len(instance.automaton.input_aps))
+
+
 @dataclass
 class BaselineAgent:
     name: str
@@ -45,13 +49,14 @@ class RandomInterventionAgent(BaselineAgent):
         super().__init__(name="BL-00-RandomIntervention")
 
     def propose(self, instance: GF01Instance, seed: int = 0) -> list[InterventionAtom]:
-        rng = random.Random((instance.seed << 8) ^ seed)
+        rng = random.Random(((instance.seed or 0) << 8) ^ seed)
         atoms = candidate_atoms(instance)
         rng.shuffle(atoms)
         cert: list[InterventionAtom] = []
         used_t: set[int] = set()
+        max_atoms = _max_certificate_atoms(instance)
         for atom in atoms:
-            if len(cert) >= instance.budget_atoms:
+            if len(cert) >= max_atoms:
                 break
             t_next = used_t | {atom.timestep}
             if len(t_next) > instance.budget_timestep:
@@ -86,7 +91,8 @@ class GreedyLocalAgent(BaselineAgent):
         cert: list[InterventionAtom] = []
         remaining = candidate_atoms(instance)
         current_hits = _effect_hit_count(instance, cert)
-        while len(cert) < instance.budget_atoms:
+        max_atoms = _max_certificate_atoms(instance)
+        while len(cert) < max_atoms:
             best_atom = None
             best_score = (-1, -1, "")
             for atom in remaining:
@@ -128,8 +134,9 @@ class BudgetAwareSearchAgent(BaselineAgent):
         super().__init__(name="BL-02-BudgetAwareSearch")
 
     def propose(self, instance: GF01Instance, seed: int = 0) -> list[InterventionAtom]:
+        max_atoms = _max_certificate_atoms(instance)
         search = find_valid_certificates(
-            instance, max_nodes=min(120_000, instance.budget_atoms * 40_000), max_results=8
+            instance, max_nodes=min(120_000, max_atoms * 40_000), max_results=8
         )
         if not search.certificates:
             return []

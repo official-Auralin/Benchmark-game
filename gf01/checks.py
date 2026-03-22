@@ -126,10 +126,10 @@ def check_ab001_renderer_parity(
                 outputs=outputs,
                 effect_triggered=effect_satisfied(instance, outputs),
                 budget_t_remaining=instance.budget_timestep,
-                budget_a_remaining=instance.budget_atoms,
                 history=[],
                 mode=instance.mode,
                 t_star=instance.t_star,
+                budget_a_remaining=instance.budget_atoms,
             )
             obs_json = parse_json(render_json(obs))
             obs_visual = parse_visual(render_visual(obs))
@@ -224,23 +224,6 @@ def _cert_exceeding_timestep_budget(instance: GF01Instance) -> list[Intervention
     return cert
 
 
-def _cert_exceeding_atom_budget(instance: GF01Instance) -> list[InterventionAtom]:
-    needed = instance.budget_atoms + 1
-    cert: list[InterventionAtom] = []
-    for t in range(len(instance.base_trace)):
-        for ap in instance.automaton.input_aps:
-            v = 1 - int(instance.base_trace[t][ap])
-            cert.append(InterventionAtom(timestep=t, ap=ap, value=v))
-            if len(cert) >= needed:
-                return cert
-    # Fallback: duplicate first atom to force atom-count overflow.
-    if not cert:
-        cert = [InterventionAtom(timestep=0, ap=instance.automaton.input_aps[0], value=1)]
-    while len(cert) < needed:
-        cert.append(cert[0])
-    return cert
-
-
 def check_ab009_certificate_structure_edges(
     seed: int = 9101, cfg: GeneratorConfig | None = None
 ) -> dict[str, object]:
@@ -257,10 +240,6 @@ def check_ab009_certificate_structure_edges(
         "conflicting_assignments": (
             [InterventionAtom(0, ap, 0), InterventionAtom(0, ap, 1)],
             "conflicting assignments",
-        ),
-        "atom_budget_exceeded": (
-            _cert_exceeding_atom_budget(instance),
-            "atom budget exceeded",
         ),
     }
     over_timestep = _cert_exceeding_timestep_budget(instance)

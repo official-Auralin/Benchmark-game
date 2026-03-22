@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +29,7 @@ RESEARCH_PACK_PATH = ROOT / "research_pack"
 PUBLIC_REPO_PATH = ROOT / "public_repo"
 CONTRACT_INVENTORY_PATH = ROOT / "spec" / "contract_inventory.json"
 IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
+DUPLICATE_ARTIFACT_RE = re.compile(r".* [2-9][0-9]*(?:\.[^.]+)?$")
 
 
 def _load_sync_module():
@@ -40,6 +42,16 @@ def _load_sync_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _duplicate_artifact_paths(search_root: Path) -> list[Path]:
+    duplicates: list[Path] = []
+    for path in search_root.rglob("*"):
+        if ".git" in path.parts:
+            continue
+        if DUPLICATE_ARTIFACT_RE.fullmatch(path.name):
+            duplicates.append(path)
+    return sorted(duplicates)
 
 
 class TestSyncPublicRepoPolicy(unittest.TestCase):
@@ -59,6 +71,16 @@ class TestSyncPublicRepoPolicy(unittest.TestCase):
         self.assertTrue(
             SYNC_SCRIPT_PATH.exists(),
             msg=f"missing sync script in source repo: {SYNC_SCRIPT_PATH}",
+        )
+
+    def test_no_numbered_duplicate_artifacts_in_repo_scope(self) -> None:
+        duplicates = _duplicate_artifact_paths(ROOT)
+        self.assertFalse(
+            duplicates,
+            msg=(
+                "numbered duplicate artifacts must not exist in the active repo tree: "
+                + ", ".join(str(path.relative_to(ROOT)) for path in duplicates[:20])
+            ),
         )
 
     @unittest.skipUnless(

@@ -81,6 +81,10 @@ git push
 - Treat the mirrored root as the publication root on GitHub. Files such as
   `LICENSE`, `pyproject.toml`, and the profile requirements files must exist at
   the mirror root when they are part of the public contract.
+- Treat numbered duplicate artifacts such as `foo 2.py`, `bar 3.md`, or
+  `commands 2/` as hygiene failures. They are not part of the mirror workflow,
+  should not be ignored, and should be deleted after confirming they add no new
+  information.
 - Keep `requirements.txt` limited to dependencies needed by mirrored/public
   files, and keep the profile-specific requirements files aligned with
   `pyproject.toml`.

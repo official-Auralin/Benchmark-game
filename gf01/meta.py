@@ -31,6 +31,9 @@ CHECKER_VERSION = "0.1.0"
 HARNESS_VERSION = __version__
 
 INSTANCE_BUNDLE_SCHEMA_VERSION = "gf01.instance_bundle.v1"
+FORMAL_TASK_SCHEMA_VERSION = "gf01.formal_task.v1"
+FORMAL_BUNDLE_SCHEMA_VERSION = "gf01.formal_bundle.v1"
+NORMALIZATION_VERSION = "gf01.normalization.v1"
 RUN_RECORD_SCHEMA_VERSION = "gf01.run_record.v1"
 SPLIT_MANIFEST_SCHEMA_VERSION = "gf01.split_manifest.v1"
 PILOT_FREEZE_SCHEMA_VERSION = "gf01.pilot_freeze.v1"

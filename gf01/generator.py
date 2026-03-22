@@ -18,20 +18,16 @@ __maintainer__ = "Bobby Veihman"
 __email__ = "bv2340@columbia.edu"
 __status__ = "Development"
 
-import hashlib
 import random
 
 from .identifiability import (
     identifiability_policy_error,
     instance_identifiability_metrics,
 )
+from .meta import NORMALIZATION_VERSION, stable_hash_json
 from .models import GF01Instance, GeneratorConfig, MealyAutomaton, Valuation
 from .semantics import all_input_valuations, effect_satisfied, input_key, run_automaton
 from .verifier import exact_existence_check
-
-
-def _hash_id(payload: str) -> str:
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
 def _generate_automaton(
@@ -130,9 +126,20 @@ def generate_instance(
         b_t = _budget_timestep(cfg, t_len, z_score)
         b_a = _budget_atoms(t_len, len(input_aps), b_t)
 
-        raw_id = f"{seed}:{attempt}:{resolved_mode}:{t_len}:{n_states}:{effect_ap}:{t_star}:{split_id}"
+        semantic_payload = {
+            "automaton": automaton.to_canonical_dict(),
+            "base_trace": [
+                {k: int(step[k]) for k in sorted(step)} for step in base_trace
+            ],
+            "effect_ap": effect_ap,
+            "t_star": int(t_star),
+            "mode": resolved_mode,
+            "window_size": int(w_size),
+            "budget_timestep": int(b_t),
+        }
+        content_hash = stable_hash_json(semantic_payload)
         instance = GF01Instance(
-            instance_id=f"gf01-{_hash_id(raw_id)}",
+            instance_id=f"gf01-{content_hash[:12]}",
             automaton=automaton,
             base_trace=base_trace,
             effect_ap=effect_ap,
@@ -146,6 +153,12 @@ def generate_instance(
             identifiability={},
             split_id=split_id,
             renderer_track="json",
+            provenance={
+                "content_hash": content_hash,
+                "normalization_version": NORMALIZATION_VERSION,
+                "source_type": "generated_dev_seed",
+                "source_id": str(seed),
+            },
         )
         # Reject trivial instances solved by empty certificate.
         _, base_outputs = run_automaton(instance.automaton, instance.base_trace)

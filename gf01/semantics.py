@@ -104,21 +104,33 @@ def canonical_observation(
     outputs: list[Valuation],
     effect_triggered: bool,
     budget_t_remaining: int,
-    budget_a_remaining: int,
     history: list[InterventionAtom],
     mode: str,
     t_star: int,
+    budget_a_remaining: int | None = None,
+    submitted_action_t: dict[str, int] | None = None,
+    committed_action_t: dict[str, int] | None = None,
 ) -> dict[str, object]:
-    return {
+    obs: dict[str, object] = {
         "t": int(t),
         "y_t": {k: int(v) for k, v in sorted(outputs[t].items())},
         "effect_status_t": "triggered" if effect_triggered else "not-triggered",
         "budget_t_remaining": int(budget_t_remaining),
-        "budget_a_remaining": int(budget_a_remaining),
         "history_atoms": [atom.to_tuple() for atom in sorted_certificate(history)],
         "mode": mode,
         "t_star": int(t_star),
     }
+    if budget_a_remaining is not None:
+        obs["budget_a_remaining"] = int(budget_a_remaining)
+    if submitted_action_t is not None:
+        obs["submitted_action_t"] = {
+            str(k): int(v) for k, v in sorted(submitted_action_t.items())
+        }
+    if committed_action_t is not None:
+        obs["committed_action_t"] = {
+            str(k): int(v) for k, v in sorted(committed_action_t.items())
+        }
+    return obs
 
 
 def render_json(obs: dict[str, object]) -> str:
@@ -139,6 +151,20 @@ def _format_y_t_for_visual(y_t: object) -> str:
         except (TypeError, ValueError):
             return "(invalid)"
     return " ".join(tokens) if tokens else "(none)"
+
+
+def _normalize_action_map(payload: object) -> dict[str, int]:
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, value in payload.items():
+        try:
+            bit = int(value)
+        except (TypeError, ValueError):
+            continue
+        if bit in (0, 1):
+            out[str(key)] = bit
+    return out
 
 
 def iter_history_atoms(
@@ -293,9 +319,10 @@ def render_visual(obs: dict[str, object]) -> str:
     mode = str(obs["mode"])
     effect_status = str(obs["effect_status_t"])
     budget_t = _coerce_visual_int(obs.get("budget_t_remaining"), "budget_t_remaining")
-    budget_a = _coerce_visual_int(obs.get("budget_a_remaining"), "budget_a_remaining")
     y_text = _format_y_t_for_visual(obs.get("y_t", {}))
     history_atoms = obs.get("history_atoms", [])
+    submitted_action = _normalize_action_map(obs.get("submitted_action_t"))
+    committed_action = _normalize_action_map(obs.get("committed_action_t"))
     timeline_lines = _format_timeline_for_visual(t_now, t_star, history_atoms)
     history_lines = _format_history_atoms_for_visual(history_atoms)
 
@@ -304,12 +331,21 @@ def render_visual(obs: dict[str, object]) -> str:
         f"Time: t={t_now} (target t*={t_star}, mode={mode})",
         *timeline_lines,
         f"Effect status: {effect_status}",
-        f"Budget remaining: timesteps={budget_t}, atoms={budget_a}",
+        f"Budget remaining: timesteps={budget_t}",
         f"Outputs y_t: {y_text}",
         *history_lines,
         # Exact parse anchor used by parse_visual for parity checks.
         f"OBS_JSON={render_json(obs)}",
     ]
+    if "budget_a_remaining" in obs:
+        budget_a = _coerce_visual_int(obs.get("budget_a_remaining"), "budget_a_remaining")
+        lines.insert(5, f"Legacy atom budget remaining: {budget_a}")
+    if submitted_action:
+        requested = ", ".join(f"{ap}={value}" for ap, value in sorted(submitted_action.items()))
+        lines.insert(-1, f"Requested action: {requested}")
+    if committed_action:
+        committed = ", ".join(f"{ap}={value}" for ap, value in sorted(committed_action.items()))
+        lines.insert(-1, f"Committed action: {committed}")
     return "\n".join(lines)
 
 
