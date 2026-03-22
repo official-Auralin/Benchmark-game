@@ -24,6 +24,8 @@ from typing import Any
 from .meta import (
     IDENTIFIABILITY_MIN_RESPONSE_RATIO,
     IDENTIFIABILITY_MIN_UNIQUE_SIGNATURES,
+    NORMALIZATION_VERSION,
+    stable_hash_json,
 )
 
 
@@ -79,15 +81,34 @@ class GF01Instance:
     mode: str  # "normal" | "hard"
     window_size: int
     budget_timestep: int
-    budget_atoms: int
-    seed: int
+    budget_atoms: int | None = None
+    seed: int | None = None
     complexity: dict[str, float] = field(default_factory=dict)
     identifiability: dict[str, Any] = field(default_factory=dict)
     split_id: str = "public_dev"
     renderer_track: str = "json"
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+    def semantic_identity_dict(self) -> dict[str, Any]:
+        return {
+            "automaton": self.automaton.to_canonical_dict(),
+            "base_trace": [
+                {k: int(step[k]) for k in sorted(step)} for step in self.base_trace
+            ],
+            "effect_ap": self.effect_ap,
+            "t_star": int(self.t_star),
+            "mode": self.mode,
+            "window_size": int(self.window_size),
+            "budget_timestep": int(self.budget_timestep),
+        }
+
+    def content_hash(self) -> str:
+        if self.provenance.get("content_hash"):
+            return str(self.provenance["content_hash"])
+        return stable_hash_json(self.semantic_identity_dict())
 
     def to_canonical_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "instance_id": self.instance_id,
             "automaton": self.automaton.to_canonical_dict(),
             "base_trace": [
@@ -98,8 +119,6 @@ class GF01Instance:
             "mode": self.mode,
             "window_size": int(self.window_size),
             "budget_timestep": int(self.budget_timestep),
-            "budget_atoms": int(self.budget_atoms),
-            "seed": int(self.seed),
             "complexity": {k: float(self.complexity[k]) for k in sorted(self.complexity)},
             "identifiability": {
                 k: self.identifiability[k]
@@ -107,7 +126,20 @@ class GF01Instance:
             },
             "split_id": self.split_id,
             "renderer_track": self.renderer_track,
+            "normalization_version": str(
+                self.provenance.get("normalization_version", NORMALIZATION_VERSION)
+            ),
+            "content_hash": self.content_hash(),
+            "provenance": {
+                k: self.provenance[k]
+                for k in sorted(self.provenance)
+            },
         }
+        if self.budget_atoms is not None:
+            payload["budget_atoms"] = int(self.budget_atoms)
+        if self.seed is not None:
+            payload["seed"] = int(self.seed)
+        return payload
 
 
 @dataclass

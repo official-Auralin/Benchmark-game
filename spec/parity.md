@@ -11,14 +11,16 @@ The allowed information set is:
 
 where `O(s)` is the canonical benchmark observation and static mission metadata
 includes only benchmark-approved context such as AP names, target timing,
-mode, and budget information.
+mode, content-derived labels/layout, and official budget information.
 
 ## Allowed Interface Differences
 
 - Text, JSON, and the canonical `GF-01-R1` pygame renderer may reformat the
   same information.
 - Visual overlays may summarize or highlight observed information.
-- Human-facing mockups may improve readability and onboarding.
+- Human-facing renderers may improve readability and onboarding.
+- Relation-derived spatial layouts are allowed only when they are deterministic
+  functions of normalized formal content plus approved public observation.
 
 ## Forbidden Differences
 
@@ -26,6 +28,8 @@ mode, and budget information.
 - No overlay may encode future trace values or oracle-only statistics.
 - UI convenience features must not change scoring semantics or certificate
   validity.
+- Seed-derived arbitrary geography, placeholder output flashes, and timeline-as-
+  map encodings are out of contract.
 
 ## Validation Expectations
 
@@ -34,6 +38,9 @@ mode, and budget information.
   canonical observation payload for parity auditing.
 - Derived summaries must be computable only from already observed outputs,
   action history, and static mission metadata.
+- Parity is defined at the information-contract level. Psychological
+  equivalence is a design goal and evaluation threat to monitor, not a property
+  guaranteed by the contract itself.
 
 ## Design Artifacts
 

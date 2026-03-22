@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from .models import GF01Instance, InterventionAtom
 from .semantics import (
     apply_certificate,
-    atom_cost,
     effect_satisfied,
     run_automaton,
     sorted_certificate,
@@ -64,8 +63,6 @@ def validate_certificate_structure(
         seen[key] = atom.value
     if timestep_cost(certificate) > instance.budget_timestep:
         return False, "timestep budget exceeded"
-    if atom_cost(certificate) > instance.budget_atoms:
-        return False, "atom budget exceeded"
     return True, ""
 
 
@@ -177,7 +174,7 @@ def find_valid_certificates(
             if max_results is not None and len(found) >= max_results:
                 return
 
-    for k in range(1, instance.budget_atoms + 1):
+    for k in range(1, max_atoms_given_timestep_budget + 1):
         if k > max_atoms_given_timestep_budget:
             break
         _search_k(

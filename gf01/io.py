@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .formal_loader import instance_from_formal_dict
 from .metrics import compute_ap_ts_metrics
 from .meta import (
     ADAPTATION_POLICY_VERSION,
@@ -152,27 +153,10 @@ def automaton_from_dict(data: dict[str, Any]) -> MealyAutomaton:
     )
 
 
-def instance_from_dict(data: dict[str, Any]) -> GF01Instance:
-    automaton = automaton_from_dict(data["automaton"])
-    base_trace = [_to_int_valuation(step) for step in data["base_trace"]]
-    return GF01Instance(
-        instance_id=str(data["instance_id"]),
-        automaton=automaton,
-        base_trace=base_trace,
-        effect_ap=str(data["effect_ap"]),
-        t_star=int(data["t_star"]),
-        mode=str(data["mode"]),
-        window_size=int(data["window_size"]),
-        budget_timestep=int(data["budget_timestep"]),
-        budget_atoms=int(data["budget_atoms"]),
-        seed=int(data["seed"]),
-        complexity={str(k): float(v) for k, v in data.get("complexity", {}).items()},
-        identifiability={
-            str(k): v for k, v in data.get("identifiability", {}).items()
-        },
-        split_id=str(data.get("split_id", "public_dev")),
-        renderer_track=str(data.get("renderer_track", "json")),
-    )
+def instance_from_dict(
+    data: dict[str, Any], *, base_dir: Path | None = None
+) -> GF01Instance:
+    return instance_from_formal_dict(data, base_dir=base_dir)
 
 
 def load_instance_bundle(path: str) -> tuple[list[GF01Instance], dict[str, Any]]:
@@ -195,7 +179,9 @@ def load_instance_bundle(path: str) -> tuple[list[GF01Instance], dict[str, Any]]
         raise ValueError("instance JSON payload must be a list or object")
     if not isinstance(instances_raw, list):
         raise ValueError("instances must be a list")
-    return [instance_from_dict(item) for item in instances_raw], bundle_meta
+    return [
+        instance_from_dict(item, base_dir=Path(path).parent) for item in instances_raw
+    ], bundle_meta
 
 
 def load_instances_json(path: str) -> list[GF01Instance]:
@@ -214,15 +200,18 @@ def build_split_manifest(
         entries.append(
             {
                 "instance_id": inst.instance_id,
+                "content_hash": inst.content_hash(),
                 "split_id": inst.split_id,
                 "mode": inst.mode,
-                "seed": int(inst.seed),
                 "t_star": int(inst.t_star),
                 "window_size": int(inst.window_size),
                 "budget_timestep": int(inst.budget_timestep),
-                "budget_atoms": int(inst.budget_atoms),
             }
         )
+        if inst.seed is not None:
+            entries[-1]["seed"] = int(inst.seed)
+        if inst.budget_atoms is not None:
+            entries[-1]["budget_atoms"] = int(inst.budget_atoms)
 
     split_mode_counts: dict[tuple[str, str], int] = {}
     for entry in entries:
@@ -312,8 +301,10 @@ def run_record_to_dict(
                 "t_star": int(instance.t_star),
                 "window_size": int(instance.window_size),
                 "budget_timestep": int(instance.budget_timestep),
-                "budget_atoms": int(instance.budget_atoms),
-                "seed": int(instance.seed),
+                "content_hash": instance.content_hash(),
+                "normalization_version": str(
+                    instance.provenance.get("normalization_version", "")
+                ),
                 "complexity": {k: float(instance.complexity[k]) for k in sorted(instance.complexity)},
                 "identifiability": {
                     k: instance.identifiability[k]
@@ -321,6 +312,10 @@ def run_record_to_dict(
                 },
             }
         )
+        if instance.budget_atoms is not None:
+            out["budget_atoms"] = int(instance.budget_atoms)
+        if instance.seed is not None:
+            out["seed"] = int(instance.seed)
     return out
 
 

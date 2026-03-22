@@ -6,6 +6,7 @@ import argparse
 import json
 
 from ..baselines import make_agent
+from ..formal_loader import FormalArtifactError, load_formal_bundle
 from ..generator import generate_instance
 from ..io import load_instance_bundle, write_json
 from ..meta import (
@@ -31,8 +32,54 @@ from .shared import (
 
 
 def cmd_play(args: argparse.Namespace) -> int:
+    source_count = sum(1 for value in (args.instances, args.formal) if str(value).strip())
+    if source_count > 1:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "mutually_exclusive_inputs",
+                    "message": "choose only one of --instances or --formal",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     if args.instances:
         instances, _ = load_instance_bundle(args.instances)
+        if args.instance_index < 0 or args.instance_index >= len(instances):
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "instance_index_out_of_range",
+                        "instance_count": len(instances),
+                        "instance_index": int(args.instance_index),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        instance = instances[args.instance_index]
+    elif args.formal:
+        try:
+            instances, _ = load_formal_bundle(args.formal)
+        except FormalArtifactError as exc:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "error_type": "formal_artifact_error",
+                        "message": str(exc),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
         if args.instance_index < 0 or args.instance_index >= len(instances):
             print(
                 json.dumps(
@@ -244,6 +291,13 @@ def cmd_play(args: argparse.Namespace) -> int:
             "adaptation_budget_tokens": adaptation_budget_tokens,
             "adaptation_data_scope": adaptation_data_scope,
             "adaptation_protocol_id": adaptation_protocol_id or "none",
+            "instance_source": (
+                "formal"
+                if args.formal
+                else "bundle"
+                if args.instances
+                else "generated_dev_seed"
+            ),
         },
         "instance": instance.to_canonical_dict(),
         "episode": result,

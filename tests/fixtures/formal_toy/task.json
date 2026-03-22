@@ -1,0 +1,22 @@
+{
+  "schema_version": "gf01.formal_task.v1",
+  "source_type": "tempo_hoa_trace",
+  "source_id": "toy-formal-hoa",
+  "hoa_path": "toy.hoa",
+  "input_aps": ["in0"],
+  "output_aps": ["out0"],
+  "output_by_state": {
+    "s0": {"out0": 0},
+    "s1": {"out0": 1}
+  },
+  "base_trace": [
+    {"in0": 0},
+    {"in0": 0},
+    {"in0": 0}
+  ],
+  "effect_ap": "out0",
+  "t_star": 1,
+  "mode": "hard",
+  "window_size": 1,
+  "budget_timestep": 2
+}

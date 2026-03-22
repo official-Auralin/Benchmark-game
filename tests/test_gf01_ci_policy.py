@@ -127,6 +127,10 @@ class TestCiPolicyWorkflow(unittest.TestCase):
             step_env(ui_steps["Run Human UI Smoke And Tests"]).get("GF01_REQUIRE_PYGAME"),
             "1",
         )
+        self.assertEqual(
+            step_env(ui_steps["Run Human UI Smoke And Tests"]).get("SDL_AUDIODRIVER"),
+            "dummy",
+        )
 
         mypy_run = str(type_steps["Run Targeted Mypy"].get("run", ""))
         self.assertIn("python -m mypy", mypy_run)

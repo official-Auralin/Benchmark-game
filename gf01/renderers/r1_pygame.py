@@ -1,9 +1,9 @@
-"""Tower-defense themed pygame renderer for canonical GF-01-R1 human play.
+"""Causal-board pygame renderer for canonical GF-01-R1 human play.
 
-Presents the benchmark as a tower-defense game.  Formal concepts (APs,
-certificates, automata) are fully abstracted behind game vocabulary.
-The renderer consumes only the canonical observation O(s) and static mission
-metadata, preserving parity with the text visual path and the JSON renderer.
+Presents the benchmark as a spatial control/signal board derived from formal
+AP relations rather than arbitrary theme fiction. The renderer consumes only
+canonical observation plus static mission metadata, preserving parity with the
+text visual path and the JSON renderer.
 """
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from ..semantics import history_counts_by_t, iter_history_atoms
 from .r1_theme import (
     COLOR_ACCENT_C,
     COLOR_ACCENT_G,
-    COLOR_ACCENT_P,
     COLOR_ACCENT_R,
     COLOR_ACCENT_Y,
     COLOR_BG,
@@ -59,6 +58,7 @@ from .r1_grid import (
     TILE_W,
     TileData,
     build_grid,
+    grid_dimensions,
     tile_at_screen_pos,
     wave_timeline_data,
 )
@@ -104,10 +104,12 @@ CANONICAL_OBS_KEYS = (
     "y_t",
     "effect_status_t",
     "budget_t_remaining",
-    "budget_a_remaining",
     "history_atoms",
     "mode",
     "t_star",
+    "budget_a_remaining",
+    "submitted_action_t",
+    "committed_action_t",
 )
 
 
@@ -183,8 +185,10 @@ def _canonical_inspector_payload(
         "mode": instance.mode,
         "t_star": int(instance.t_star),
         "budget_timestep": int(instance.budget_timestep),
-        "budget_atoms": int(instance.budget_atoms),
+        "content_hash": instance.content_hash(),
     }
+    if instance.budget_atoms is not None:
+        mission["budget_atoms"] = int(instance.budget_atoms)
     if not isinstance(last_obs, dict):
         return {"mission": mission, "observation": None}
     observation = {key: last_obs[key] for key in CANONICAL_OBS_KEYS if key in last_obs}
@@ -232,7 +236,7 @@ class _R1Session:
                 "pygame backend could not open a display; "
                 "use --visual-backend text in headless environments"
             ) from exc
-        self.pg.display.set_caption("GF-01-R1  \u2014  Tower Defense")
+        self.pg.display.set_caption("GF-01-R1  -  Causal Board")
         self.clock = self.pg.time.Clock()
         self.font = self.pg.font.SysFont("Arial,Helvetica", 17)
         self.font_sm = self.pg.font.SysFont("Arial,Helvetica", 14)
@@ -518,15 +522,16 @@ class _R1Session:
     def _draw_top_bar(
         self, *, timestep: int, total_waves: int,
         t_star: int, energy: int, energy_total: int,
-        cmd_pts: int, objective: str, effect_status: str,
+        cmd_pts: int | None, objective: str, effect_status: str,
     ) -> None:
         self._rect(0, 0, SCREEN_W, TOP_BAR_H, fill=COLOR_PANEL, border=COLOR_BORDER, bw=1)
         self._text(wave_label(timestep, total_waves), 16, 6, font="lg")
 
-        self._text("ENERGY", 220, 6, font="sm", color=COLOR_TEXT_DIM)
+        self._text("STEP BUDGET", 220, 6, font="sm", color=COLOR_TEXT_DIM)
         self._draw_energy_bar(220, 24, energy_total, energy)
 
-        self._text(cmd_points_label(cmd_pts), 440, 10, color=COLOR_CMD_PTS, font="md")
+        if cmd_pts is not None:
+            self._text(cmd_points_label(cmd_pts), 440, 10, color=COLOR_CMD_PTS, font="md")
 
         crit = critical_wave_label(t_star)
         self._text(crit, SCREEN_W - 310, 6, color=COLOR_ACCENT_Y, font="lg")
@@ -548,26 +553,39 @@ class _R1Session:
         history_counts: Mapping[int, int],
         report: _DeploymentReport,
     ) -> None:
+        _ = pressure_levels
         sx = SIDEBAR_X
         panel_h = SCREEN_H - TOP_BAR_H - BOTTOM_H
         self._rect(sx, TOP_BAR_H, SIDEBAR_W, panel_h,
                     fill=COLOR_PANEL, border=COLOR_BORDER)
 
-        self._text("DEFENSE STATUS", sx + 14, TOP_BAR_H + 10, font="md", color=COLOR_TEXT_BRIGHT)
+        self._text("SIGNAL STATE", sx + 14, TOP_BAR_H + 10, font="md", color=COLOR_TEXT_BRIGHT)
+        y_off = TOP_BAR_H + 34
+        output_aps = instance.automaton.output_aps
+        for output_ap in output_aps[:8]:
+            label = threat_name(output_ap, output_aps)
+            value = int(y_t.get(output_ap, 0))
+            color = COLOR_ACCENT_G if value == 1 else COLOR_TEXT_DIM
+            token = "1" if value == 1 else "0"
+            self._text(f"{label}: {token}", sx + 16, y_off, font="sm", color=color)
+            y_off += 16
 
-        on_count = sum(1 for v in y_t.values() if v == 1)
-        total_out = max(1, len(y_t))
-        self._text("Base Integrity", sx + 14, TOP_BAR_H + 34, font="sm", color=COLOR_TEXT_DIM)
-        integrity = 1.0 - (on_count / total_out) if y_t else 1.0
-        pct_txt = f"{int(integrity * 100)}%"
-        pct_col = COLOR_ACCENT_G if integrity > 0.5 else COLOR_ACCENT_Y if integrity > 0.25 else COLOR_ACCENT_R
-        self._text(pct_txt, sx + SIDEBAR_W - 50, TOP_BAR_H + 34, font="sm", color=pct_col)
-        self._bar(sx + 14, TOP_BAR_H + 52, SIDEBAR_W - 28, 14, ratio=integrity, fg=pct_col)
-
-        y_off = TOP_BAR_H + 76
+        y_off += 10
+        self._text("PENDING CONTROLS", sx + 14, y_off, font="md", color=COLOR_TEXT_BRIGHT)
+        y_off += 22
+        if pending:
+            for ap_name, value in sorted(pending.items())[:6]:
+                label = defense_name(ap_name, instance.automaton.input_aps)
+                color = COLOR_ACCENT_G if value == 1 else COLOR_ACCENT_R
+                self._text(f"{label}: {value}", sx + 16, y_off, font="sm", color=color)
+                y_off += 16
+        else:
+            self._text("(none)", sx + 16, y_off, font="sm", color=COLOR_TEXT_DIM)
+            y_off += 16
 
         if report.wave >= 0:
-            self._text("LAST DEPLOYMENT", sx + 14, y_off, font="md", color=COLOR_TEXT_BRIGHT)
+            y_off += 10
+            self._text("LAST COMMITTED STEP", sx + 14, y_off, font="md", color=COLOR_TEXT_BRIGHT)
             y_off += 22
             action_parts: list[str] = []
             input_aps = instance.automaton.input_aps
@@ -584,7 +602,7 @@ class _R1Session:
             y_off += 18
 
             if report.deltas:
-                self._text("RESULT", sx + 14, y_off, font="sm", color=COLOR_TEXT_BRIGHT)
+                self._text("OBSERVED OUTPUT DELTAS", sx + 14, y_off, font="sm", color=COLOR_TEXT_BRIGHT)
                 y_off += 16
                 for tname, old_s, new_s in report.deltas[:4]:
                     if old_s != new_s:
@@ -592,23 +610,10 @@ class _R1Session:
                         self._text(f"{tname}: {old_s} \u2192 {new_s}",
                                     sx + 20, y_off, font="sm", color=arrow_col)
                         y_off += 16
-            y_off += 8
-        else:
-            y_off += 4
-
-        self._text("Threat Sensors", sx + 14, y_off, font="sm", color=COLOR_TEXT_DIM)
-        y_off += 18
-        output_aps = instance.automaton.output_aps
-        for oap in output_aps[:6]:
-            tname = threat_name(oap, output_aps)
-            val = y_t.get(oap, 0)
-            col = COLOR_ACCENT_R if val == 1 else COLOR_ACCENT_G
-            status = "ACTIVE" if val == 1 else "CLEAR"
-            self._text(f"{tname}: {status}", sx + 20, y_off, font="sm", color=col)
-            y_off += 16
+            y_off += 12
 
         # wave timeline strip
-        self._text("WAVE TIMELINE", sx + 14, TIMELINE_Y_OFFSET, font="md", color=COLOR_TEXT_BRIGHT)
+        self._text("STEP TIMELINE", sx + 14, TIMELINE_Y_OFFSET, font="md", color=COLOR_TEXT_BRIGHT)
         total_waves = len(instance.base_trace)
         entries = wave_timeline_data(
             total_waves, timestep, instance.t_star, instance.mode,
@@ -646,6 +651,7 @@ class _R1Session:
         self, tiles: list[TileData], *,
         instance: "GF01Instance",
         pending: dict[str, int],
+        current_outputs: dict[str, int],
         mouse_pos: tuple[int, int],
         hovered_tile: TileData | None,
         hovered_card_ap: str | None,
@@ -667,7 +673,6 @@ class _R1Session:
 
             self._draw_iso_tile(tile, highlight=is_hover, link_highlight=is_link,
                                  staged_value=staged)
-            self._draw_terrain_feature(tile, instance.seed)
 
             if tile.is_objective:
                 obj_xs.append(tile.iso_x + TILE_W // 2)
@@ -691,12 +696,29 @@ class _R1Session:
                     tile.iso_y + TILE_H // 2 - SPRITE_SIZE // 2 - 4,
                     ap_idx, col, size=SPRITE_SIZE,
                 )
-                badge_num = str(ap_idx + 1)
-                bx = tile.iso_x + TILE_W // 2 + SPRITE_SIZE // 2
-                by = tile.iso_y + TILE_H // 2 - SPRITE_SIZE // 2 - 8
-                self._rect(bx, by, 20, 18, fill=(16, 22, 36),
-                            border=COLOR_ACCENT_C, bw=2, radius=3)
-                self._text(badge_num, bx + 4, by + 1, font="badge", color=COLOR_ACCENT_C)
+                label = defense_name(tile.defense_ap, input_aps)
+                self._text(
+                    label[:10],
+                    tile.iso_x + 12,
+                    tile.iso_y + TILE_H // 2 + 10,
+                    font="sm",
+                    color=COLOR_TEXT_BRIGHT,
+                )
+
+            if tile.output_ap is not None:
+                value = int(current_outputs.get(tile.output_ap, 0))
+                col = COLOR_ACCENT_G if value == 1 else COLOR_ACCENT_R
+                cx = tile.iso_x + TILE_W // 2
+                cy = tile.iso_y + TILE_H // 2 - 2
+                self.pg.draw.circle(self.screen, col, (cx, cy), 14)
+                self.pg.draw.circle(self.screen, COLOR_BORDER_HI, (cx, cy), 14, 2)
+                self._text(
+                    threat_name(tile.output_ap, instance.automaton.output_aps)[:10],
+                    tile.iso_x + 12,
+                    tile.iso_y + TILE_H // 2 + 10,
+                    font="sm",
+                    color=COLOR_TEXT_BRIGHT,
+                )
 
             if tile.deployed_value is not None and tile.defense_ap not in pending:
                 dot_col = COLOR_HISTORY_ON if tile.deployed_value == 1 else COLOR_HISTORY_OFF
@@ -706,25 +728,6 @@ class _R1Session:
                 self.pg.draw.circle(self.screen, (18, 22, 32), (dx, dy), 6, 1)
                 marker = "\u25B2" if tile.deployed_value == 1 else "\u25BC"
                 self._text(marker, dx - 4, dy - 6, font="badge", color=COLOR_TEXT_BRIGHT)
-
-            if tile.threat_level > 0.3:
-                tcx = tile.iso_x + TILE_W // 2
-                tcy = tile.iso_y + 6
-                ring_size = 6 + int(tile.threat_level * 8)
-                pulse_r = ring_size + int(abs(math.sin(time.time() * 3)) * 3)
-                self.pg.draw.circle(self.screen, COLOR_ACCENT_R, (tcx, tcy), pulse_r, 2)
-                if tile.threat_level > 0.5:
-                    self.pg.draw.circle(self.screen, (148, 42, 36), (tcx, tcy),
-                                         pulse_r + 4, 1)
-                n_chev = 1 + int(tile.threat_level * 2)
-                for ci in range(min(n_chev, 3)):
-                    offset = 10 + ci * 8
-                    pts = [
-                        (tcx + offset, tcy - 5),
-                        (tcx + offset + 6, tcy),
-                        (tcx + offset, tcy + 5),
-                    ]
-                    self.pg.draw.lines(self.screen, COLOR_ACCENT_R, False, pts, 2)
 
         if obj_xs:
             obj_label = objective_text_themed(instance)
@@ -743,8 +746,13 @@ class _R1Session:
             tooltip_y = mouse_pos[1] - 28
             if hovered_tile.defense_ap:
                 name = defense_name(hovered_tile.defense_ap, input_aps)
-                idx = hovered_tile.defense_index
-                label = f"[{idx + 1 if idx is not None else '?'}] {name}"
+                label = name
+                bg_surf = self.pg.Surface((len(label) * 8 + 12, 20), self.pg.SRCALPHA)
+                bg_surf.fill((14, 18, 26, 180))
+                self.screen.blit(bg_surf, (tooltip_x - 4, tooltip_y - 2))
+                self._text(label, tooltip_x, tooltip_y, font="sm", color=COLOR_TEXT_BRIGHT)
+            elif hovered_tile.output_ap:
+                label = threat_name(hovered_tile.output_ap, instance.automaton.output_aps)
                 bg_surf = self.pg.Surface((len(label) * 8 + 12, 20), self.pg.SRCALPHA)
                 bg_surf.fill((14, 18, 26, 180))
                 self.screen.blit(bg_surf, (tooltip_x - 4, tooltip_y - 2))
@@ -753,7 +761,7 @@ class _R1Session:
                 bg_surf = self.pg.Surface((110, 20), self.pg.SRCALPHA)
                 bg_surf.fill((14, 18, 26, 180))
                 self.screen.blit(bg_surf, (tooltip_x - 4, tooltip_y - 2))
-                self._text("Objective Zone", tooltip_x, tooltip_y,
+                self._text("Target Output", tooltip_x, tooltip_y,
                             font="sm", color=COLOR_ACCENT_Y)
 
     # ------------------------------------------------- defense cards
@@ -777,7 +785,7 @@ class _R1Session:
         self._rect(0, SCREEN_H - BOTTOM_H, SIDEBAR_X, BOTTOM_H,
                     fill=COLOR_PANEL, border=COLOR_BORDER)
 
-        self._text("DEFENSES", CARD_AREA_X, CARD_Y - 12, font="md", color=COLOR_TEXT_BRIGHT)
+        self._text("CONTROL INPUTS", CARD_AREA_X, CARD_Y - 12, font="md", color=COLOR_TEXT_BRIGHT)
         self._text(
             f"Page {page + 1}/{total_pages}  [\u2190/\u2192]  [+/-]",
             CARD_AREA_X + 100, CARD_Y - 12, font="sm", color=COLOR_TEXT_DIM,
@@ -827,7 +835,7 @@ class _R1Session:
             self._draw_defense_sprite(cx + 26, cy + 4, ap_idx, d_col, size=22)
             self._text(name, cx + 52, cy + 8, font="sm", color=COLOR_TEXT)
 
-            status_txt = "ACTIVE" if val == 1 else "OFF" if val == 0 else "\u2014"
+            status_txt = "1" if val == 1 else "0" if val == 0 else "\u2014"
             status_col = COLOR_ACCENT_G if val == 1 else COLOR_ACCENT_R if val == 0 else COLOR_TEXT_DIM
             self._text(status_txt, cx + 52, cy + 28, font="sm", color=status_col)
 
@@ -856,7 +864,7 @@ class _R1Session:
         bx = BTN_AREA_X
         by = SCREEN_H - BOTTOM_H + 10
 
-        deploy_label = f"DEPLOY ({pending_count})" if pending_count > 0 else "DEPLOY"
+        deploy_label = f"COMMIT ({pending_count})" if pending_count > 0 else "COMMIT"
         self._rect(bx, by, BTN_W, BTN_H,
                     fill=COLOR_DEPLOY_BTN if pending_count > 0 else (38, 68, 52),
                     border=COLOR_ACCENT_G, bw=2, radius=5)
@@ -866,7 +874,7 @@ class _R1Session:
         by2 = by + BTN_H + BTN_GAP
         self._rect(bx, by2, BTN_W, BTN_H,
                     fill=COLOR_SKIP_BTN, border=COLOR_BORDER, bw=1, radius=5)
-        self._text("SKIP WAVE", bx + 22, by2 + 8, font="md", color=COLOR_TEXT_DIM)
+        self._text("SKIP STEP", bx + 22, by2 + 8, font="md", color=COLOR_TEXT_DIM)
         hits.append(_HitRect(bx, by2, BTN_W, BTN_H, "action", "skip"))
 
         by3 = by2 + BTN_H + BTN_GAP
@@ -874,7 +882,7 @@ class _R1Session:
                     fill=COLOR_UNDO_BTN if pending_count > 0 else (58, 38, 36),
                     border=COLOR_ACCENT_R if pending_count > 0 else COLOR_BORDER,
                     bw=1, radius=5)
-        self._text("UNDO ALL", bx + 24, by3 + 8, font="md",
+        self._text("CLEAR ALL", bx + 20, by3 + 8, font="md",
                     color=COLOR_TEXT_BRIGHT if pending_count > 0 else COLOR_TEXT_DIM)
         hits.append(_HitRect(bx, by3, BTN_W, BTN_H, "action", "recall"))
 
@@ -889,12 +897,12 @@ class _R1Session:
         self.screen.blit(overlay, (0, 0))
 
         if report and report.wave >= 0 and report.actions:
-            self._text(f"WAVE {report.wave + 1} DEPLOYED",
+            self._text(f"STEP {report.wave + 1} COMMITTED",
                         SCREEN_W // 2 - 100, SCREEN_H // 2 - 60,
                         font="lg", color=COLOR_ACCENT_C)
             y_off = SCREEN_H // 2 - 24
             for ap_name, val in report.actions[:6]:
-                tag = "ACTIVATED" if val == 1 else "DEACTIVATED"
+                tag = "SET TO 1" if val == 1 else "SET TO 0"
                 col = COLOR_ACCENT_G if val == 1 else COLOR_ACCENT_R
                 self._text(f"{ap_name}: {tag}", SCREEN_W // 2 - 80, y_off,
                             font="sm", color=col)
@@ -908,10 +916,10 @@ class _R1Session:
                                     SCREEN_W // 2 - 80, y_off, font="sm", color=col)
                         y_off += 18
         else:
-            txt = f"WAVE {wave_num}"
+            txt = f"STEP {wave_num}"
             self._text(txt, SCREEN_W // 2 - len(txt) * 7, SCREEN_H // 2 - 24,
                         font="lg", color=COLOR_ACCENT_C)
-            sub = "Prepare your defenses"
+            sub = "Prepare your next control assignment"
             self._text(sub, SCREEN_W // 2 - len(sub) * 4, SCREEN_H // 2 + 12,
                         font="sm", color=COLOR_TEXT_DIM)
         self.pg.display.flip()
@@ -957,25 +965,25 @@ class _R1Session:
     # ------------------------------------------------- help overlay
     def _draw_help_overlay(self) -> None:
         lines = [
-            "TOWER DEFENSE  \u2014  QUICK HELP",
+            "CAUSAL BOARD  -  QUICK HELP",
             "",
-            "Goal: Activate defenses to protect the base at the critical wave.",
-            "Each defense is numbered [1], [2], etc. on the map and cards.",
+            "Goal: choose control inputs that trigger the target output in time.",
+            "Each card stages a 0/1 assignment for one input proposition.",
             "",
-            "Mouse: Click ON/OFF on defense cards to stage deployments.",
-            "       Click a map tile to toggle its defense.",
-            "       Hover a card to highlight its tile on the map.",
+            "Mouse: Click ON/OFF on control cards to stage assignments.",
+            "       Click an input tile to toggle its staged value.",
+            "       Hover a card to highlight its board location.",
             "",
-            "Keys:  1-9,0   Toggle visible defense cards",
-            "       Enter   Deploy staged defenses (commit wave)",
-            "       Escape  Skip wave (no deployment)",
-            "       Backsp  Recall all staged defenses",
-            "       \u2190/\u2192     Page through defenses",
+            "Keys:  1-9,0   Toggle visible control cards",
+            "       Enter   Commit staged assignments",
+            "       Escape  Skip step (no assignment)",
+            "       Backsp  Clear all staged assignments",
+            "       \u2190/\u2192     Page through controls",
             "       +/-     Adjust cards per page",
             "       I       Toggle canonical observation inspector",
             "       H       Toggle this help panel",
             "",
-            "After deploying, check LAST DEPLOYMENT in the sidebar",
+            "After committing, check LAST COMMITTED STEP in the sidebar",
             "to see what changed. Press H to dismiss.",
         ]
         w = 520
@@ -1039,32 +1047,23 @@ class _R1Session:
         )
         history_atoms_raw = [] if last_obs is None else last_obs.get("history_atoms", [])
         parsed_atoms = iter_history_atoms(history_atoms_raw)
+        changed_outputs: list[str] = []
 
         if last_obs is not None and self._prev_y_t is not None:
             if len(parsed_atoms) > self._prev_history_atoms_count:
                 new_atoms = parsed_atoms[self._prev_history_atoms_count:]
                 self._report.wave = max(0, timestep - 1)
-                self._report.actions = [
-                    (defense_name(ap, input_aps), val) for _t, ap, val in new_atoms
-                ]
+                self._report.actions = [(ap, val) for _t, ap, val in new_atoms]
                 self._report.deltas = []
                 for oap in output_aps:
                     old_val = self._prev_y_t.get(oap, 0)
                     new_val = current_y_t.get(oap, 0)
-                    old_s = "THREAT" if old_val == 1 else "CLEAR"
-                    new_s = "THREAT" if new_val == 1 else "CLEAR"
+                    old_s = str(old_val)
+                    new_s = str(new_val)
                     tname = threat_name(oap, output_aps)
                     self._report.deltas.append((tname, old_s, new_s))
-
-                self._tile_flashes.clear()
-                self._flash_start = time.time()
-                for oap in output_aps:
-                    old_val = self._prev_y_t.get(oap, 0)
-                    new_val = current_y_t.get(oap, 0)
                     if old_val != new_val:
-                        for tile in _find_tiles_for_output(oap):
-                            key = f"{tile[0]},{tile[1]}"
-                            self._tile_flashes[key] = "clear" if new_val == 0 else "threat"
+                        changed_outputs.append(oap)
 
                 self._draw_wave_transition(timestep + 1, self._report)
             elif timestep > 0 and len(parsed_atoms) == self._prev_history_atoms_count:
@@ -1086,19 +1085,20 @@ class _R1Session:
             if last_obs and "budget_t_remaining" in last_obs
             else energy_total
         )
-        cmd_pts = (
-            int(last_obs["budget_a_remaining"])
-            if last_obs and "budget_a_remaining" in last_obs
-            else int(instance.budget_atoms)
-        )
+        cmd_pts = None
+        if last_obs and "budget_a_remaining" in last_obs:
+            cmd_pts = int(last_obs["budget_a_remaining"])
+        elif instance.budget_atoms is not None:
+            cmd_pts = int(instance.budget_atoms)
         effect_status = (
             str(last_obs.get("effect_status_t", "unknown"))
             if last_obs else "unknown"
         )
 
-        iso_width = (GRID_COLS + GRID_ROWS - 1) * (TILE_W // 2)
-        iso_height = (GRID_COLS + GRID_ROWS - 1) * (TILE_H // 2) + ISO_DEPTH
-        grid_origin_x = MAP_X + (MAP_W - iso_width) // 2 + GRID_ROWS * (TILE_W // 2)
+        grid_cols, grid_rows = grid_dimensions(instance)
+        iso_width = (grid_cols + grid_rows - 1) * (TILE_W // 2)
+        iso_height = (grid_cols + grid_rows - 1) * (TILE_H // 2) + ISO_DEPTH
+        grid_origin_x = MAP_X + (MAP_W - iso_width) // 2 + grid_rows * (TILE_W // 2)
         grid_origin_y = MAP_Y + (MAP_H - iso_height) // 2
 
         tiles = build_grid(
@@ -1107,9 +1107,18 @@ class _R1Session:
             pressure_levels=pressure_levels,
             history_counts=h_counts,
             history_atoms=parsed_atoms,
+            current_outputs=current_y_t,
             origin_x=grid_origin_x,
             origin_y=grid_origin_y,
         )
+        if changed_outputs:
+            self._tile_flashes.clear()
+            self._flash_start = time.time()
+            for tile in tiles:
+                if tile.output_ap in changed_outputs:
+                    key = f"{tile.row},{tile.col}"
+                    new_val = current_y_t.get(tile.output_ap or "", 0)
+                    self._tile_flashes[key] = "clear" if new_val == 0 else "threat"
 
         card_hits: list[_HitRect] = []
         btn_hits: list[_HitRect] = []
@@ -1218,6 +1227,7 @@ class _R1Session:
                 tiles,
                 instance=instance,
                 pending=pending,
+                current_outputs=current_y_t,
                 mouse_pos=mouse_pos,
                 hovered_tile=hovered_tile,
                 hovered_card_ap=self._hovered_card_ap,
@@ -1259,17 +1269,6 @@ class _R1Session:
                 self._draw_help_overlay()
 
             self.pg.display.flip()
-
-
-def _find_tiles_for_output(_output_ap: str) -> list[tuple[int, int]]:
-    """Placeholder: map output APs to tile coordinates for flash effects.
-
-    Since output APs don't have a fixed spatial mapping, flash a few central
-    tiles as a visual cue.
-    """
-    h = abs(hash(_output_ap)) % 48
-    return [(h // 8, h % 8), ((h + 7) // 8, (h + 3) % 8)]
-
 
 def _session() -> _R1Session:
     global _SESSION

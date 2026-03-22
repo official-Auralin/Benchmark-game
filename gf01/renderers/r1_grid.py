@@ -1,24 +1,26 @@
-"""Grid and tile-map helpers for the canonical GF-01-R1 tower-defense renderer.
+"""Spatial causal-board helpers for the GF-01 visual renderer.
 
-Builds the grid layout, assigns tile types, computes isometric projection
-coordinates, and determines which tiles carry defense icons or threat overlays.
-No pygame import -- pure geometry and data.
+The board is no longer a disguised timeline. It is a deterministic spatial
+layout derived from proposition roles and coarse relation structure in the
+formal task, while time remains represented separately in the mission/timeline
+widgets.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .r1_theme import tile_type_for_index, tile_color
+from ..semantics import run_automaton
+from .r1_theme import tile_color
 
 if TYPE_CHECKING:
     from ..models import GF01Instance
 
 
-GRID_COLS = 8
-GRID_ROWS = 6
+GRID_COLS = 6
+GRID_ROWS = 4
 TILE_W = 96
 TILE_H = 48
 
@@ -32,6 +34,9 @@ class TileData:
     is_objective: bool
     is_current_wave: bool
     defense_ap: str | None
+    output_ap: str | None
+    role: str
+    label: str | None
     defense_index: int | None
     threat_level: float
     has_edits: bool
@@ -41,10 +46,82 @@ class TileData:
 
 
 def iso_project(col: int, row: int, *, origin_x: int, origin_y: int) -> tuple[int, int]:
-    """Convert grid (col, row) to isometric screen coordinates."""
     ix = origin_x + (col - row) * (TILE_W // 2)
     iy = origin_y + (col + row) * (TILE_H // 2)
     return ix, iy
+
+
+def relation_weights(instance: "GF01Instance") -> dict[tuple[str, str], int]:
+    baseline_outputs = run_automaton(instance.automaton, instance.base_trace)[1]
+    weights: dict[tuple[str, str], int] = {
+        (input_ap, output_ap): 0
+        for input_ap in instance.automaton.input_aps
+        for output_ap in instance.automaton.output_aps
+    }
+    for t, step in enumerate(instance.base_trace):
+        for input_ap in instance.automaton.input_aps:
+            flipped_trace = [{k: int(v) for k, v in row.items()} for row in instance.base_trace]
+            flipped_trace[t][input_ap] = 1 - int(step[input_ap])
+            changed_outputs = run_automaton(instance.automaton, flipped_trace)[1]
+            for output_ap in instance.automaton.output_aps:
+                delta = 0
+                for idx in range(t, len(baseline_outputs)):
+                    if (
+                        int(changed_outputs[idx].get(output_ap, 0))
+                        != int(baseline_outputs[idx].get(output_ap, 0))
+                    ):
+                        delta += 1
+                weights[(input_ap, output_ap)] += delta
+    return weights
+
+
+def grid_dimensions(instance: "GF01Instance") -> tuple[int, int]:
+    input_count = len(instance.automaton.input_aps)
+    output_count = len(instance.automaton.output_aps)
+    rel_count = sum(1 for value in relation_weights(instance).values() if value > 0)
+    cols = max(5, min(10, 5 + int(rel_count > (input_count + output_count))))
+    output_slot_cols = 1 if cols < 6 else 2
+    rows = max(
+        3,
+        math.ceil(input_count / 2),
+        math.ceil(output_count / output_slot_cols),
+    )
+    return cols, rows
+
+
+def _rank_inputs(instance: "GF01Instance") -> list[str]:
+    weights = relation_weights(instance)
+    target = instance.effect_ap
+    return sorted(
+        instance.automaton.input_aps,
+        key=lambda ap: (
+            -weights.get((ap, target), 0),
+            -sum(weights.get((ap, out), 0) for out in instance.automaton.output_aps),
+            ap,
+        ),
+    )
+
+
+def _rank_outputs(instance: "GF01Instance") -> list[str]:
+    weights = relation_weights(instance)
+    return sorted(
+        instance.automaton.output_aps,
+        key=lambda output_ap: (
+            0 if output_ap == instance.effect_ap else 1,
+            -sum(weights.get((inp, output_ap), 0) for inp in instance.automaton.input_aps),
+            output_ap,
+        ),
+    )
+
+
+def _spread_positions(items: list[str], columns: list[int], rows: int) -> dict[str, tuple[int, int]]:
+    positions: dict[str, tuple[int, int]] = {}
+    for idx, item in enumerate(items):
+        col = columns[idx % len(columns)]
+        band = idx // len(columns)
+        row = min(rows - 1, band)
+        positions[item] = (row, col)
+    return positions
 
 
 def build_grid(
@@ -54,107 +131,85 @@ def build_grid(
     pressure_levels: Mapping[int, int] | None = None,
     history_counts: Mapping[int, int] | None = None,
     history_atoms: list[tuple[int, str, int]] | None = None,
+    current_outputs: Mapping[str, int] | None = None,
     origin_x: int = 0,
     origin_y: int = 0,
 ) -> list[TileData]:
-    """Build the full tile grid from the instance and current observation state."""
-    total_t = len(instance.base_trace)
-    t_star = instance.t_star
-    mode = instance.mode
-    window_size = instance.window_size
-    input_aps = list(instance.automaton.input_aps)
-    seed = instance.seed
+    cols, rows = grid_dimensions(instance)
+    input_aps = _rank_inputs(instance)
+    output_aps = _rank_outputs(instance)
+    history_by_ap: dict[str, int] = {}
+    for _t, ap_name, value in history_atoms or []:
+        history_by_ap[ap_name] = int(value)
 
-    window_start = t_star if mode == "hard" else max(0, t_star - window_size)
-    window_end = t_star
+    input_positions = _spread_positions(input_aps, [0, 1], rows)
+    output_columns = [cols - 1] if cols < 6 else [cols - 1, cols - 2]
+    output_positions = _spread_positions(output_aps, output_columns, rows)
 
-    total_cells = GRID_COLS * GRID_ROWS
-    obs_pressure = pressure_levels or {}
-    obs_edits = history_counts or {}
-
-    ap_map = defense_tile_assignments(input_aps, total_cells, seed)
-    ap_to_cell: dict[str, int] = {v: k for k, v in ap_map.items()}
-
-    deployed_aps: dict[str, int] = {}
-    if history_atoms:
-        for _t, ap_name, val in history_atoms:
-            deployed_aps[ap_name] = val
+    current_outputs = {str(k): int(v) for k, v in (current_outputs or {}).items()}
+    history_counts = history_counts or {}
+    _ = (pressure_levels, timestep)
 
     tiles: list[TileData] = []
+    for row in range(rows):
+        for col in range(cols):
+            defense_ap = next((ap for ap, pos in input_positions.items() if pos == (row, col)), None)
+            output_ap = next((ap for ap, pos in output_positions.items() if pos == (row, col)), None)
+            role = "neutral"
+            label: str | None = None
+            is_objective = False
+            defense_index: int | None = None
+            threat_level = 0.0
+            deployed_value: int | None = None
+            has_edits = False
+            tile_type = "neutral"
 
-    for idx in range(total_cells):
-        row = idx // GRID_COLS
-        col = idx % GRID_COLS
+            if defense_ap is not None:
+                role = "input"
+                label = defense_ap
+                tile_type = "input"
+                defense_index = instance.automaton.input_aps.index(defense_ap)
+                deployed_value = history_by_ap.get(defense_ap)
+                has_edits = defense_ap in history_by_ap
+            elif output_ap is not None:
+                role = "output"
+                label = output_ap
+                tile_type = "output"
+                is_objective = output_ap == instance.effect_ap
+                threat_level = float(current_outputs.get(output_ap, 0))
+                has_edits = any(count > 0 for count in history_counts.values())
+            else:
+                input_rows = {pos[0] for pos in input_positions.values()}
+                output_rows = {pos[0] for pos in output_positions.values()}
+                if row in input_rows or row in output_rows:
+                    tile_type = "bridge"
+                    role = "bridge"
 
-        t_frac_start = (idx * total_t) / total_cells
-        t_frac_end = ((idx + 1) * total_t) / total_cells
-        t_start = int(t_frac_start)
-        t_end = max(t_start, int(math.ceil(t_frac_end)) - 1)
-
-        tt = tile_type_for_index(idx, total_cells, seed)
-
-        is_obj = _ranges_overlap(t_start, t_end, window_start, window_end)
-        is_current = t_start <= timestep <= t_end
-
-        defense_ap: str | None = ap_map.get(idx)
-        defense_index: int | None = None
-        if defense_ap is not None:
-            try:
-                defense_index = input_aps.index(defense_ap)
-            except ValueError:
-                defense_index = 0
-
-        deployed_value: int | None = None
-        if defense_ap is not None and defense_ap in deployed_aps:
-            deployed_value = deployed_aps[defense_ap]
-
-        threat = 0.0
-        for t in range(t_start, min(t_end + 1, total_t)):
-            level = obs_pressure.get(t)
-            if level is not None:
-                threat = max(threat, level / 10.0)
-
-        has_edits = any(obs_edits.get(t, 0) > 0 for t in range(t_start, t_end + 1))
-
-        if is_obj:
-            base = tile_color("objective")
-        elif is_current:
-            base = tile_color("highlight")
-        else:
-            base = tile_color(tt)
-
-        if threat > 0.3:
-            r, g, b = base
-            blend = min(1.0, threat)
-            base = (
-                int(r + (160 - r) * blend * 0.4),
-                int(g * (1.0 - blend * 0.3)),
-                int(b * (1.0 - blend * 0.2)),
+            ix, iy = iso_project(col, row, origin_x=origin_x, origin_y=origin_y)
+            tiles.append(
+                TileData(
+                    row=row,
+                    col=col,
+                    tile_type=tile_type,
+                    base_color=tile_color("objective" if is_objective else tile_type),
+                    is_objective=is_objective,
+                    is_current_wave=False,
+                    defense_ap=defense_ap,
+                    output_ap=output_ap,
+                    role=role,
+                    label=label,
+                    defense_index=defense_index,
+                    threat_level=threat_level,
+                    has_edits=has_edits,
+                    deployed_value=deployed_value,
+                    iso_x=ix,
+                    iso_y=iy,
+                )
             )
-
-        ix, iy = iso_project(col, row, origin_x=origin_x, origin_y=origin_y)
-        tiles.append(TileData(
-            row=row,
-            col=col,
-            tile_type=tt,
-            base_color=base,
-            is_objective=is_obj,
-            is_current_wave=is_current,
-            defense_ap=defense_ap,
-            defense_index=defense_index,
-            threat_level=threat,
-            has_edits=has_edits,
-            deployed_value=deployed_value,
-            iso_x=ix,
-            iso_y=iy,
-        ))
-
     return tiles
 
 
-def grid_bounding_box(
-    tiles: list[TileData],
-) -> tuple[int, int, int, int]:
+def grid_bounding_box(tiles: list[TileData]) -> tuple[int, int, int, int]:
     if not tiles:
         return (0, 0, 0, 0)
     xs = [t.iso_x for t in tiles]
@@ -162,9 +217,7 @@ def grid_bounding_box(
     return (min(xs), min(ys), max(xs) + TILE_W, max(ys) + TILE_H)
 
 
-def tile_at_screen_pos(
-    tiles: list[TileData], mx: int, my: int
-) -> TileData | None:
+def tile_at_screen_pos(tiles: list[TileData], mx: int, my: int) -> TileData | None:
     for tile in reversed(tiles):
         cx = tile.iso_x + TILE_W // 2
         cy = tile.iso_y + TILE_H // 2
@@ -187,19 +240,20 @@ def wave_timeline_data(
     window_start = t_star if mode == "hard" else max(0, t_star - window_size)
     obs_pressure = pressure_levels or {}
     obs_edits = history_counts or {}
-
     entries: list[dict[str, object]] = []
     for t in range(total_waves):
-        entries.append({
-            "wave": t + 1,
-            "t": t,
-            "is_current": t == current,
-            "is_critical": t == t_star,
-            "in_window": window_start <= t <= t_star,
-            "pressure": obs_pressure.get(t),
-            "has_edits": obs_edits.get(t, 0) > 0,
-            "is_past": t < current,
-        })
+        entries.append(
+            {
+                "wave": t + 1,
+                "t": t,
+                "is_current": t == current,
+                "is_critical": t == t_star,
+                "in_window": window_start <= t <= t_star,
+                "pressure": obs_pressure.get(t),
+                "has_edits": obs_edits.get(t, 0) > 0,
+                "is_past": t < current,
+            }
+        )
     return entries
 
 
@@ -208,16 +262,14 @@ def defense_tile_assignments(
     total_cells: int,
     seed: int,
 ) -> dict[int, str]:
-    """Spread input APs across grid cells deterministically."""
+    _ = seed
     assignments: dict[int, str] = {}
-    n = max(1, total_cells)
-    for i, ap in enumerate(input_aps):
-        cell_idx = (i * 7 + seed) % n
-        while cell_idx in assignments and cell_idx < n:
-            cell_idx = (cell_idx + 1) % n
+    if not input_aps:
+        return assignments
+    stride = max(1, total_cells // max(1, len(input_aps)))
+    for idx, ap in enumerate(input_aps):
+        cell_idx = min(total_cells - 1, idx * stride)
+        while cell_idx in assignments and cell_idx < total_cells - 1:
+            cell_idx += 1
         assignments[cell_idx] = ap
     return assignments
-
-
-def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
-    return not (a_end < b_start or a_start > b_end)
