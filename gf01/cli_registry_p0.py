@@ -68,7 +68,7 @@ def register_p0_commands(
     p_p0_seed.add_argument("--count", type=int, default=8)
     p_p0_seed.add_argument("--seeds", type=str, default="", help="Optional explicit comma-separated seed list; overrides --seed-start/--count")
     p_p0_seed.add_argument("--mode", type=str, default="normal", choices=list(ALLOWED_MODES), help="P0 default is normal mode; override only for targeted checks")
-    p_p0_seed.add_argument("--out-dir", type=str, default="research_pack/pilot_freeze/gf01_p0_alpha_v1", help="Output directory for the frozen P0 pack")
+    p_p0_seed.add_argument("--out-dir", type=str, default="pilot_freeze/gf01_p0_alpha_v1", help="Output directory for the frozen P0 pack")
     p_p0_seed.add_argument("--force", action="store_true", help="Overwrite an existing non-empty output directory")
     p_p0_seed.set_defaults(func=cmd_p0_seed_pack)
 
@@ -83,7 +83,7 @@ def register_p0_commands(
     p_p0_init.add_argument("--count", type=int, default=8)
     p_p0_init.add_argument("--seeds", type=str, default="", help="Optional explicit comma-separated seed list; overrides --seed-start/--count")
     p_p0_init.add_argument("--mode", type=str, default="normal", choices=list(ALLOWED_MODES), help="P0 default is normal mode; override only for targeted checks")
-    p_p0_init.add_argument("--out-dir", type=str, default="research_pack/pilot_freeze/gf01_p0_alpha_v1", help="Output directory for the frozen P0 pack")
+    p_p0_init.add_argument("--out-dir", type=str, default="pilot_freeze/gf01_p0_alpha_v1", help="Output directory for the frozen P0 pack")
     p_p0_init.add_argument("--force", action="store_true", help="Overwrite template output and non-empty P0 seed-pack directory")
     p_p0_init.add_argument("--out", type=str, default="", help="Optional output JSON path")
     p_p0_init.set_defaults(func=cmd_p0_init)

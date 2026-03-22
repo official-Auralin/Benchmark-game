@@ -1,7 +1,8 @@
 # GF-01 Research Notes
 
 This page is the compact paper-facing rationale for the benchmark. The
-underlying evidence chain remains in `research_pack/`.
+underlying evidence chain now lives in
+`../gf01_private_companion/source/research_pack/`.
 
 ## Core Thesis
 
@@ -27,8 +28,8 @@ experimentally usable beyond purely formal evaluation.
 ## Key Threats To Validity
 
 The authoritative threat register remains
-`research_pack/26_phase_h2_threats_validity.md`. The current highest-risk
-classes are:
+`../gf01_private_companion/source/research_pack/26_phase_h2_threats_validity.md`.
+The current highest-risk classes are:
 
 - hidden-state leakage through renderer affordances,
 - shortcut strategies that optimize goal achievement without causal validity,
@@ -38,8 +39,8 @@ classes are:
 ## Ablation And Adversarial Priorities
 
 The authoritative ablation plan remains
-`research_pack/27_phase_h3_ablations_adversarial_checks.md`. Near-term
-priority checks are:
+`../gf01_private_companion/source/research_pack/27_phase_h3_ablations_adversarial_checks.md`.
+Near-term priority checks are:
 
 - renderer parity,
 - greedy-versus-certified divergence,
@@ -55,8 +56,10 @@ For an AAAI-style benchmark paper, the repo should always support:
 - a stable reference implementation,
 - retained pilot and benchmark artifacts,
 - documented threats and ablations,
-- and a public mirror containing the publishable subset.
+- and a private companion carrying the evidence chain without bloating the
+  primary repo.
 
 The compliance snapshot in
-`research_pack/55_phase_ah_full_prompt_compliance_audit.md` should remain a
-compact bridge between the canonical docs and the deeper evidence library.
+`../gf01_private_companion/source/research_pack/55_phase_ah_full_prompt_compliance_audit.md`
+should remain a compact bridge between the canonical docs and the deeper
+evidence library.

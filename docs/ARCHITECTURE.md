@@ -67,7 +67,9 @@ over spreading edits through multiple command groups.
 
 ## Steering Documents
 
-- Formal normative spec: `spec/tex_files/Spec.tex`
+- Normative public spec: `spec/Spec.pdf`
+- Private spec authoring source: `../spec_source/Spec.tex`
+- Private agent skill: `../gf01_private_companion/skill/gf01-private-companion/`
 - Operational spec: `spec/`
 - Benchmarking and publication context: `docs/benchmarking.md`
 - Contributor workflow: `docs/CONTRIBUTING.md`

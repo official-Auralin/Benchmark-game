@@ -1,14 +1,11 @@
 # GF-01 Benchmark Harness
 
 GF-01 is a benchmark harness for human-playable and agent-playable temporal
-causal reasoning tasks. The repository is organized around a formal spec, a
-stable reference implementation, retained evaluation artifacts, and a compact
-set of canonical docs that future contributors can use without loading the
-entire project history.
+causal reasoning tasks. This repository is now the primary public contract
+surface: it carries the stable implementation, the normative published spec
+PDF, the retained public benchmark artifacts, and the compact contributor docs.
 
-This repository is released under the Apache-2.0 license. The authoritative
-license file must exist at the root of the public GitHub mirror as `LICENSE`,
-not only in the private source repository.
+This repository is released under the Apache-2.0 license.
 
 ## Start Here
 
@@ -21,11 +18,12 @@ not only in the private source repository.
 - `docs/HUMAN_DATA_GOVERNANCE.md`: current local-only human-data boundary and future deployment checklist.
 - `docs/ARCHITECTURE.md`: module boundaries and extension points.
 - `docs/CONTRIBUTING.md`: setup, workflow rules, docs policy, and archive procedure.
+- `docs/LOCAL_COMPANION.md`: maintainer workflow for `../spec_source/` and `../gf01_private_companion/`.
 
 ## Quick Setup
 
 - Python `3.10+`
-- Core profile (stdlib-only runtime plus editable package metadata):
+- Core profile:
 
 ```bash
 python3 -m pip install -e .
@@ -45,17 +43,11 @@ python3 -m pip install -e .[paper-artifact]
 python3 -m pip install -r requirements-paper-artifact.txt
 ```
 
-- In the private source repo only, rebuild the locked formal spec PDF when TeX changes:
-
-```bash
-python3 scripts/build_spec.py
-python3 scripts/build_spec.py --check
-```
-
-- The paper-artifact path also requires `latexmk` to be installed and available
-  on `PATH`.
-- The public GitHub mirror intentionally exposes only `spec/Spec.pdf`. The
-  locked TeX source is not mirrored there and is not contributor-editable.
+- Maintainers who update the formal spec or private evidence chain also work in:
+  - `../spec_source/` for editable `Spec.tex`
+  - `../gf01_private_companion/` for private research/evidence and the agent skill
+- The primary repo publishes and validates `spec/Spec.pdf`. Editable TeX
+  authoring lives outside this repo at `../spec_source/Spec.tex`.
 
 ## Quick Commands
 
@@ -88,12 +80,14 @@ python3 -m gf01 gate --fixture-root tests/fixtures/official_example --seed-profi
 
 ## Repo Layout
 
-- `spec/`: operational spec plus the formal PDF and TeX source.
+- `spec/`: operational spec plus the normative public `spec/Spec.pdf`.
 - `docs/`: contributor workflow, architecture, benchmarking, and archive policy.
 - `gf01/`: runtime, generator, verifier, baselines, CLI, and renderer code.
 - `tests/`: regression suite and fixtures.
-- `research_pack/`: retained evidence library only.
-- `pilot_freeze/`, `pilot_runs/`: latest retained experiment artifacts.
+- `pilot_freeze/gf01_pilot_freeze_v1`: retained public freeze artifact.
+- `pilot_runs/gf01_pilot_campaign_v1`: retained public campaign artifact.
+- `../spec_source/`: private TeX authoring repo for maintainers.
+- `../gf01_private_companion/`: private evidence repo and structured agent skill.
 
-Historical plans, noisy execution logs, notebooks, and older experiment slices
-are archived outside the repo. See `docs/ARCHIVE_LOG.md`.
+Historical plans, mirror-era tooling, noisy execution logs, and superseded
+experiment slices are archived outside the repo. See `docs/ARCHIVE_LOG.md`.

@@ -12,17 +12,15 @@
   `python3 -m pip install -e .[paper-artifact]`
   and `python3 -m pip install -r requirements-paper-artifact.txt`
 - `requirements.txt` remains intentionally limited to dependencies needed by
-  the mirrored/public files. Do not add local-only, private-only, or
-  non-mirrored tooling there.
-- `latexmk` is required for the private source repo paper-artifact path and for
-  `scripts/build_spec.py`.
-- The public GitHub mirror intentionally omits `spec/tex_files/Spec.tex`; the
-  TeX source is locked and not contributor-editable there.
+  the primary repo runtime surface. Do not add local-only, private-only, or
+  sibling-companion tooling there.
+- `latexmk` is only required in `../spec_source/` when maintainers rebuild the
+  private TeX authoring source.
 
 ## Canonical Doc Map
 
 - `docs/INDEX.md`: first stop for contributors and agents.
-- `spec/tex_files/Spec.tex`: formal normative spec authority.
+- `spec/Spec.pdf`: normative public spec surface.
 - `spec/contracts.md`: public contract and version-policy page.
 - `spec/environment.md`: environment model and semantics.
 - `spec/parity.md`: human-versus-agent information parity.
@@ -31,6 +29,7 @@
 - `docs/HUMAN_DATA_GOVERNANCE.md`: current human-data boundary and future deployment checklist.
 - `docs/ARCHITECTURE.md`: code boundaries and extension points.
 - `docs/STYLE.md`: documentation hygiene rules.
+- `docs/LOCAL_COMPANION.md`: sibling-repo maintainer workflow.
 
 ## Common Commands
 
@@ -40,14 +39,14 @@
   `python3 -m gf01 checks --seed 3000`
 - Faster gate-equivalent run:
   `python3 -m gf01 gate --fixture-root tests/fixtures/official_example --seed-profile 4200 --unittest-shards 2`
-- Build the formal spec PDF in the private source repo:
-  `python3 scripts/build_spec.py`
-- Check that the committed formal spec PDF is fresh in the private source repo:
-  `python3 scripts/build_spec.py --check`
-- Public-mirror spec validation:
-  `python3 -m unittest tests.test_docs_spec_sync tests.test_spec_tex_integrity -v`
+- Public docs/spec surface validation:
+  `python3 -m unittest tests.test_docs_spec_sync tests.test_repo_layout_policy tests.test_gf01_ci_policy -v`
 - Human-ui smoke path:
   `SDL_VIDEODRIVER=dummy python3 -m unittest tests.test_gf01_play_loop tests.test_r1_renderer_modules -v`
+- Private spec authoring check in `../spec_source/`:
+  `latexmk -pdf -interaction=nonstopmode -halt-on-error Spec.tex`
+- Private companion validation in `../gf01_private_companion/`:
+  `python3 -m unittest discover -s tests -p 'test_*.py' -v`
 
 ## Workflow Rules
 
@@ -55,8 +54,8 @@
 - Update the spec before or alongside any behavior change.
 - Add or update characterization tests before large structural changes.
 - Do not create new active plan documents when `spec/plan.md` can be updated.
-- Treat `research_pack/` as an evidence library, not the default contributor
-  navigation surface.
+- Treat the private companion as the evidence library, not the default
+  contributor navigation surface for this repo.
 
 ## Change Locality Target
 
@@ -87,12 +86,15 @@
 - If you changed schema or policy identifiers, update `spec/contracts.md` and
   relevant tests.
 - If you changed environment semantics, update `spec/environment.md` and the
-  formal spec if needed.
+  normative spec artifacts when needed.
 - If you changed parity or renderer behavior, update `spec/parity.md`.
 - If you changed architecture or module boundaries, update
   `docs/ARCHITECTURE.md`.
 - If you changed benchmarking protocol or retained artifact policy, update
   `docs/benchmarking.md`.
-- If you changed mirrored dependency needs, update `requirements.txt`, but only
-  for dependencies required by mirrored/public files. Update the profile-specific
-  requirements files and `pyproject.toml` at the same time when applicable.
+- If you changed the formal spec, update these three artifacts together:
+  `../spec_source/Spec.tex`, `spec/Spec.pdf`, and
+  `../gf01_private_companion/skill/gf01-private-companion/references/spec/spec.md`.
+- If you changed primary-repo dependency needs, update `requirements.txt`, the
+  profile-specific requirements files, and `pyproject.toml` together when
+  applicable.

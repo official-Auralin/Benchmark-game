@@ -3,6 +3,24 @@
 Historical material is archived outside the repo so the active working set
 stays small.
 
+## 2026-03-22 Repo Simplification
+
+- Archive root:
+  `../archive/Research/2026-03-22_repo-simplification/`
+- Purpose:
+  remove the nested `public_repo/` mirror workflow, preserve the nested public
+  repo history as a bundle, and move non-public materials into audited sibling
+  repos.
+- Preserved audit artifacts:
+  - `02_public-repo-history/public_repo.bundle`
+  - `02_public-repo-history/public_repo_heads.txt`
+
+Archive categories:
+
+- `01_superseded-canonical-docs/`
+- `02_public-repo-history/`
+- `04_experiment-artifacts/`
+
 ## 2026-03-07 Repo Curation
 
 - Archive root:
@@ -41,5 +59,4 @@ what moved there and why.
 - `spec/`
 - `gf01/`
 - `tests/`
-- retained `research_pack/` evidence backbone
-- retained latest pilot and run artifacts
+- retained public pilot and run artifacts

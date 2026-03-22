@@ -25,12 +25,14 @@ publication-ready evidence package for benchmark results.
 
 ## Immediate Workstreams
 
-- Spec backbone: keep `spec/tex_files/Spec.tex`, `spec/contracts.md`,
-  `spec/environment.md`, and `spec/parity.md` synchronized.
+- Spec backbone: keep `spec/Spec.pdf`, `../spec_source/Spec.tex`,
+  `../gf01_private_companion/skill/gf01-private-companion/references/spec/spec.md`,
+  `spec/contracts.md`, `spec/environment.md`, and `spec/parity.md`
+  synchronized.
 - Stable layer: keep `gf01` modular enough that future family work stays local.
 - Human parity: keep the canonical `GF-01-R1` causal-board visual path
   readable without hidden-state leakage.
 - Benchmark ops: keep gate, profiling, q033, pilot, and release workflows
   reproducible.
-- Publication: keep the retained evidence chain defensible and the archive
-  organized.
+- Publication: keep the retained private evidence chain defensible and the
+  archive organized.

@@ -1,7 +1,8 @@
 # GF-01 Environment Contract
 
 This page is the compact operational description of the benchmark environment.
-The formal normative source remains `spec/tex_files/Spec.tex`.
+The normative public source remains `spec/Spec.pdf`. Editable TeX authoring
+lives in `../spec_source/Spec.tex`.
 
 ## Instance Model
 

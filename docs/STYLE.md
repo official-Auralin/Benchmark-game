@@ -12,7 +12,11 @@ Keep the repo's active working set small and high signal.
   - active planning in `spec/plan.md`
   - architecture in `docs/ARCHITECTURE.md`
   - benchmarking protocol in `docs/benchmarking.md`
-- Put durable decisions in `research_pack/09_decision_log.md`, not ad hoc notes.
+- put durable decisions in
+  `../gf01_private_companion/source/research_pack/09_decision_log.md`, not ad
+  hoc notes
+- keep formal spec changes synchronized across `../spec_source/Spec.tex`,
+  `spec/Spec.pdf`, and the companion skill spec reference
 - Do not keep chat transcripts, one-off brainstorming dumps, or repetitive
   execution logs in the repo root.
 - Prefer short sections, explicit headings, and link-out summaries over long

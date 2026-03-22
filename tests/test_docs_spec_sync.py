@@ -1,30 +1,26 @@
-"""Regression tests for docs/spec scaffolding and public-scope dependency rules."""
+"""Regression tests for docs/spec scaffolding and public contract rules."""
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
 from gf01 import meta
 
-try:
-    from .repo_scope import is_public_mirror
-except ImportError:  # pragma: no cover
-    from repo_scope import is_public_mirror
-
 
 ROOT = Path(__file__).resolve().parents[1]
-COMMON_REQUIRED_PATHS = (
+REQUIRED_PATHS = (
     ROOT / "LICENSE",
     ROOT / "pyproject.toml",
     ROOT / "docs" / "INDEX.md",
     ROOT / "docs" / "ARCHITECTURE.md",
     ROOT / "docs" / "CONTRIBUTING.md",
     ROOT / "docs" / "HUMAN_DATA_GOVERNANCE.md",
+    ROOT / "docs" / "LOCAL_COMPANION.md",
     ROOT / "docs" / "STYLE.md",
     ROOT / "docs" / "benchmarking.md",
     ROOT / "docs" / "research-notes.md",
-    ROOT / "docs" / "PUBLIC_MIRROR.md",
     ROOT / "docs" / "ARCHIVE_LOG.md",
     ROOT / "spec" / "overview.md",
     ROOT / "spec" / "contracts.md",
@@ -40,18 +36,12 @@ COMMON_REQUIRED_PATHS = (
     ROOT / "requirements-paper-artifact.txt",
     ROOT / "requirements-dev.txt",
 )
-SOURCE_ONLY_REQUIRED_PATHS = (
-    ROOT / "spec" / "tex_files" / "Spec.tex",
-)
-IS_PUBLIC_MIRROR = is_public_mirror(ROOT)
+CONTRACT_INVENTORY_PATH = ROOT / "spec" / "contract_inventory.json"
 
 
 class TestDocsSpecSync(unittest.TestCase):
     def test_required_docs_and_spec_paths_exist(self) -> None:
-        required_paths = list(COMMON_REQUIRED_PATHS)
-        if not IS_PUBLIC_MIRROR:
-            required_paths.extend(SOURCE_ONLY_REQUIRED_PATHS)
-        for path in required_paths:
+        for path in REQUIRED_PATHS:
             self.assertTrue(path.exists(), msg=f"missing required artifact: {path}")
 
     def test_contracts_page_mentions_current_schema_and_policy_versions(self) -> None:
@@ -73,7 +63,13 @@ class TestDocsSpecSync(unittest.TestCase):
         for token in required_tokens:
             self.assertIn(token, text, msg=f"missing contract token: {token}")
 
-    def test_public_scope_dependency_rule_is_documented(self) -> None:
+    def test_contract_inventory_lists_retained_public_artifacts(self) -> None:
+        payload = json.loads(CONTRACT_INVENTORY_PATH.read_text(encoding="utf-8"))
+        include_paths = payload.get("public_include_paths", [])
+        self.assertIn("pilot_freeze/gf01_pilot_freeze_v1", include_paths)
+        self.assertIn("pilot_runs/gf01_pilot_campaign_v1", include_paths)
+
+    def test_primary_repo_dependency_rule_is_documented(self) -> None:
         req_text = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
         human_ui_text = (ROOT / "requirements-human-ui.txt").read_text(
             encoding="utf-8"
@@ -81,10 +77,10 @@ class TestDocsSpecSync(unittest.TestCase):
         contrib_text = (ROOT / "docs" / "CONTRIBUTING.md").read_text(
             encoding="utf-8"
         ).lower()
-        self.assertIn("mirrored repository only", req_text)
+        self.assertIn("primary-repo runtime dependencies only", req_text)
         self.assertIn("pygame-ce==", human_ui_text)
         self.assertIn("do not add local-only", contrib_text)
-        self.assertIn("mirrored/public files", contrib_text)
+        self.assertIn("primary repo runtime surface", contrib_text)
 
 
 if __name__ == "__main__":

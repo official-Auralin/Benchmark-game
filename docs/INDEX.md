@@ -19,21 +19,23 @@ Read these pages in order before opening large historical artifacts.
 - `docs/research-notes.md` for hypotheses, threats to validity, ablations, and paper-facing rationale.
 - `docs/ARCHITECTURE.md` for code boundaries and extension points.
 - `docs/CONTRIBUTING.md` for setup, workflow rules, documentation policy, and archive procedure.
-- `docs/PUBLIC_MIRROR.md` for the private-source to public-mirror publishing workflow.
+- `docs/LOCAL_COMPANION.md` for the sibling `../spec_source/` and `../gf01_private_companion/` workflow.
 - `spec/plan.md` for the single active execution plan.
 
-## Evidence Library
+## Private Evidence Library
 
-Use `research_pack/` only when you need the underlying evidence chain:
+Use the sibling private companion only when you need the underlying evidence
+chain or agent-facing private references:
 
-- `research_pack/00_index.md`
-- `research_pack/04_claims_ledger.md`
-- `research_pack/05_open_questions.md`
-- `research_pack/06_design_principles.md`
-- `research_pack/09_decision_log.md`
-- `research_pack/26_phase_h2_threats_validity.md`
-- `research_pack/27_phase_h3_ablations_adversarial_checks.md`
-- `research_pack/55_phase_ah_full_prompt_compliance_audit.md`
+- `../gf01_private_companion/source/research_pack/00_index.md`
+- `../gf01_private_companion/source/research_pack/04_claims_ledger.md`
+- `../gf01_private_companion/source/research_pack/05_open_questions.md`
+- `../gf01_private_companion/source/research_pack/06_design_principles.md`
+- `../gf01_private_companion/source/research_pack/09_decision_log.md`
+- `../gf01_private_companion/source/research_pack/26_phase_h2_threats_validity.md`
+- `../gf01_private_companion/source/research_pack/27_phase_h3_ablations_adversarial_checks.md`
+- `../gf01_private_companion/source/research_pack/55_phase_ah_full_prompt_compliance_audit.md`
+- `../gf01_private_companion/skill/gf01-private-companion/` for the structured agent skill
 
 ## Historical Material
 

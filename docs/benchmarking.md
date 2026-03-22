@@ -25,19 +25,19 @@ reproducibility, and retained benchmark artifacts.
 
 ## Retained In-Repo Artifacts
 
-Top-level retained pilot assets:
+Top-level retained public assets:
 
 - `pilot_freeze/gf01_pilot_freeze_v1`
-- `pilot_freeze/hyp018_matched_mode_v4_n240`
 - `pilot_runs/gf01_pilot_campaign_v1`
-- `pilot_runs/hyp018_matched_mode_v4_n240`
-- `pilot_runs/hyp018_trend_summary`
 
-Retained research-pack run artifacts:
+Private companion retained artifacts now live outside the primary repo:
 
-- `research_pack/pilot_runs/q033_protocol_v2_mw2`
-- `research_pack/pilot_runs/q033_calibration_probe_v2`
-- `research_pack/pilot_runs/release_candidate_smoke_v1`
+- `../gf01_private_companion/source/dev_artifacts/pilot_freeze/hyp018_matched_mode_v4_n240`
+- `../gf01_private_companion/source/dev_artifacts/pilot_runs/hyp018_matched_mode_v4_n240`
+- `../gf01_private_companion/source/dev_artifacts/pilot_runs/hyp018_trend_summary`
+- `../gf01_private_companion/source/dev_artifacts/research_pack_pilot_runs/q033_protocol_v2_mw2`
+- `../gf01_private_companion/source/dev_artifacts/research_pack_pilot_runs/q033_calibration_probe_v2`
+- `../gf01_private_companion/source/dev_artifacts/research_pack_pilot_runs/release_candidate_smoke_v1`
 
 Older campaign slices and exploratory summaries belong in the external archive.
 
@@ -51,18 +51,16 @@ Older campaign slices and exploratory summaries belong in the external archive.
 - Paper-artifact profile:
   `python3 -m pip install -e .[paper-artifact]`
   and `python3 -m pip install -r requirements-paper-artifact.txt`
-- The paper-artifact path in the private source repo also requires `latexmk`
-  on `PATH`.
 - Run `python3 -m gf01 checks --seed 3000` before publication-facing changes.
 - Run `python3 -m unittest discover -s tests -p 'test_*.py' -v` before merging.
 - Use `python3 -m gf01 gate --fixture-root tests/fixtures/official_example --seed-profile 4200 --unittest-shards 2`
   for the fast gate-equivalent local check.
-- In the private source repo, rebuild the formal PDF with
-  `python3 scripts/build_spec.py` after TeX or formal-spec edits.
-- In the private source repo, check for stale committed formal-spec output with
-  `python3 scripts/build_spec.py --check`.
-- In the public mirror, validate the locked published spec surface with
-  `python3 -m unittest tests.test_docs_spec_sync tests.test_spec_tex_integrity -v`.
+- Validate the public docs/spec surface with
+  `python3 -m unittest tests.test_docs_spec_sync tests.test_repo_layout_policy tests.test_gf01_ci_policy -v`.
+- In `../spec_source/`, maintainers rebuild or validate the private TeX source
+  with `latexmk -pdf -interaction=nonstopmode -halt-on-error Spec.tex`.
+- In `../gf01_private_companion/`, run the private validation suite with
+  `python3 -m unittest discover -s tests -p 'test_*.py' -v`.
 - For reviewer reproduction, prefer the paper-artifact profile and keep the
   `generate`, `freeze-pilot`, `pilot-campaign`, `release-package`, and
   `q033-build-manifests` outputs deterministic across reruns with identical
@@ -81,12 +79,14 @@ decision, and hardware declaration needed to defend the result.
 
 ## Publication Expectations
 
-- Treat `spec/tex_files/Spec.tex` as the locked formal benchmark authority in
-  the private source repo only; the public mirror intentionally exposes only
-  `spec/Spec.pdf`.
+- Treat `spec/Spec.pdf` as the normative public benchmark artifact.
+- Treat `../spec_source/Spec.tex` as the private TeX authoring source.
+- Treat `../gf01_private_companion/skill/gf01-private-companion/references/spec/spec.md`
+  as the agent-ingestible companion copy.
 - Keep `spec/` and `docs/` in sync with any behavior or policy change.
 - Treat `docs/HUMAN_DATA_GOVERNANCE.md` as the current statement of the repo's
   local-only human-study boundary.
-- Use `research_pack/26_phase_h2_threats_validity.md`,
-  `research_pack/27_phase_h3_ablations_adversarial_checks.md`, and
-  `docs/research-notes.md` when preparing paper claims or reviewer responses.
+- Use `../gf01_private_companion/source/research_pack/26_phase_h2_threats_validity.md`,
+  `../gf01_private_companion/source/research_pack/27_phase_h3_ablations_adversarial_checks.md`,
+  and `docs/research-notes.md` when preparing paper claims or reviewer
+  responses.

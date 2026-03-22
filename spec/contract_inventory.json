@@ -54,7 +54,9 @@
     "spec/contract_inventory.json",
     ".github/workflows/gf01-gate.yml",
     "gf01",
-    "tests"
+    "tests",
+    "pilot_freeze/gf01_pilot_freeze_v1",
+    "pilot_runs/gf01_pilot_campaign_v1"
   ],
   "schema_versions": {
     "instance_bundle": "gf01.instance_bundle.v1",

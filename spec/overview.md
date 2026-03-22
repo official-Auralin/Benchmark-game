@@ -31,6 +31,6 @@ The operational spec is split across:
 ## Non-goals
 
 - Local/private research notes and unpublished workflows are not part of the
-  mirrored public dependency surface.
-- The markdown spec in `spec/` does not replace the formal TeX specification in
-  `spec/tex_files/Spec.tex`; it is the compact operational steering layer.
+  primary repo dependency surface.
+- The markdown spec in `spec/` does not replace the normative public PDF in
+  `spec/Spec.pdf`; editable TeX authoring lives in `../spec_source/Spec.tex`.

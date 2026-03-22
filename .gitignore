@@ -1,0 +1,32 @@
+.DS_Store
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+spec/tex_files/artifacts/*
+!spec/tex_files/artifacts/.gitkeep
+
+# Python cache artifacts
+__pycache__/
+*.pyc
+*.stats
+*.egg-info/
+.venv/
+.venv-ci/
+.venv_d1/
+
+# Local generated campaign plot exports (source SVG/CSV remain tracked)
+pilot_runs/**/artifacts/*.pdf
+pilot_runs/*/*.pdf
+
+# Local summary scratch directory
+summary/
+
+# Local public mirror repo (separate git history for remote publishing)
+/public_repo/
