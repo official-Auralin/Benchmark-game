@@ -52,6 +52,8 @@ from .r1_theme import (
     wave_label,
 )
 from .r1_grid import (
+    GRID_COLS,
+    GRID_ROWS,
     TILE_H,
     TILE_W,
     TileData,

@@ -475,7 +475,11 @@ def load_formal_bundle(path: str) -> tuple[list[GF01Instance], dict[str, Any]]:
         base_dir = src
     elif src.suffix.lower() == ".hoa":
         candidates = [src.with_suffix(".task.json"), src.with_suffix(".json")]
-        task_path = next((candidate for candidate in candidates if candidate.exists()), None)
+        task_path: Path | None = None
+        for candidate in candidates:
+            if candidate.exists():
+                task_path = candidate
+                break
         if task_path is None:
             raise FormalArtifactError(
                 f"direct HOA ingestion requires a sidecar task JSON next to {src.name}"

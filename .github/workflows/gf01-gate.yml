@@ -132,6 +132,7 @@ jobs:
         shell: bash
         env:
           GF01_REQUIRE_PYGAME: "1"
+          SDL_AUDIODRIVER: dummy
         run: |
           SDL_VIDEODRIVER=dummy python -m unittest tests.test_gf01_play_loop tests.test_r1_renderer_modules -v
           SDL_VIDEODRIVER=dummy python -m gf01 play --seed 1337 --renderer-track visual --visual-backend pygame --agent greedy
