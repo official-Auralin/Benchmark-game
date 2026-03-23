@@ -37,6 +37,32 @@ REQUIRED_PATHS = (
     ROOT / "requirements-dev.txt",
 )
 CONTRACT_INVENTORY_PATH = ROOT / "spec" / "contract_inventory.json"
+ALLOWED_PUBLIC_INCLUDE_PATHS = frozenset(
+    {
+        "LICENSE",
+        "README.md",
+        "pyproject.toml",
+        "requirements.txt",
+        "requirements-core.txt",
+        "requirements-human-ui.txt",
+        "requirements-paper-artifact.txt",
+        "requirements-dev.txt",
+        "docs",
+        "spec/Spec.pdf",
+        "spec/overview.md",
+        "spec/contracts.md",
+        "spec/environment.md",
+        "spec/parity.md",
+        "spec/acceptance-tests.md",
+        "spec/plan.md",
+        "spec/contract_inventory.json",
+        ".github/workflows/gf01-gate.yml",
+        "gf01",
+        "tests",
+        "pilot_freeze/gf01_pilot_freeze_v1",
+        "pilot_runs/gf01_pilot_campaign_v1",
+    }
+)
 
 
 class TestDocsSpecSync(unittest.TestCase):
@@ -66,8 +92,28 @@ class TestDocsSpecSync(unittest.TestCase):
     def test_contract_inventory_lists_retained_public_artifacts(self) -> None:
         payload = json.loads(CONTRACT_INVENTORY_PATH.read_text(encoding="utf-8"))
         include_paths = payload.get("public_include_paths", [])
+        self.assertIsInstance(include_paths, list)
+        self.assertEqual(
+            len(include_paths),
+            len(set(include_paths)),
+            msg="public_include_paths must not contain duplicates",
+        )
         self.assertIn("pilot_freeze/gf01_pilot_freeze_v1", include_paths)
         self.assertIn("pilot_runs/gf01_pilot_campaign_v1", include_paths)
+        unexpected_paths = sorted(set(include_paths) - ALLOWED_PUBLIC_INCLUDE_PATHS)
+        self.assertEqual(
+            unexpected_paths,
+            [],
+            msg=(
+                "public_include_paths contains entries outside the intended "
+                f"public surface: {unexpected_paths}"
+            ),
+        )
+        for relative_path in include_paths:
+            self.assertTrue(
+                (ROOT / relative_path).exists(),
+                msg=f"public_include_paths entry is missing on disk: {relative_path}",
+            )
 
     def test_primary_repo_dependency_rule_is_documented(self) -> None:
         req_text = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
