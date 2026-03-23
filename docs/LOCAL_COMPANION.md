@@ -4,6 +4,9 @@ This repo is the primary public contract surface. Maintainers who work on the
 private spec authoring source or the private evidence chain also keep two
 sibling git repos:
 
+This document is the authoritative description of that sibling-repo topology
+for maintainer docs and primary-repo policy tests.
+
 - `../spec_source/`
 - `../gf01_private_companion/`
 

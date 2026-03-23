@@ -49,24 +49,12 @@ with code, tests, and documentation.
 
 ## Repo Contract
 
-The primary repo includes the public implementation and retained public
-artifacts:
+The canonical machine-readable inventory of the primary repo surface is
+`spec/contract_inventory.json`. It defines the exact public docs, workflow,
+runtime code, tests, and retained public artifacts that belong in this repo.
 
-- `README.md`
-- `requirements.txt`
-- `docs/`
-- `spec/Spec.pdf`
-- `spec/overview.md`
-- `spec/contracts.md`
-- `spec/environment.md`
-- `spec/parity.md`
-- `spec/acceptance-tests.md`
-- `spec/plan.md`
-- `.github/workflows/gf01-gate.yml`
-- `gf01/`
-- `tests/`
-- `pilot_freeze/gf01_pilot_freeze_v1`
-- `pilot_runs/gf01_pilot_campaign_v1`
+`docs/LOCAL_COMPANION.md` is the authoritative maintainer reference for the
+expected sibling-repo topology and linked-change workflow.
 
 Private authoring and evidence surfaces live outside this repo:
 

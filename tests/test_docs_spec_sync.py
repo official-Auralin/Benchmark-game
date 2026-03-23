@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from gf01 import meta
+from gf01 import repo_contract
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,32 +38,6 @@ REQUIRED_PATHS = (
     ROOT / "requirements-dev.txt",
 )
 CONTRACT_INVENTORY_PATH = ROOT / "spec" / "contract_inventory.json"
-ALLOWED_PUBLIC_INCLUDE_PATHS = frozenset(
-    {
-        "LICENSE",
-        "README.md",
-        "pyproject.toml",
-        "requirements.txt",
-        "requirements-core.txt",
-        "requirements-human-ui.txt",
-        "requirements-paper-artifact.txt",
-        "requirements-dev.txt",
-        "docs",
-        "spec/Spec.pdf",
-        "spec/overview.md",
-        "spec/contracts.md",
-        "spec/environment.md",
-        "spec/parity.md",
-        "spec/acceptance-tests.md",
-        "spec/plan.md",
-        "spec/contract_inventory.json",
-        ".github/workflows/gf01-gate.yml",
-        "gf01",
-        "tests",
-        "pilot_freeze/gf01_pilot_freeze_v1",
-        "pilot_runs/gf01_pilot_campaign_v1",
-    }
-)
 
 
 class TestDocsSpecSync(unittest.TestCase):
@@ -88,6 +63,8 @@ class TestDocsSpecSync(unittest.TestCase):
         )
         for token in required_tokens:
             self.assertIn(token, text, msg=f"missing contract token: {token}")
+        self.assertIn("spec/contract_inventory.json", text)
+        self.assertIn("docs/LOCAL_COMPANION.md", text)
 
     def test_contract_inventory_lists_retained_public_artifacts(self) -> None:
         payload = json.loads(CONTRACT_INVENTORY_PATH.read_text(encoding="utf-8"))
@@ -98,17 +75,16 @@ class TestDocsSpecSync(unittest.TestCase):
             len(set(include_paths)),
             msg="public_include_paths must not contain duplicates",
         )
-        self.assertIn("pilot_freeze/gf01_pilot_freeze_v1", include_paths)
-        self.assertIn("pilot_runs/gf01_pilot_campaign_v1", include_paths)
-        unexpected_paths = sorted(set(include_paths) - ALLOWED_PUBLIC_INCLUDE_PATHS)
         self.assertEqual(
-            unexpected_paths,
-            [],
+            include_paths,
+            list(repo_contract.PRIMARY_REPO_PUBLIC_INCLUDE_PATHS),
             msg=(
-                "public_include_paths contains entries outside the intended "
-                f"public surface: {unexpected_paths}"
+                "public_include_paths must match the shared primary-repo "
+                "contract inventory"
             ),
         )
+        for relative_path in repo_contract.RETAINED_PUBLIC_ARTIFACT_RELATIVE_PATHS:
+            self.assertIn(relative_path, include_paths)
         for relative_path in include_paths:
             self.assertTrue(
                 (ROOT / relative_path).exists(),
