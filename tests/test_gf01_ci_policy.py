@@ -22,6 +22,8 @@ import json
 import unittest
 from pathlib import Path
 
+from gf01 import repo_contract
+
 try:
     from .workflow_parser_subset import (
         WorkflowSubsetParseError,
@@ -190,8 +192,8 @@ class TestCiPolicyWorkflow(unittest.TestCase):
         text = BRANCH_GUIDANCE_PATH.read_text(encoding="utf-8")
         self.assertIn("GF01 Gate / gate", text)
         self.assertIn("GF01 Gate / release-candidate", text)
-        self.assertIn("../spec_source/Spec.tex", text)
-        self.assertIn("../gf01_private_companion/skill/gf01-private-companion/", text)
+        self.assertIn(repo_contract.SPEC_SOURCE_SPEC_TEX, text)
+        self.assertIn(repo_contract.PRIVATE_COMPANION_SKILL_ROOT, text)
 
 class TestParseWorkflowJobsUnit(unittest.TestCase):
     """Focused unit tests for ``parse_workflow_jobs_subset``."""
