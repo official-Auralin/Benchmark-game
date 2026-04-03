@@ -39,15 +39,45 @@ RUNTIME_LAYOUT_SCAN_EXCLUSIONS = {
     ROOT / "gf01" / "repo_contract.py",
 }
 
-PATHLIKE_CALL_NAMES = frozenset({"Path", "joinpath", "open", "glob", "rglob"})
+PATHLIKE_METHOD_NAMES = frozenset({"joinpath", "glob", "rglob", "open"})
+PATHLIKE_RECEIVER_SUFFIXES = ("path", "root", "dir")
 
 
-def _call_name(node: ast.AST) -> str | None:
+def _is_path_constructor(node: ast.AST) -> bool:
     if isinstance(node, ast.Name):
-        return node.id
+        return node.id == "Path"
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "pathlib"
+        and node.attr == "Path"
+    )
+
+
+def _is_path_receiver(node: ast.AST) -> bool:
+    if isinstance(node, ast.Name):
+        token = node.id.lower()
+        return node.id == "ROOT" or token.endswith(PATHLIKE_RECEIVER_SUFFIXES)
     if isinstance(node, ast.Attribute):
-        return node.attr
-    return None
+        return node.attr.lower().endswith(PATHLIKE_RECEIVER_SUFFIXES) or _is_path_receiver(
+            node.value
+        )
+    if isinstance(node, ast.Call):
+        return _is_pathlike_call(node)
+    return False
+
+
+def _is_pathlike_call(node: ast.Call) -> bool:
+    func = node.func
+    if _is_path_constructor(func):
+        return True
+    if isinstance(func, ast.Name):
+        return func.id == "open"
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr in PATHLIKE_METHOD_NAMES
+        and _is_path_receiver(func.value)
+    )
 
 
 def _string_fragments(node: ast.AST | None) -> list[str]:
@@ -73,7 +103,7 @@ def _runtime_path_strings(tree: ast.AST) -> list[str]:
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             strings.extend(_string_fragments(getattr(node, "value", None)))
             continue
-        if isinstance(node, ast.Call) and _call_name(node.func) in PATHLIKE_CALL_NAMES:
+        if isinstance(node, ast.Call) and _is_pathlike_call(node):
             for arg in node.args:
                 strings.extend(_string_fragments(arg))
             for keyword in node.keywords:
@@ -82,6 +112,16 @@ def _runtime_path_strings(tree: ast.AST) -> list[str]:
 
 
 class TestRepoLayoutPolicy(unittest.TestCase):
+    def test_runtime_path_string_extractor_ignores_unrelated_open_methods(self) -> None:
+        tree = ast.parse(
+            'client.open("../spec_source/Spec.tex")\n'
+            'pathlib.Path("../spec_source/Spec.tex")\n'
+        )
+        self.assertEqual(
+            _runtime_path_strings(tree),
+            ["../spec_source/Spec.tex"],
+        )
+
     def test_retained_public_paths_exist(self) -> None:
         for path in RETAINED_PUBLIC_PATHS:
             self.assertTrue(path.exists(), msg=f"missing retained public path: {path}")
