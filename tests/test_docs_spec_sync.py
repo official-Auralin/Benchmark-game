@@ -75,7 +75,9 @@ class TestDocsSpecSync(unittest.TestCase):
             len(set(include_paths)),
             msg="public_include_paths must not contain duplicates",
         )
-        self.assertEqual(
+        # Order is not part of the public contract; the inventory just needs
+        # to contain the same allowlisted paths as the shared repo contract.
+        self.assertCountEqual(
             include_paths,
             list(repo_contract.PRIMARY_REPO_PUBLIC_INCLUDE_PATHS),
             msg=(

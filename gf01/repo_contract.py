@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-PRIMARY_REPO_PUBLIC_INCLUDE_PATHS = (
-    "LICENSE",
-    "README.md",
-    "pyproject.toml",
+PRIMARY_REPO_REQUIREMENTS_RELATIVE_PATHS = (
     "requirements.txt",
     "requirements-core.txt",
     "requirements-human-ui.txt",
     "requirements-paper-artifact.txt",
     "requirements-dev.txt",
-    "docs",
+)
+
+PRIMARY_REPO_SPEC_RELATIVE_PATHS = (
     "spec/Spec.pdf",
     "spec/overview.md",
     "spec/contracts.md",
@@ -20,11 +19,6 @@ PRIMARY_REPO_PUBLIC_INCLUDE_PATHS = (
     "spec/acceptance-tests.md",
     "spec/plan.md",
     "spec/contract_inventory.json",
-    ".github/workflows/gf01-gate.yml",
-    "gf01",
-    "tests",
-    "pilot_freeze/gf01_pilot_freeze_v1",
-    "pilot_runs/gf01_pilot_campaign_v1",
 )
 
 RETAINED_PUBLIC_ARTIFACT_RELATIVE_PATHS = (
@@ -32,10 +26,23 @@ RETAINED_PUBLIC_ARTIFACT_RELATIVE_PATHS = (
     "pilot_runs/gf01_pilot_campaign_v1",
 )
 
+PRIMARY_REPO_PUBLIC_INCLUDE_PATHS = (
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+    *PRIMARY_REPO_REQUIREMENTS_RELATIVE_PATHS,
+    "docs",
+    *PRIMARY_REPO_SPEC_RELATIVE_PATHS,
+    ".github/workflows/gf01-gate.yml",
+    "gf01",
+    "tests",
+    *RETAINED_PUBLIC_ARTIFACT_RELATIVE_PATHS,
+)
+
 REQUIRED_PRIMARY_LAYOUT_RELATIVE_PATHS = (
     "spec/Spec.pdf",
-    *RETAINED_PUBLIC_ARTIFACT_RELATIVE_PATHS,
     "docs/LOCAL_COMPANION.md",
+    *RETAINED_PUBLIC_ARTIFACT_RELATIVE_PATHS,
 )
 
 SPEC_SOURCE_ROOT = "../spec_source"
