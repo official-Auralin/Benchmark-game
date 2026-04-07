@@ -122,6 +122,28 @@ class TestRepoLayoutPolicy(unittest.TestCase):
             ["../spec_source/Spec.tex"],
         )
 
+    def test_runtime_path_string_extractor_handles_suffix_based_path_receivers(
+        self,
+    ) -> None:
+        tree = ast.parse(
+            'data_dir.joinpath("foo")\n'
+            'root_path.rglob("*.py")\n'
+            'config.output_dir.glob("**/*.txt")\n'
+        )
+        self.assertEqual(
+            _runtime_path_strings(tree),
+            ["foo", "*.py", "**/*.txt"],
+        )
+
+    def test_runtime_path_string_extractor_handles_nested_attribute_receivers(
+        self,
+    ) -> None:
+        tree = ast.parse('project.config.data_dir.joinpath("nested", "path")\n')
+        self.assertEqual(
+            _runtime_path_strings(tree),
+            ["nested", "path"],
+        )
+
     def test_retained_public_paths_exist(self) -> None:
         for path in RETAINED_PUBLIC_PATHS:
             self.assertTrue(path.exists(), msg=f"missing retained public path: {path}")
